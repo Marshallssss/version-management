@@ -178,9 +178,10 @@ public static class CatalogEndpoints
         {
             return Results.NotFound();
         }
-        if (request.ParentComponentId is not null && !await database.ConfigurationComponents.AnyAsync(
-                component => component.Id == request.ParentComponentId && component.ProjectId == projectId,
-                cancellationToken))
+        var parent = request.ParentComponentId is null
+            ? null
+            : await database.ConfigurationComponents.SingleOrDefaultAsync(component => component.Id == request.ParentComponentId, cancellationToken);
+        if (request.ParentComponentId is not null && (parent is null || parent.ProjectId != projectId))
         {
             return Results.ValidationProblem(new Dictionary<string, string[]> { ["parentComponentId"] = ["父组件不存在或不属于该项目。"] });
         }
@@ -204,6 +205,7 @@ public static class CatalogEndpoints
             ParentComponentId = request.ParentComponentId,
             ComponentCode = code,
             NormalizedComponentCode = normalizedCode,
+            LineageKey = parent is null ? normalizedCode : $"{parent.LineageKey}/{normalizedCode}",
             Name = name,
             SortOrder = maxSortOrder + 1,
             CreatedAt = DateTimeOffset.UtcNow
@@ -247,7 +249,7 @@ public static class CatalogEndpoints
         var nextSequenceNo = (await database.ComponentVersions
             .Where(version => version.ComponentId == componentId)
             .Select(version => (long?)version.SequenceNo)
-            .MaxAsync(cancellationToken) ?? 0) + 1;
+            .MaxAsync(cancellationToken) ?? 0) + 10;
         var version = new ComponentVersion
         {
             Id = Guid.NewGuid(),

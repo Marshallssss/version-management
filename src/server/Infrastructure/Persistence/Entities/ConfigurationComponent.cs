@@ -7,6 +7,7 @@ public sealed class ConfigurationComponent
     public Guid? ParentComponentId { get; set; }
     public required string ComponentCode { get; set; }
     public required string NormalizedComponentCode { get; set; }
+    public required string LineageKey { get; set; }
     public required string Name { get; set; }
     public int SortOrder { get; set; }
     public DateTimeOffset CreatedAt { get; set; }

@@ -1848,7 +1848,8 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - Project/Clone、Component Tree、Version Sequence、Lifecycle、Version Detail。
 - 状态：进行中；先交付 Project → Component → Version 的可用闭环，Clone 与完整 Lifecycle 扩展随后补齐。
 - 已交付：Project 创建/列表/详情、根 Component 创建、ComponentVersion 创建、每个 Component 的显式递增 `sequence_no`、规范化编码与版本号唯一约束，以及中文操作界面。
-- 待完成：深层组件树编辑、Project Clone Preview/Commit、Version Lifecycle Transition、版本详情/影响查询和 RBAC 接入。
+- 已交付补充：`lineage_key`、同项目唯一约束、PostgreSQL 父组件/环检测触发器、版本 `max(sequence_no) + 10` 间隔与 `tests/integration/catalog-acceptance.ps1` 自动验收脚本（含 10/20 序列、重复版本 HTTP 409、Audit/Correlation 断言）。
+- 待完成：深层组件树移动/编辑、Project Clone Preview/Commit、Version Lifecycle Transition、版本详情/影响查询和 RBAC 接入。
 
 ## Step 4 — Baseline
 

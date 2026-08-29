@@ -81,11 +81,14 @@ internal static class ConfigHubModel
             entity.Property(component => component.ParentComponentId).HasColumnName("parent_component_id");
             entity.Property(component => component.ComponentCode).HasColumnName("component_code").HasMaxLength(80);
             entity.Property(component => component.NormalizedComponentCode).HasColumnName("normalized_component_code").HasMaxLength(80);
+            entity.Property(component => component.LineageKey).HasColumnName("lineage_key").HasMaxLength(1000);
             entity.Property(component => component.Name).HasColumnName("name").HasMaxLength(200);
             entity.Property(component => component.SortOrder).HasColumnName("sort_order");
             entity.Property(component => component.CreatedAt).HasColumnName("created_at");
             entity.HasIndex(component => new { component.ProjectId, component.NormalizedComponentCode })
                 .IsUnique().HasDatabaseName("ux_components_project_code");
+            entity.HasIndex(component => new { component.ProjectId, component.LineageKey })
+                .IsUnique().HasDatabaseName("ux_components_project_lineage");
             entity.HasIndex(component => new { component.ProjectId, component.ParentComponentId, component.SortOrder })
                 .HasDatabaseName("ix_components_project_parent_sort");
             entity.HasOne<Project>().WithMany().HasForeignKey(component => component.ProjectId).OnDelete(DeleteBehavior.Restrict);
