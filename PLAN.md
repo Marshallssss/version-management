@@ -1841,7 +1841,9 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - Identity、Cookie、RBAC、Audit、Correlation、React Shell。
 - 状态：进行中。
 - 已交付：React 中文操作壳、请求 `X-Correlation-ID` 传播、追加式 `audit_events`、项目/组件/版本写入审计与只读审计查询。
-- 待完成：本地用户、Cookie 登录、角色初始化与 RBAC 授权策略。
+- 已交付补充：ASP.NET Core Identity 用户/角色表、Cookie 登录/退出/当前身份接口、Bootstrap Admin 本机配置、Engineer 以上角色的 API 授权；Project Create 在同一事务中校验 `reason`、`Idempotency-Key`、权限、Audit 与结果重放。
+- 自动验收：`tests/integration/catalog-acceptance.ps1` 覆盖未认证 HTTP 401、Cookie 登录、同 Key 重放、认证 Audit/Correlation、组件版本序列与重复版本冲突。
+- 待完成：用户管理界面、角色管理和所有后续写命令统一接入同一授权/原因/幂等协议。
 
 ## Step 3 — Project → Component → Version
 

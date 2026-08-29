@@ -1,10 +1,12 @@
 using ConfigHub.Infrastructure.Persistence.Entities;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
 namespace ConfigHub.Infrastructure.Persistence;
 
 public sealed class ConfigHubDbContext(DbContextOptions<ConfigHubDbContext> options)
-    : DbContext(options)
+    : IdentityDbContext<ApplicationUser, IdentityRole<Guid>, Guid>(options)
 {
     public DbSet<IdempotencyRecord> IdempotencyRecords => Set<IdempotencyRecord>();
 
@@ -18,8 +20,9 @@ public sealed class ConfigHubDbContext(DbContextOptions<ConfigHubDbContext> opti
 
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
 
-    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    protected override void OnModelCreating(ModelBuilder builder)
     {
-        ConfigHubModel.Configure(modelBuilder);
+        base.OnModelCreating(builder);
+        ConfigHubModel.Configure(builder);
     }
 }

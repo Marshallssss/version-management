@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
 using ConfigHub.Infrastructure.Persistence;
 using ConfigHub.Infrastructure.Persistence.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -11,7 +13,7 @@ public static class CatalogEndpoints
     {
         var projects = endpoints.MapGroup("/api/v1/projects");
         projects.MapGet("", ListProjectsAsync);
-        projects.MapPost("", CreateProjectAsync);
+        projects.MapPost("", CreateProjectAsync).RequireAuthorization("Engineer");
         projects.MapGet("/{projectId:guid}", GetProjectAsync);
         projects.MapPost("/{projectId:guid}/components", CreateComponentAsync);
 
@@ -100,7 +102,7 @@ public static class CatalogEndpoints
         IDbContextFactory<ConfigHubDbContext> contextFactory,
         CancellationToken cancellationToken)
     {
-        var validationError = ValidateIdentifier(request.Code, "项目编码", 50) ?? ValidateRequired(request.Name, "项目名称", 200);
+        var validationError = ValidateIdentifier(request.Code, "项目编码", 50) ?? ValidateRequired(request.Name, "项目名称", 200) ?? ValidateRequired(request.Reason, "创建原因", 500);
         if (validationError is not null)
         {
             return Results.ValidationProblem(validationError);
@@ -108,6 +110,11 @@ public static class CatalogEndpoints
 
         var code = request.Code!.Trim();
         var name = request.Name!.Trim();
+        var idempotencyKey = httpContext.Request.Headers["Idempotency-Key"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(idempotencyKey) || idempotencyKey.Length > 200)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["创建项目必须提供不超过 200 个字符的 Idempotency-Key。"] });
+        }
 
         var now = DateTimeOffset.UtcNow;
         var project = new Project
@@ -122,14 +129,29 @@ public static class CatalogEndpoints
         };
 
         await using var database = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var requestHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request))));
+        var existing = await database.IdempotencyRecords.SingleOrDefaultAsync(record => record.Scope == "projects.create" && record.IdempotencyKey == idempotencyKey, cancellationToken);
+        if (existing is not null)
+        {
+            if (existing.RequestHash != requestHash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" });
+            if (existing.Result is not null) return TypedResults.Ok(existing.Result.RootElement.Clone());
+            return Results.Conflict(new { message = "该请求仍在处理。" });
+        }
         if (await database.Projects.AnyAsync(candidate => candidate.NormalizedCode == project.NormalizedCode, cancellationToken))
         {
             return Results.Conflict(new { message = "项目编码已存在。" });
         }
 
+        await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
+        database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = "projects.create", IdempotencyKey = idempotencyKey, RequestHash = requestHash, CreatedAt = now, ExpiresAt = now.AddDays(7) });
         database.Projects.Add(project);
-        AddAuditEvent(database, httpContext, "ProjectCreated", "Project", project.Id, new { project.Code, project.Name });
+        AddAuditEvent(database, httpContext, "ProjectCreated", "Project", project.Id, new { project.Code, project.Name, reason = request.Reason!.Trim() });
         await database.SaveChangesAsync(cancellationToken);
+        var record = await database.IdempotencyRecords.SingleAsync(item => item.Scope == "projects.create" && item.IdempotencyKey == idempotencyKey, cancellationToken);
+        record.Status = IdempotencyRecordStatus.Completed;
+        record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = project.Id }));
+        await database.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return TypedResults.Created($"/api/v1/projects/{project.Id}", new { id = project.Id });
     }
 
@@ -289,7 +311,7 @@ public static class CatalogEndpoints
 
     private static void AddAuditEvent(DbContext database, HttpContext httpContext, string action, string entityType, Guid entityId, object data)
     {
-        var actor = httpContext.Request.Headers["X-ConfigHub-Actor"].FirstOrDefault();
+        var actor = httpContext.User.Identity?.Name;
         var correlationId = httpContext.Items["CorrelationId"]?.ToString() ?? httpContext.TraceIdentifier;
         database.Set<AuditEvent>().Add(new AuditEvent
         {
@@ -305,6 +327,6 @@ public static class CatalogEndpoints
     }
 }
 
-public sealed record CreateProjectRequest(string? Code, string? Name, string? Description);
+public sealed record CreateProjectRequest(string? Code, string? Name, string? Description, string? Reason);
 public sealed record CreateComponentRequest(string? Code, string? Name, Guid? ParentComponentId);
 public sealed record CreateComponentVersionRequest(string? VersionNumber);

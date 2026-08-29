@@ -1,10 +1,12 @@
 using ConfigHub.Host.Health;
 using ConfigHub.Host.Catalog;
+using ConfigHub.Host.Auth;
 using ConfigHub.Host.System;
 using ConfigHub.Infrastructure.Persistence;
 using ConfigHub.Infrastructure.Persistence.Entities;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Identity;
 using System.Text.Json;
 
 var migrateRequested = args.Contains("--migrate", StringComparer.OrdinalIgnoreCase);
@@ -38,6 +40,12 @@ builder.Services.AddPooledDbContextFactory<ConfigHubDbContext>(options =>
         npgsql.MigrationsAssembly(
             typeof(ConfigHubDbContext).Assembly.GetName().Name
             ?? throw new InvalidOperationException("Infrastructure assembly name is unavailable."))));
+builder.Services.AddIdentityCore<ApplicationUser>(options => options.Password.RequiredLength = 12)
+    .AddRoles<IdentityRole<Guid>>()
+    .AddEntityFrameworkStores<ConfigHubDbContext>()
+    .AddSignInManager();
+builder.Services.AddAuthentication(IdentityConstants.ApplicationScheme).AddIdentityCookies();
+builder.Services.AddAuthorizationBuilder().AddPolicy("Engineer", policy => policy.RequireRole("Engineer", "SeniorEngineer", "Admin"));
 
 builder.Services
     .AddHealthChecks()
@@ -68,13 +76,17 @@ if (migrateRequested)
     return;
 }
 
+await BootstrapIdentity.EnsureAsync(app.Services, app.Configuration);
+
 if (!app.Environment.IsDevelopment())
 {
-    app.UseExceptionHandler();
+app.UseExceptionHandler();
     app.UseHsts();
 }
 
 app.UseHttpsRedirection();
+app.UseAuthentication();
+app.UseAuthorization();
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
@@ -166,6 +178,7 @@ app.MapPost("/api/v1/system/jobs/noop", async (
 });
 
 app.MapCatalogEndpoints();
+app.MapAuthEndpoints();
 
 app.MapFallback("/api/{**path}", () => Results.Problem(
     statusCode: StatusCodes.Status404NotFound,

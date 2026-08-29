@@ -9,6 +9,11 @@ internal static class ConfigHubModel
     {
         modelBuilder.HasPostgresExtension("btree_gist");
 
+        modelBuilder.Entity<ApplicationUser>(entity =>
+        {
+            entity.Property(user => user.DisplayName).HasColumnName("display_name").HasMaxLength(160);
+        });
+
         modelBuilder.Entity<IdempotencyRecord>(entity =>
         {
             entity.ToTable("idempotency_records");

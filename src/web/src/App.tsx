@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { createComponent, createComponentVersion, createProject, getProject, getProjects } from './catalog-api'
+import { createComponent, createComponentVersion, createProject, getCurrentUser, getProject, getProjects, login, logout } from './catalog-api'
 import { enqueueNoopJob, getSystemStatus, getSystemVersion, type BackgroundJobStatus } from './system-api'
 
 const navigation = [
@@ -38,6 +38,9 @@ function App() {
   const [projectCode, setProjectCode] = useState('')
   const [projectName, setProjectName] = useState('')
   const [projectDescription, setProjectDescription] = useState('')
+  const [projectReason, setProjectReason] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [componentCode, setComponentCode] = useState('')
   const [componentName, setComponentName] = useState('')
   const [versionComponentId, setVersionComponentId] = useState('')
@@ -46,6 +49,7 @@ function App() {
   const system = useQuery({ queryKey: ['system-version'], queryFn: getSystemVersion })
   const status = useQuery({ queryKey: ['system-status'], queryFn: getSystemStatus, refetchInterval: 5_000 })
   const projects = useQuery({ queryKey: ['projects'], queryFn: getProjects })
+  const currentUser = useQuery({ queryKey: ['current-user'], queryFn: getCurrentUser, retry: false })
   const projectDetail = useQuery({ queryKey: ['project', selectedProjectId], queryFn: () => getProject(selectedProjectId!), enabled: selectedProjectId !== null })
   const enqueue = useMutation({
     mutationFn: enqueueNoopJob,
@@ -60,10 +64,13 @@ function App() {
       setProjectCode('')
       setProjectName('')
       setProjectDescription('')
+      setProjectReason('')
       setSelectedProjectId(id)
       await queryClient.invalidateQueries({ queryKey: ['projects'] })
     },
   })
+  const signIn = useMutation({ mutationFn: login, onSuccess: async () => { setPassword(''); await queryClient.invalidateQueries({ queryKey: ['current-user'] }) } })
+  const signOut = useMutation({ mutationFn: logout, onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ['current-user'] }); setSelectedProjectId(null) } })
   const addComponent = useMutation({
     mutationFn: ({ projectId, code, name }: { projectId: string; code: string; name: string }) => createComponent(projectId, { code, name, parentComponentId: null }),
     onSuccess: async () => {
@@ -105,7 +112,7 @@ function App() {
       <main>
         <header className="topbar">
           <div><span className="eyebrow">工程运行 / 基础设施</span><h1>{selectedNavigation.label}</h1></div>
-          <div className={`connection-state ${connectivity}`}><span>服务状态</span><strong>{connectivityText[connectivity]}</strong></div>
+          <div className={`connection-state ${connectivity}`}><span>{currentUser.data?.name ?? '未登录'}</span><strong>{connectivityText[connectivity]}</strong></div>
         </header>
 
         {selectedNavigation.available ? (
@@ -152,13 +159,16 @@ function App() {
             </>}
 
             {activePage === 'projects' && <>
+              {!currentUser.data && <section className="status-panel catalog-detail"><div className="panel-heading"><div><span className="section-index">身份验证</span><h3>登录后管理项目</h3></div></div><form className="catalog-form" onSubmit={(event) => { event.preventDefault(); signIn.mutate({ email, password }) }}><label>邮箱<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label><label>密码<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label><button className="primary-action" type="submit" disabled={signIn.isPending}>{signIn.isPending ? '正在登录' : '登录'}</button></form>{signIn.isError && <p className="error-strip">登录失败，请检查凭据。</p>}</section>}
+              {currentUser.data && <section className="status-panel catalog-detail"><div className="panel-heading"><div><span className="section-index">当前身份</span><h3>{currentUser.data.name}</h3></div><button type="button" onClick={() => signOut.mutate()} disabled={signOut.isPending}>退出登录</button></div></section>}
               <section className="status-panel catalog-panel">
                 <div className="panel-heading"><div><span className="section-index">项目目录</span><h3>创建项目</h3></div></div>
-                <form className="catalog-form" onSubmit={(event) => { event.preventDefault(); addProject.mutate({ code: projectCode, name: projectName, description: projectDescription }) }}>
+                <form className="catalog-form" onSubmit={(event) => { event.preventDefault(); addProject.mutate({ code: projectCode, name: projectName, description: projectDescription, reason: projectReason }) }}>
                   <label>项目编码<input value={projectCode} maxLength={50} placeholder="例如：LINE-A" onChange={(event) => setProjectCode(event.target.value)} required /></label>
                   <label>项目名称<input value={projectName} maxLength={200} placeholder="例如：产线 A 配置" onChange={(event) => setProjectName(event.target.value)} required /></label>
                   <label className="wide-field">说明<textarea value={projectDescription} maxLength={2000} onChange={(event) => setProjectDescription(event.target.value)} /></label>
-                  <button className="primary-action" type="submit" disabled={addProject.isPending}>{addProject.isPending ? '正在创建' : '创建项目'}</button>
+                  <label className="wide-field">创建原因<input value={projectReason} maxLength={500} onChange={(event) => setProjectReason(event.target.value)} required /></label>
+                  <button className="primary-action" type="submit" disabled={addProject.isPending || !currentUser.data}>{addProject.isPending ? '正在创建' : '创建项目'}</button>
                 </form>
                 {addProject.isError && <p className="error-strip">{addProject.error.message}</p>}
               </section>

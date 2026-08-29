@@ -34,7 +34,8 @@ export interface ProjectDetail {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
-    headers: { Accept: 'application/json', 'X-ConfigHub-Actor': '本机操作员', ...init?.headers },
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json', ...init?.headers },
   })
   if (!response.ok) {
     const body = await response.json().catch(() => null) as { message?: string; errors?: Record<string, string[]> } | null
@@ -46,8 +47,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const getProjects = () => request<ProjectSummary[]>('/api/v1/projects')
 export const getProject = (projectId: string) => request<ProjectDetail>(`/api/v1/projects/${projectId}`)
-export const createProject = (input: { code: string; name: string; description: string }) =>
-  request<{ id: string }>('/api/v1/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
+export const getCurrentUser = () => request<{ name: string; roles: string[] }>('/api/v1/auth/me')
+export const login = (input: { email: string; password: string }) => request<void>('/api/v1/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
+export const logout = () => request<void>('/api/v1/auth/logout', { method: 'POST' })
+export const createProject = (input: { code: string; name: string; description: string; reason: string }) =>
+  request<{ id: string }>('/api/v1/projects', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify(input) })
 export const createComponent = (projectId: string, input: { code: string; name: string; parentComponentId: string | null }) =>
   request<{ id: string }>(`/api/v1/projects/${projectId}/components`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
 export const createComponentVersion = (componentId: string, input: { versionNumber: string }) =>
