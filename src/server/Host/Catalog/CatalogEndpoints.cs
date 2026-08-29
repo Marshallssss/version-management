@@ -21,6 +21,7 @@ public static class CatalogEndpoints
         projects.MapPost("/{projectId:guid}/clone", CloneAsync).RequireAuthorization("Engineer");
         projects.MapGet("/{projectId:guid}/baselines", ListBaselinesAsync);
         projects.MapPost("/{projectId:guid}/baselines", CreateBaselineAsync).RequireAuthorization("SeniorEngineer");
+        endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/release", ReleaseBaselineAsync).RequireAuthorization("SeniorEngineer");
 
         endpoints.MapPost("/api/v1/components/{componentId:guid}/versions", CreateVersionAsync).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/component-versions/{versionId:guid}/maturity", ChangeMaturityAsync).RequireAuthorization("SeniorEngineer");
@@ -253,6 +254,60 @@ public static class CatalogEndpoints
         await database.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return TypedResults.Created($"/api/v1/baselines/{baseline.Id}", new { id = baseline.Id, revisionNo = baseline.RevisionNo, itemCount = components.Count });
+    }
+
+    private static async Task<IResult> ReleaseBaselineAsync(
+        Guid baselineId,
+        LifecycleRequest request,
+        HttpContext context,
+        IDbContextFactory<ConfigHubDbContext> factory,
+        CancellationToken cancellationToken)
+    {
+        var validation = ValidateRequired(request.Reason, "发布原因", 500);
+        if (validation is not null) return Results.ValidationProblem(validation);
+        var idempotencyKey = context.Request.Headers["Idempotency-Key"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(idempotencyKey) || idempotencyKey.Length > 200)
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["发布基线必须提供不超过 200 个字符的 Idempotency-Key。"] });
+
+        var now = DateTimeOffset.UtcNow;
+        var scope = $"baselines.release:{baselineId}";
+        var requestHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request))));
+        await using var database = await factory.CreateDbContextAsync(cancellationToken);
+        var existing = await database.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == idempotencyKey, cancellationToken);
+        if (existing is not null)
+        {
+            if (existing.RequestHash != requestHash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" });
+            if (existing.Result is not null) return TypedResults.Ok(existing.Result.RootElement.Clone());
+            return Results.Conflict(new { message = "该请求仍在处理。" });
+        }
+
+        var baseline = await database.ConfigurationBaselines.SingleOrDefaultAsync(item => item.Id == baselineId, cancellationToken);
+        if (baseline is null) return Results.NotFound();
+        if (baseline.State != BaselineState.Draft) return Results.Conflict(new { message = "只有草稿基线可以发布。" });
+        var itemCount = await database.BaselineItems.CountAsync(item => item.ConfigurationBaselineId == baselineId, cancellationToken);
+        if (itemCount == 0) return Results.Conflict(new { message = "空基线不能发布。" });
+        var blocked = await database.BaselineItems
+            .Where(item => item.ConfigurationBaselineId == baselineId)
+            .Join(database.ComponentVersions, item => item.ComponentVersionId, version => version.Id, (_, version) => version)
+            .AnyAsync(version => version.Safety == VersionSafety.Blocked, cancellationToken);
+        if (blocked) return Results.Conflict(new { message = "包含已阻断版本的基线不能发布。" });
+
+        var actor = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required.");
+        await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
+        database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = idempotencyKey, RequestHash = requestHash, CreatedAt = now, ExpiresAt = now.AddDays(7) });
+        baseline.State = BaselineState.Released;
+        baseline.ReleasedBy = actor;
+        baseline.ReleasedAt = now;
+        baseline.ReleaseReason = request.Reason!.Trim();
+        database.BaselineLifecycleTransitions.Add(new BaselineLifecycleTransition { Id = Guid.NewGuid(), ConfigurationBaselineId = baseline.Id, FromState = BaselineState.Draft.ToString(), ToState = BaselineState.Released.ToString(), Reason = baseline.ReleaseReason, Actor = actor, OccurredAt = now });
+        AddAuditEvent(database, context, "BaselineReleased", "ConfigurationBaseline", baseline.Id, new { baseline.BaselineCode, reason = baseline.ReleaseReason, itemCount });
+        await database.SaveChangesAsync(cancellationToken);
+        var record = await database.IdempotencyRecords.SingleAsync(item => item.Scope == scope && item.IdempotencyKey == idempotencyKey, cancellationToken);
+        record.Status = IdempotencyRecordStatus.Completed;
+        record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = baseline.Id, state = baseline.State.ToString(), releasedAt = baseline.ReleasedAt }));
+        await database.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return TypedResults.Ok(new { id = baseline.Id, state = baseline.State.ToString(), releasedAt = baseline.ReleasedAt });
     }
 
     private static async Task<IResult> CreateProjectAsync(

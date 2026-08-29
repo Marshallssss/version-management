@@ -80,3 +80,5 @@ export const moveComponent = (componentId: string, input: { parentComponentId: s
 export const getBaselines = (projectId: string) => request<BaselineSummary[]>(`/api/v1/projects/${projectId}/baselines`)
 export const createBaseline = (projectId: string, input: { seriesCode: string; baselineCode: string; description: string; reason: string }) =>
   request<{ id: string; revisionNo: number; itemCount: number }>(`/api/v1/projects/${projectId}/baselines`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify(input) })
+export const releaseBaseline = (baselineId: string, reason: string) =>
+  request<{ id: string; state: string }>(`/api/v1/baselines/${baselineId}/release`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ reason }) })

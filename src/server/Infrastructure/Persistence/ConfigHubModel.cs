@@ -234,5 +234,20 @@ internal static class ConfigHubModel
             entity.HasOne<ComponentVersion>().WithMany().HasForeignKey(item => item.ComponentVersionId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<BaselineItem>().WithMany().HasForeignKey(item => item.ParentBaselineItemId).OnDelete(DeleteBehavior.Restrict);
         });
+
+        modelBuilder.Entity<BaselineLifecycleTransition>(entity =>
+        {
+            entity.ToTable("baseline_lifecycle_transitions");
+            entity.HasKey(transition => transition.Id);
+            entity.Property(transition => transition.Id).HasColumnName("id");
+            entity.Property(transition => transition.ConfigurationBaselineId).HasColumnName("configuration_baseline_id");
+            entity.Property(transition => transition.FromState).HasColumnName("from_state").HasMaxLength(32);
+            entity.Property(transition => transition.ToState).HasColumnName("to_state").HasMaxLength(32);
+            entity.Property(transition => transition.Reason).HasColumnName("reason").HasMaxLength(500);
+            entity.Property(transition => transition.Actor).HasColumnName("actor").HasMaxLength(160);
+            entity.Property(transition => transition.OccurredAt).HasColumnName("occurred_at");
+            entity.HasIndex(transition => new { transition.ConfigurationBaselineId, transition.OccurredAt }).HasDatabaseName("ix_baseline_lifecycle_transitions_baseline_occurred_at");
+            entity.HasOne<ConfigurationBaseline>().WithMany().HasForeignKey(transition => transition.ConfigurationBaselineId).OnDelete(DeleteBehavior.Restrict);
+        });
     }
 }

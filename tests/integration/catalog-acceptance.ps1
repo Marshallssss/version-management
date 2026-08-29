@@ -3,7 +3,8 @@
 param(
     [uri]$BaseUri = 'http://127.0.0.1:5080',
     [Parameter(Mandatory)][string]$Email,
-    [Parameter(Mandatory)][string]$Password
+    [Parameter(Mandatory)][string]$Password,
+    [string]$ConnectionString
 )
 
 $ErrorActionPreference = 'Stop'
@@ -64,8 +65,23 @@ $baselineHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString(); 'X-Corre
 $baseline = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/baselines")) -Headers $baselineHeaders -ContentType 'application/json' -Body $baselineBody
 $baselineReplay = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/baselines")) -Headers $baselineHeaders -ContentType 'application/json' -Body $baselineBody
 if ($baseline.itemCount -ne 2 -or $baseline.revisionNo -ne 1 -or $baseline.id -ne $baselineReplay.id) { throw 'Expected idempotent complete baseline draft snapshot.' }
+$releaseBody = @{ reason = '自动化基线发布验收' } | ConvertTo-Json
+$releaseHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString(); 'X-Correlation-ID' = "release-$suffix" }
+$releasedBaseline = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/baselines/$($baseline.id)/release")) -Headers $releaseHeaders -ContentType 'application/json' -Body $releaseBody
+$releasedReplay = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/baselines/$($baseline.id)/release")) -Headers $releaseHeaders -ContentType 'application/json' -Body $releaseBody
+if ($releasedBaseline.state -ne 'Released' -or $releasedBaseline.id -ne $releasedReplay.id) { throw 'Expected idempotent baseline release.' }
 $baselineList = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/baselines"))
-if ($baselineList.Count -ne 1 -or $baselineList[0].itemCount -ne 2 -or $baselineList[0].state -ne 'Draft') { throw 'Expected listed baseline draft snapshot.' }
+if ($baselineList.Count -ne 1 -or $baselineList[0].itemCount -ne 2 -or $baselineList[0].state -ne 'Released') { throw 'Expected listed released baseline snapshot.' }
+
+if (-not [string]::IsNullOrWhiteSpace($ConnectionString)) {
+    $psql = 'C:\Program Files\PostgreSQL\17\bin\psql.exe'
+    if (-not (Test-Path $psql)) { throw 'psql.exe is required to verify the baseline immutability trigger.' }
+    $psqlConnection = ($ConnectionString -replace ';', ' ') -replace '(?i)\bHost=', 'host=' -replace '(?i)\bPort=', 'port=' -replace '(?i)\bDatabase=', 'dbname=' -replace '(?i)\bUsername=', 'user=' -replace '(?i)\bPassword=', 'password='
+    $result = & $psql $psqlConnection -v ON_ERROR_STOP=1 -c "UPDATE baseline_items SET sort_order = sort_order WHERE configuration_baseline_id = '$($baseline.id)'" 2>&1
+    if ($LASTEXITCODE -eq 0 -or ($result -join [Environment]::NewLine) -notmatch 'Items of released baseline cannot be modified') {
+        throw 'Released baseline item update was not rejected by the PostgreSQL trigger.'
+    }
+}
 
 $audit = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/audit?entityId=$($project.id)"))
 if ($audit.Count -lt 1 -or $audit[0].actor -ne $Email -or [string]::IsNullOrWhiteSpace($audit[0].correlationId)) { throw 'Expected authenticated audit event.' }
