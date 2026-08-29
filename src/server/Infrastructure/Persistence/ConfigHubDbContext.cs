@@ -33,6 +33,7 @@ public sealed class ConfigHubDbContext(DbContextOptions<ConfigHubDbContext> opti
     public DbSet<BaselineLifecycleTransition> BaselineLifecycleTransitions => Set<BaselineLifecycleTransition>();
 
     public DbSet<ProjectStandardAssignment> ProjectStandardAssignments => Set<ProjectStandardAssignment>();
+    public DbSet<Machine> Machines => Set<Machine>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {

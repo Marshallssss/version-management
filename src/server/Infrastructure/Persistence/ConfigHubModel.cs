@@ -265,5 +265,17 @@ internal static class ConfigHubModel
             entity.HasOne<Project>().WithMany().HasForeignKey(assignment => assignment.ProjectId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<ConfigurationBaseline>().WithMany().HasForeignKey(assignment => assignment.ConfigurationBaselineId).OnDelete(DeleteBehavior.Restrict);
         });
+        modelBuilder.Entity<Machine>(entity =>
+        {
+            entity.ToTable("machines"); entity.HasKey(machine => machine.Id);
+            entity.Property(machine => machine.Id).HasColumnName("id"); entity.Property(machine => machine.ProjectId).HasColumnName("project_id");
+            entity.Property(machine => machine.SerialNumber).HasColumnName("serial_number").HasMaxLength(160);
+            entity.Property(machine => machine.NormalizedSerialNumber).HasColumnName("normalized_serial_number").HasMaxLength(160);
+            entity.Property(machine => machine.Name).HasColumnName("name").HasMaxLength(200); entity.Property(machine => machine.MachineType).HasColumnName("machine_type").HasMaxLength(120);
+            entity.Property(machine => machine.Status).HasColumnName("status").HasMaxLength(32).HasConversion<string>(); entity.Property(machine => machine.CreatedAt).HasColumnName("created_at");
+            entity.HasIndex(machine => machine.NormalizedSerialNumber).IsUnique().HasDatabaseName("ux_machines_normalized_serial");
+            entity.HasIndex(machine => new { machine.ProjectId, machine.Status, machine.MachineType }).HasDatabaseName("ix_machines_project_status_type");
+            entity.HasOne<Project>().WithMany().HasForeignKey(machine => machine.ProjectId).OnDelete(DeleteBehavior.Restrict);
+        });
     }
 }

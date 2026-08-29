@@ -24,6 +24,8 @@ public static class CatalogEndpoints
         projects.MapGet("/{projectId:guid}/standard", GetProjectStandardAsync);
         projects.MapPost("/{projectId:guid}/standard", AssignProjectStandardAsync).RequireAuthorization("SeniorEngineer");
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/release", ReleaseBaselineAsync).RequireAuthorization("SeniorEngineer");
+        endpoints.MapGet("/api/v1/machines", ListMachinesAsync);
+        endpoints.MapPost("/api/v1/machines", CreateMachineAsync).RequireAuthorization("Engineer");
 
         endpoints.MapPost("/api/v1/components/{componentId:guid}/versions", CreateVersionAsync).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/component-versions/{versionId:guid}/maturity", ChangeMaturityAsync).RequireAuthorization("SeniorEngineer");
@@ -52,6 +54,25 @@ public static class CatalogEndpoints
             })
             .ToListAsync(cancellationToken);
         return TypedResults.Ok(projects);
+    }
+
+    private static async Task<IResult> ListMachinesAsync(IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        await using var database = await factory.CreateDbContextAsync(cancellationToken);
+        return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => item.SerialNumber).Select(item => new { id = item.Id, projectId = item.ProjectId, serialNumber = item.SerialNumber, name = item.Name, machineType = item.MachineType, status = item.Status.ToString() }).ToListAsync(cancellationToken));
+    }
+
+    private static async Task<IResult> CreateMachineAsync(CreateMachineRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        var validation = request.ProjectId == Guid.Empty ? new Dictionary<string, string[]> { ["projectId"] = ["必须选择项目。"] } : ValidateRequired(request.SerialNumber, "序列号", 160) ?? ValidateRequired(request.Name, "机台名称", 200) ?? ValidateRequired(request.Reason, "创建原因", 500);
+        if (validation is not null) return Results.ValidationProblem(validation);
+        await using var database = await factory.CreateDbContextAsync(cancellationToken);
+        if (!await database.Projects.AnyAsync(item => item.Id == request.ProjectId, cancellationToken)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["projectId"] = ["项目不存在。"] });
+        var normalized = Normalize(request.SerialNumber!);
+        if (await database.Machines.AnyAsync(item => item.NormalizedSerialNumber == normalized, cancellationToken)) return Results.Conflict(new { message = "机台序列号已存在。" });
+        var machine = new Machine { Id = Guid.NewGuid(), ProjectId = request.ProjectId, SerialNumber = request.SerialNumber!.Trim(), NormalizedSerialNumber = normalized, Name = request.Name!.Trim(), MachineType = NormalizeOptional(request.MachineType, 120), CreatedAt = DateTimeOffset.UtcNow };
+        database.Machines.Add(machine); AddAuditEvent(database, context, "MachineCreated", "Machine", machine.Id, new { machine.ProjectId, machine.SerialNumber, reason = request.Reason!.Trim() }); await database.SaveChangesAsync(cancellationToken);
+        return TypedResults.Created($"/api/v1/machines/{machine.Id}", new { id = machine.Id });
     }
 
     private static async Task<IResult> GetProjectAsync(
@@ -681,3 +702,4 @@ public sealed record CloneProjectRequest(string? Code, string? Name, string? Rea
 public sealed record MoveComponentRequest(Guid? ParentComponentId, string? Reason);
 public sealed record CreateBaselineRequest(string? SeriesCode, string? BaselineCode, string? Description, string? Reason);
 public sealed record AssignProjectStandardRequest(Guid ConfigurationBaselineId, string? Reason);
+public sealed record CreateMachineRequest(Guid ProjectId, string? SerialNumber, string? Name, string? MachineType, string? Reason);

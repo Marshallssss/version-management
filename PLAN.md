@@ -1867,6 +1867,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 ## Step 5 — Machine → Target
 
 - Registry、Target History、Machine Header/List。
+- 5A 进行中：Machine Registry 以全局规范化序列号作为身份，项目归属、名称、机型和归档状态独立保存；创建/重复序列号 API 验收已补入自动脚本。Target Assignment 仍保持后续独立切片，禁止从 Project Standard 自动补值。
 
 ## Step 6 — Facts → Current Actual
 
