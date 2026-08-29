@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <ProjectReference Include="../Infrastructure/ConfigHub.Infrastructure.csproj" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <Target Name="BuildReactClient"
+          BeforeTargets="ComputeFilesToPublish"
+          Condition="'$(SkipClientBuild)' != 'true'">
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)/../../web"
+          Command="npm ci --no-audit --no-fund" />
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)/../../web"
+          Command="npm run build" />
+  </Target>
+</Project>

@@ -1,0 +1,24 @@
+# .NET
+**/bin/
+**/obj/
+*.user
+*.suo
+
+# Frontend
+**/node_modules/
+src/server/Host/wwwroot/*
+!src/server/Host/wwwroot/.gitkeep
+
+# Local configuration and artifacts
+.env
+.env.*
+!.env.example
+artifacts/
+coverage/
+*.log
+
+# IDE / OS
+.idea/
+.vs/
+.vscode/
+.DS_Store

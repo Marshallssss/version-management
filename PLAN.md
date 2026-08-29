@@ -1,0 +1,1885 @@
+# Software Configuration & Machine Version Management System
+
+## Final Architecture and Product Plan
+
+**Status:** Approved architecture baseline before Core V1 coding  
+**Deployment:** Pure Windows  
+**Delivery approach:** Vertical Slice Incremental Development  
+**Primary language:** Chinese UI and documentation, English code identifiers
+
+---
+
+# 0. Executive Summary
+
+本系统是面向工程团队的本地部署、局域网多用户软件配置管理与机台版本追溯系统。它不是 Git Repository、软件包下载站、普通资产管理系统或通用 CRUD 后台。
+
+系统管理的主链路是：
+
+```text
+Project
+  → ConfigurationComponent
+    → ComponentVersion
+      → Version Lifecycle
+        → ConfigurationBaseline
+          → Project Current Standard
+          → Machine Target Baseline
+            → Deployment / Observation History
+              → Machine Actual Configuration
+                → Drift / Risk / Compare / Traceability
+```
+
+最终架构采用：
+
+- React + TypeScript + Vite + Ant Design + TanStack Query。
+- ASP.NET Core / .NET 10。
+- EF Core + Npgsql。
+- PostgreSQL 18 Native Windows Service。
+- Modular Monolith。
+- Single Database、Single Server First。
+- IIS 托管单一 ASP.NET Core Application。
+- React Build 由 ASP.NET Core `wwwroot` 提供。
+- Background Worker 作为 Windows Service。
+- Local NTFS + External UNC/SMB File Store。
+- Windows Task Scheduler + PowerShell + `pg_dump` 备份。
+
+生产环境明确不依赖：
+
+- Linux。
+- Hyper-V Linux VM。
+- WSL。
+- Docker / Docker Compose。
+- Nginx。
+- Kubernetes。
+- Redis、Kafka、RabbitMQ、Elasticsearch。
+
+---
+
+# A. Domain Analysis
+
+## A1. 四个必须严格区分的概念
+
+### Target vs Actual
+
+- Project Current Standard：项目当前推荐的标准 Baseline。
+- Machine Target Baseline：某台机台当前应该达到的精确 Baseline Revision。
+- Machine Actual Configuration：通过有效 Deployment/Observation Facts 得到的实际配置。
+- Configuration Drift 必须比较 Machine Target 与 Machine Actual。
+- Machine Target 落后于 Project Current Standard 不自动构成 Drift。
+
+### Baseline vs Version
+
+- ComponentVersion 是单个 Component 的版本身份。
+- ConfigurationBaseline 是多个 ComponentVersion 构成的完整标准配置快照。
+- Top Software Version 只是 Baseline 的锚点，不等同于 Baseline。
+- 同一 Top Software Version 允许对应多个 Baseline，关系为 1:N。
+
+### Match vs Risk
+
+- Match 回答实际配置是否等于目标配置。
+- Risk 回答当前配置是否安全、受支持或合规。
+- `Expected = Installed` 可以得到 `Matched + Critical`，例如该 Version 后续被 Blocked。
+- Match Status 与 Risk Severity 不得合并为同一字段。
+
+### Version Lifecycle vs Baseline Lifecycle
+
+- Version Lifecycle 描述单个 Version 的成熟度、安全状态和推荐关系。
+- Baseline Lifecycle 描述配置快照的编制、发布、废弃和归档。
+- Version 后续 Blocked 不修改历史 Baseline 内容或 Lifecycle，只产生动态 Risk。
+- 两套状态使用不同字段、历史记录、命令和权限。
+
+## A2. 核心不变量
+
+1. Released Baseline 的 Identity、Top Version、Items、树结构和 Requirement 不可修改。
+2. Baseline 配套变化必须创建新的独立 Revision。
+3. Version Number 是 opaque string，不解析或假设 SemVer。
+4. ComponentVersion 使用显式 `sequence_no` 表达工程顺序，不从 Version Number 推导。
+5. Recommendation/Upgrade 逻辑不能只依赖 Version Number 或 `sequence_no`。
+6. 每台 Machine 任意时间最多有一个有效 Target Assignment。
+7. Project Standard 与 Machine Target 都使用 Assignment History，不保存 Current Pointer。
+8. Deployment/Observation History 是 Actual Configuration 的事实来源。
+9. `MachineCurrentConfiguration` 是可重建 Current Projection。
+10. 只有 Finalized 且成功的 Facts 才能更新 Current Projection。
+11. Rollback、Correction 不覆盖原历史，而是新增事实。
+12. Block Version 不自动修改 Machine Actual、Baseline 或 Deployment History。
+13. Lifecycle Transition、Baseline Release、Target Change、Deployment、Import 必须审计。
+14. 核心历史数据原则上不物理删除。
+15. 文件内容不保存在数据库 BLOB；数据库保存 Metadata、Locator 和 Checksum。
+
+## A3. 关键架构问题结论
+
+| Topic | Final Decision |
+|---|---|
+| Component 抽象 | 使用适度通用 `ConfigurationComponent + ComponentVersion`，不建设万能 CMDB/EAV |
+| Version 排序 | `version_number` opaque；同 Component 内使用显式唯一 `sequence_no` |
+| Current Actual | History 为事实源，`MachineCurrentConfiguration` 为可重建投影 |
+| Baseline Revision | 每个 Revision 是独立 Baseline，使用 `BaselineSeries` 分组 |
+| Top Version | Top Version 与 Baseline 为 1:N |
+| Machine Target | Assignment History + `valid_to IS NULL`，不保存 Current Pointer |
+| Project Standard | Assignment History + `valid_to IS NULL`，不保存 Current Pointer |
+| Deployment | `DeploymentBatch + DeploymentItem` |
+| Observation | 复用统一事实结构，但用 `operation_type` 明确区分 |
+| Temporal Model | Baseline Snapshot + Assignment Interval + Fact History + Current Projection |
+| Component Tree | Adjacency List + Recursive CTE；Core V1 不使用 Closure Table |
+| Recommended | 独立 Recommendation Assignment，不是 Maturity Enum |
+| Blocked | 独立 Safety State，不是 Maturity Enum |
+| Blocked Risk | Core V1 动态查询；Exposure Snapshot 延后 |
+| Project Clone | 只复制模板型数据，不复制 Version、Baseline、Machine 或运行历史 |
+| File Storage | NTFS/UNC 保存文件；PostgreSQL 保存 Metadata/Locator/Checksum |
+
+---
+
+# B. Bounded Modules
+
+系统采用 Modular Monolith。模块共享一个 PostgreSQL Database，但业务写入必须通过模块 Application Service/Command，不能随意跨模块更新表。
+
+| Module | Responsibility |
+|---|---|
+| Identity & Access | Local User、Cookie Authentication、RBAC |
+| Project Management | Project、Project Role、Custom Field、Clone |
+| Configuration Catalog | Component Tree、Version、Package Reference |
+| Version Lifecycle | Maturity、Safety、Recommendation、Transition History |
+| Baseline Management | Series、Revision、Items、Release、Project Standard |
+| Machine Registry | Machine Metadata、Attachment、Target History |
+| Deployment Management | Batch、Items、Observation、Partial Result |
+| Configuration State | Current Actual、Historical As-of Reconstruction |
+| Drift & Risk | Match、Risk、Machine Summary |
+| Compare | Baseline/Machine Snapshot Resolution 和 Tree Diff |
+| Traceability & Impact | 双向追溯、Version Real-time Impact |
+| Search | Project/Component/Version/Baseline/Machine Global Search |
+| Import | Excel/CSV Staging、Validation、Dry Run、Commit |
+| Attachment | File Object、NTFS/UNC Storage、Checksum |
+| Audit | Append-only Audit Trail |
+| Background Processing | Import、Projection Refresh、Background Jobs |
+
+---
+
+# C. Recommended Domain Model
+
+## C1. Aggregate Roots
+
+### Project
+
+- Project Identity 和状态。
+- Project Metadata 与 Custom Field Definition。
+- Component Structure。
+- Project Standard Assignment History。
+- Clone Source。
+
+### ConfigurationComponent
+
+- Project-scoped 配置槽位。
+- 任意深度 Parent/Child。
+- Component Kind。
+- Stable Lineage Key。
+- Required Default 和 Sort Order。
+
+### ComponentVersion
+
+- Opaque Version Number。
+- Explicit Sequence Number。
+- Release Metadata。
+- Current Maturity/Safety。
+- Recommendation Assignments。
+- Lifecycle History。
+- Package References。
+
+### ConfigurationBaseline
+
+- Baseline Series。
+- Independent Revision。
+- Top Version。
+- Complete Baseline Item Tree。
+- Lifecycle、Effective Date 和 Release Metadata。
+- Released 后内容不可修改。
+
+### Machine
+
+- Machine Identity 和工程元数据。
+- Target Assignment History。
+- Deployment/Observation History。
+- Current Actual Projection。
+- Current Drift Summary。
+
+### DeploymentBatch
+
+- 一台 Machine 的一组事实。
+- 明确 Operation Type 与 Source Type。
+- 多个 DeploymentItem。
+- Result、Effective Time、Recorded Time、Operator。
+
+### ImportJob
+
+- Source File、Adapter、Staging Rows、Issues、Conflict Resolution、Commit Result。
+
+## C2. Value Objects
+
+- `VersionNumber`：不透明字符串。
+- `VersionSequence`：同 Component 内显式正整数顺序。
+- `ComponentLineageKey`：Clone 后跨 Project 识别逻辑组件槽位。
+- `Checksum`：Algorithm + Value。
+- `TimeInterval`：`[valid_from, valid_to)`。
+- `ConfigurationSnapshot`：Compare Engine 统一输入。
+- `MatchResult`：Matched/Mismatch/Missing/Extra/Unknown。
+- `RiskFinding`：Code + Severity + Source + Message。
+- `StorageLocator`：Managed Object Key 或外部 UNC/URI。
+
+---
+
+# D. Core V1 ER Diagram
+
+```mermaid
+erDiagram
+    PROJECT {
+        uuid id PK
+        text code UK
+        text name
+        text status
+        uuid cloned_from_project_id FK
+    }
+
+    CUSTOM_FIELD_DEFINITION {
+        uuid id PK
+        uuid project_id FK
+        text entity_type
+        text field_key
+        text data_type
+        jsonb validation_rules
+        jsonb default_value
+    }
+
+    CONFIGURATION_COMPONENT {
+        uuid id PK
+        uuid project_id FK
+        uuid parent_id FK
+        uuid lineage_key
+        text component_code
+        text display_name
+        text component_kind
+        boolean required_default
+        int sort_order
+    }
+
+    COMPONENT_VERSION {
+        uuid id PK
+        uuid component_id FK
+        text version_number
+        text normalized_version_key
+        bigint sequence_no
+        date release_date
+        text maturity_state
+        text safety_state
+        bigint lock_version
+    }
+
+    VERSION_LIFECYCLE_TRANSITION {
+        uuid id PK
+        uuid version_id FK
+        text dimension
+        text from_state
+        text to_state
+        text reason
+        uuid actor_id FK
+        timestamptz occurred_at
+    }
+
+    VERSION_RECOMMENDATION {
+        uuid id PK
+        uuid component_id FK
+        uuid version_id FK
+        timestamptz valid_from
+        timestamptz valid_to
+        uuid assigned_by FK
+    }
+
+    BASELINE_SERIES {
+        uuid id PK
+        uuid project_id FK
+        text series_code
+    }
+
+    CONFIGURATION_BASELINE {
+        uuid id PK
+        uuid baseline_series_id FK
+        uuid project_id FK
+        uuid top_version_id FK
+        uuid supersedes_baseline_id FK
+        text baseline_code
+        int revision_no
+        text baseline_class
+        text lifecycle_state
+        date effective_date
+        uuid created_by FK
+        timestamptz created_at
+        uuid released_by FK
+        timestamptz released_at
+        text release_reason
+        uuid approved_by FK
+        text description
+    }
+
+    BASELINE_ITEM {
+        uuid id PK
+        uuid baseline_id FK
+        uuid parent_item_id FK
+        uuid component_id FK
+        uuid version_id FK
+        text requirement
+        int sort_order
+        text component_code_snapshot
+        text component_name_snapshot
+        text version_number_snapshot
+        text component_path_snapshot
+    }
+
+    PROJECT_STANDARD_ASSIGNMENT {
+        uuid id PK
+        uuid project_id FK
+        uuid baseline_id FK
+        timestamptz valid_from
+        timestamptz valid_to
+        text reason
+        uuid assigned_by FK
+    }
+
+    MACHINE {
+        uuid id PK
+        uuid project_id FK
+        text serial_number UK
+        text machine_name
+        text customer
+        text factory
+        text location
+        text machine_type
+        text hardware_revision
+        text status
+        bigint configuration_revision
+    }
+
+    MACHINE_TARGET_ASSIGNMENT {
+        uuid id PK
+        uuid machine_id FK
+        uuid baseline_id FK
+        timestamptz valid_from
+        timestamptz valid_to
+        text reason
+        uuid assigned_by FK
+    }
+
+    DEPLOYMENT_BATCH {
+        uuid id PK
+        uuid machine_id FK
+        text operation_type
+        text coverage_mode
+        text source_type
+        text source_reference
+        uuid import_job_id FK
+        text external_event_id
+        text status
+        text result
+        timestamptz effective_at
+        timestamptz recorded_at
+        uuid operator_id FK
+        uuid related_batch_id FK
+        text relation_type
+    }
+
+    DEPLOYMENT_ITEM {
+        uuid id PK
+        uuid batch_id FK
+        uuid component_id FK
+        uuid previous_version_id FK
+        uuid new_version_id FK
+        text previous_observed_version
+        text new_observed_version
+        text action
+        text result
+    }
+
+    MACHINE_CURRENT_CONFIGURATION {
+        uuid machine_id PK,FK
+        uuid component_id PK,FK
+        uuid version_id FK
+        text observed_version
+        uuid source_deployment_item_id FK
+        timestamptz state_effective_at
+        timestamptz known_installed_at
+        bigint projection_revision
+    }
+
+    MACHINE_DRIFT_SUMMARY {
+        uuid machine_id PK,FK
+        uuid target_assignment_id FK
+        text match_summary
+        text max_risk_severity
+        int mismatch_count
+        int missing_count
+        int unknown_count
+        boolean is_stale
+        timestamptz calculated_at
+    }
+
+    FILE_OBJECT {
+        uuid id PK
+        text storage_backend
+        text object_key
+        text original_name
+        text mime_type
+        bigint size_bytes
+        text checksum_algorithm
+        text checksum_value
+    }
+
+    VERSION_PACKAGE_REFERENCE {
+        uuid id PK
+        uuid version_id FK
+        uuid file_object_id FK
+        text external_locator
+        text checksum_value
+    }
+
+    IMPORT_JOB {
+        uuid id PK
+        text source_type
+        text source_checksum
+        text status
+        uuid created_by FK
+        timestamptz created_at
+    }
+
+    IMPORT_ROW {
+        uuid id PK
+        uuid import_job_id FK
+        int row_number
+        jsonb raw_data
+        jsonb normalized_data
+        text validation_status
+    }
+
+    AUDIT_EVENT {
+        uuid id PK
+        uuid actor_id FK
+        text entity_type
+        uuid entity_id
+        text action
+        jsonb before_data
+        jsonb after_data
+        text reason
+        timestamptz occurred_at
+        uuid request_id
+    }
+
+    PROJECT ||--o{ CUSTOM_FIELD_DEFINITION : defines
+    PROJECT ||--o{ CONFIGURATION_COMPONENT : contains
+    CONFIGURATION_COMPONENT o|--o{ CONFIGURATION_COMPONENT : parent_of
+    CONFIGURATION_COMPONENT ||--o{ COMPONENT_VERSION : versions
+    COMPONENT_VERSION ||--o{ VERSION_LIFECYCLE_TRANSITION : transitions
+    COMPONENT_VERSION ||--o{ VERSION_RECOMMENDATION : recommended
+
+    PROJECT ||--o{ BASELINE_SERIES : owns
+    BASELINE_SERIES ||--o{ CONFIGURATION_BASELINE : revisions
+    COMPONENT_VERSION ||--o{ CONFIGURATION_BASELINE : top_version
+    CONFIGURATION_BASELINE ||--|{ BASELINE_ITEM : contains
+    BASELINE_ITEM o|--o{ BASELINE_ITEM : parent_of
+    CONFIGURATION_COMPONENT ||--o{ BASELINE_ITEM : represented_by
+    COMPONENT_VERSION ||--o{ BASELINE_ITEM : selected_in
+
+    PROJECT ||--o{ PROJECT_STANDARD_ASSIGNMENT : standard_history
+    CONFIGURATION_BASELINE ||--o{ PROJECT_STANDARD_ASSIGNMENT : designated
+    PROJECT ||--o{ MACHINE : machines
+    MACHINE ||--o{ MACHINE_TARGET_ASSIGNMENT : target_history
+    CONFIGURATION_BASELINE ||--o{ MACHINE_TARGET_ASSIGNMENT : target
+
+    MACHINE ||--o{ DEPLOYMENT_BATCH : facts
+    DEPLOYMENT_BATCH ||--|{ DEPLOYMENT_ITEM : items
+    CONFIGURATION_COMPONENT ||--o{ DEPLOYMENT_ITEM : changes
+    COMPONENT_VERSION o|--o{ DEPLOYMENT_ITEM : previous_or_new
+    MACHINE ||--o{ MACHINE_CURRENT_CONFIGURATION : current_state
+    COMPONENT_VERSION o|--o{ MACHINE_CURRENT_CONFIGURATION : installed
+    MACHINE ||--o| MACHINE_DRIFT_SUMMARY : drift
+
+    COMPONENT_VERSION ||--o{ VERSION_PACKAGE_REFERENCE : packages
+    FILE_OBJECT o|--o{ VERSION_PACKAGE_REFERENCE : managed_file
+    IMPORT_JOB ||--o{ IMPORT_ROW : rows
+```
+
+该图是 Core V1 主业务关系的简化 ER。以下 Supporting Tables 为避免主图过度拥挤而省略，但仍属于 Core V1 Schema：
+
+- `baseline_lifecycle_transitions`
+- `project_role_assignments`
+- `project_custom_field_values`
+- `import_issues`
+- `version_attachments`
+- `machine_attachments`
+- `background_jobs`
+- `idempotency_records`
+- ASP.NET Core Identity tables
+
+这些表在 Database Schema 和 Migration 中必须存在；“omitted from simplified ER”不代表延后实现。
+
+---
+
+# E. Core Database Schema
+
+## E1. Project and Catalog
+
+| Table | Purpose | Important Constraints / Indexes |
+|---|---|---|
+| `projects` | Project Identity | `UNIQUE(lower(code))`; status index |
+| `project_role_assignments` | 项目关键角色 | Unique project+role+user |
+| `custom_field_definitions` | Custom Field Schema | Unique project+entity_type+field_key |
+| `project_custom_field_values` | Project Custom Values | PK project+definition；value JSONB |
+| `configuration_components` | Adjacency Component Tree | Unique project+component_code；unique project+lineage_key；index project+parent+sort |
+| `component_versions` | Version Identity/Current State | Unique component+normalized version；unique component+sequence_no |
+| `version_lifecycle_transitions` | Maturity/Safety History | Index version+occurred_at DESC |
+| `version_recommendations` | Basic Project+Component Recommendation | Unique active recommendation per component |
+| `version_package_references` | Package Locator/Checksum | Index version；checksum |
+
+`component_versions.sequence_no`：
+
+```text
+BIGINT NOT NULL
+CHECK sequence_no > 0
+UNIQUE(component_id, sequence_no)
+```
+
+默认 Version List：
+
+```text
+ORDER BY sequence_no DESC,
+         release_date DESC NULLS LAST,
+         created_at DESC
+```
+
+不从 `version_number` 自动生成 Sequence。Sequence 可以经权限控制后调整，但必须 Audit。
+
+Project Clone 不复制 ComponentVersion，因此不会复制或跨 Project 继承 `sequence_no`。新 Project 中后续创建的 Version 使用该 Project 自己的 Component Version Sequence。
+
+## E2. Baseline
+
+| Table | Purpose | Important Constraints / Indexes |
+|---|---|---|
+| `baseline_series` | Revision Group | Unique project+series_code |
+| `configuration_baselines` | Independent Revision | Unique project+baseline_code；unique series+revision_no；index top_version |
+| `baseline_items` | Complete Config Tree | Unique baseline+component；index version+baseline；index baseline+parent+sort |
+| `baseline_lifecycle_transitions` | Baseline State History | Index baseline+occurred_at DESC |
+| `project_standard_assignments` | Standard History | `assigned_by` required；unique current project；GiST exclusion prevents overlap |
+
+`configuration_baselines` 至少包含：
+
+```text
+created_by
+created_at
+released_by nullable while Draft
+released_at nullable while Draft
+release_reason nullable while Draft
+approved_by nullable
+description
+```
+
+进入 Released 时 `released_by`、`released_at`、`release_reason` 必填；`approved_by` 在 Core V1 保持可空。
+
+数据库约束或 Trigger 必须拒绝对 Released/Deprecated/Archived Baseline Items 执行 Update/Delete。
+
+## E3. Machine, Target and Actual
+
+| Table | Purpose | Important Constraints / Indexes |
+|---|---|---|
+| `machines` | Machine Identity | Global unique normalized serial；project/status/type indexes |
+| `machine_target_assignments` | Target History | Unique current machine；GiST exclusion prevents overlap |
+| `deployment_batches` | Actual Fact Batch | Operation/coverage/source required；index machine+effective_at；source+recorded_at |
+| `deployment_items` | Component-level Fact | Unique batch+component；index new_version+result |
+| `machine_current_configurations` | Current Projection | PK machine+component；index version+machine |
+| `machine_drift_summaries` | List/Dashboard Projection | Index match/risk/stale |
+
+Migration 必须启用：
+
+```sql
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+```
+
+`machine_target_assignments` 必须包含：
+
+```text
+CHECK(valid_to IS NULL OR valid_to > valid_from)
+
+EXCLUDE USING gist (
+  machine_id WITH =,
+  tstzrange(valid_from, valid_to, '[)') WITH &&
+)
+
+UNIQUE(machine_id) WHERE valid_to IS NULL
+```
+
+`project_standard_assignments` 使用同样约束：
+
+```text
+CHECK(valid_to IS NULL OR valid_to > valid_from)
+
+EXCLUDE USING gist (
+  project_id WITH =,
+  tstzrange(valid_from, valid_to, '[)') WITH &&
+)
+
+UNIQUE(project_id) WHERE valid_to IS NULL
+```
+
+当前 Assignment 继续通过 `valid_to IS NULL` 查询。Core V1 不在 `machines` 或 `projects` 保存 Current Assignment Pointer。
+
+外部事实幂等：
+
+```text
+UNIQUE(source_type, external_event_id)
+WHERE external_event_id IS NOT NULL
+```
+
+`deployment_batches` 明确包含自关联扩展字段：
+
+```text
+related_batch_id nullable
+relation_type nullable
+```
+
+Core V1 普通事实两者为空；V1.1 用于 ROLLBACK/CORRECTION 关联。
+
+`machine_current_configurations` 的时间字段固定为：
+
+```text
+state_effective_at NOT NULL
+known_installed_at NULL
+source_deployment_item_id NOT NULL
+```
+
+不再使用含义混杂的 `installed_at` 字段。
+
+## E4. Import, File and Operations
+
+| Table | Purpose |
+|---|---|
+| `import_jobs` | Import Lifecycle 和 source checksum |
+| `import_rows` | Raw/Normalized Staging Rows |
+| `import_issues` | Error/Warning/Conflict |
+| `file_objects` | Managed File Metadata |
+| `version_package_references` | Managed/External Package Reference |
+| `version_attachments` | Version Attachments |
+| `machine_attachments` | Machine Attachments |
+| `audit_events` | Append-only Cross-cutting Audit |
+| `background_jobs` | PostgreSQL-backed Worker Queue |
+| `idempotency_records` | Persistent API Idempotency |
+
+`idempotency_records` 至少包含：
+
+```text
+scope
+idempotency_key
+request_hash
+status
+result nullable
+reference nullable
+created_at
+expires_at
+
+UNIQUE(scope, idempotency_key)
+INDEX(expires_at)
+```
+
+适用命令：Import Commit、Deployment/Observation Finalize、Machine Target Assignment、Baseline Release、Version Block/Unblock。
+
+同一个 Scope/Key 重试时：
+
+- Request Hash 相同：返回已保存结果或正在处理状态。
+- Request Hash 不同：返回 Conflict，不执行命令。
+- 业务事务与 Idempotency Result 必须原子提交。
+- Expired Record 由 Worker 定期清理；External Event 仍由 source unique constraint 独立保护。
+
+## E5. JSONB Boundary
+
+允许 JSONB：
+
+- Custom Field Value/Validation。
+- Import Raw/Normalized Staging。
+- Audit Before/After。
+- 外部来源扩展 Metadata。
+- Background Job Payload。
+
+禁止 JSONB：
+
+- Component Tree。
+- Version Identity/Sequence/Lifecycle。
+- Baseline Items。
+- Target Assignments。
+- Deployment Items。
+- Current Configuration。
+- Core Match/Risk State。
+- User/Role/Permission。
+- Version-Baseline-Machine Traceability。
+
+## E6. Core V1 不创建的表
+
+- `component_closure`
+- `version_exposure_snapshots`
+- `version_exposure_machines`
+- `version_exposure_baselines`
+- `bulk_operations`
+- `machine_drift_item_current`
+- `machine_drift_risk_current`
+- `baseline_risk_current`
+- `search_documents`
+- `machine_configuration_checkpoints`
+- Advanced Recommendation Scope Tables
+- Compatibility/Dependency Rule Tables
+- Campaign/Notification Tables
+
+---
+
+# F. Temporal Model
+
+## F1. Time Semantics
+
+- `effective_at`：事实在工程世界生效的时间。
+- `recorded_at`：系统获知事实的时间。
+- `state_effective_at`：产生当前 Machine+Component 状态的最新有效 Fact 工程时间。
+- `known_installed_at`：只有已知真实安装时间时才保存；允许为空。
+- `valid_from/valid_to`：Assignment 有效区间，采用 `[from, to)`。
+- `occurred_at`：Lifecycle/Audit Action 发生时间。
+- 所有时间点存 UTC，UI 默认 Asia/Shanghai。
+
+## F2. Baseline History
+
+- 每个 Revision 是完整 Snapshot，不是 Delta。
+- `supersedes_baseline_id` 表达 Revision Chain。
+- Historical Project Standard 通过 Project Standard Assignment As-of 查询。
+- Baseline 内容历史不依赖当前 Component Tree。
+
+## F3. Target History
+
+- Target 变更时关闭旧 Assignment 并插入新 Assignment。
+- 使用数据库 Partial Unique Index 保证一个 Current Row。
+- Migration 安装 `btree_gist`，使用 GiST Exclusion Constraint 防止区间重叠。
+- Machine Target 与 Project Standard 都包含 `valid_to IS NULL OR valid_to > valid_from` Check Constraint。
+- 不维护 Current Pointer。
+
+## F4. Actual History
+
+- Deployment/Observation Finalized 后不可修改。
+- Correction 和 Rollback 是新 Batch。
+- Current Projection 选择每个 Machine+Component 最新有效 Fact。
+- 排序优先级：`effective_at → recorded_at → item_id`。
+- 晚到的旧 Observation 保留历史，但不覆盖更新的 Current Fact。
+- Observation Time 只写入 `state_effective_at`，不能伪造 Software Installed Time。
+- `known_installed_at` 只有 INSTALL/UPGRADE 或来源明确提供真实安装时间时才能填写。
+- INITIAL_SNAPSHOT/OBSERVATION 未提供安装时间时，UI 显示 `Installed: Unknown` 和 `Last Observed/State Effective Time`。
+
+## F5. Historical Snapshot
+
+Machine 在时间 T 的配置：
+
+```text
+For each Component:
+  select latest valid successful fact
+  where effective_at <= T
+  apply INSTALL/UPDATE/REMOVE/OBSERVATION semantics
+```
+
+Core V1 按需查询；周期 Checkpoint 延后。
+
+---
+
+# G. Version Lifecycle State Machine
+
+Version 使用三条正交状态轴。
+
+```mermaid
+stateDiagram-v2
+    state "Maturity" as Maturity {
+        [*] --> Draft
+        Draft --> Testing : submit_for_test
+        Testing --> Draft : return_to_draft
+        Testing --> Released : release
+        Released --> Maintenance : enter_maintenance
+        Released --> Deprecated : exceptional_deprecate
+        Maintenance --> Deprecated : deprecate
+    }
+
+    state "Safety" as Safety {
+        [*] --> Clear
+        Clear --> Blocked : block
+        Blocked --> Clear : unblock
+    }
+
+    state "Recommendation" as Recommendation {
+        [*] --> NotRecommended
+        NotRecommended --> Recommended : assign
+        Recommended --> NotRecommended : revoke_or_expire
+    }
+```
+
+Rules：
+
+- Safety=Blocked 时 UI 主状态显示 BLOCKED。
+- Block 不改变 Maturity；Unblock 仅将 Safety 从 Blocked 转回 Clear，Maturity 保持不变。
+- Block 结束当前 Recommendation，但不删除历史。
+- Unblock 不自动恢复 Recommendation。
+- 如果 Package/Checksum 改变，必须创建新 Version。
+- Blocked Version 禁止新 Baseline Release 和普通 Deployment。
+
+Permissions：
+
+| Action | Minimum Role |
+|---|---|
+| Draft → Testing | Engineer |
+| Testing → Released | Senior Engineer |
+| Released → Maintenance/Deprecated | Senior Engineer |
+| Recommend/Revoke | Senior Engineer |
+| Block | Senior Engineer/Admin with `VERSION_BLOCK` |
+| Unblock | Senior Engineer/Admin with `VERSION_UNBLOCK` |
+
+---
+
+# H. Baseline State Machine
+
+Core V1：
+
+```mermaid
+stateDiagram-v2
+    [*] --> Draft
+    Draft --> Released : release
+    Released --> Deprecated : deprecate
+    Deprecated --> Archived : archive
+    Draft --> Archived : cancel
+```
+
+- Draft 可编辑。
+- Released 内容冻结。
+- Deprecated/Archived 仍不可修改。
+- Released 不能返回 Draft。
+- 变更通过 Create Revision。
+- `approved_by` Core V1 可空。
+- `released_by`、`released_at`、`release_reason` 必填。
+- Review Workflow 进入 V1.1。
+- Baseline Risk 不是 Lifecycle State。
+
+---
+
+# I. Deployment and Observation Model
+
+## I1. Batch Operation Type
+
+Core V1：
+
+- `INSTALL`：已知发生首次安装行为。
+- `UPGRADE`：已知发生升级行为。
+- `INITIAL_SNAPSHOT`：首次建立系统内实际配置，不伪造安装时间。
+- `OBSERVATION`：某时点观测到的实际状态。
+
+V1.1：
+
+- `ROLLBACK`
+- `CORRECTION`
+
+## I2. Source Type
+
+- `MANUAL`
+- `EXCEL`
+- `CSV`
+- `DIRECTORY`
+- `AGENT`
+- `API`
+
+Source 表示来源，不表示 Operation 或可信等级。
+
+## I3. Coverage Mode
+
+每个 Batch 必须有 `coverage_mode`：
+
+- `FULL`：本次事实覆盖完整 Machine Configuration。
+- `PARTIAL`：只覆盖 Batch 明确出现的 Components。
+
+Defaults/Validation：
+
+- INSTALL/UPGRADE 的 Application Command 默认 `PARTIAL`。
+- INITIAL_SNAPSHOT/OBSERVATION 必须由用户或 Adapter 明确选择 FULL/PARTIAL，不允许隐式默认。
+- Import Preview 必须展示 Coverage Mode、受影响 Components 和将被标记 Absent 的 Components，并要求确认。
+
+FULL Finalize：
+
+1. 将成功的 Version Items 应用到 Current Projection。
+2. 计算 Finalized Full Fact 覆盖的 Component Set。
+3. 对 Current Configuration 中存在但 Full Set 中不存在的 Component，生成明确的 `ABSENT` DeploymentItem。
+4. `ABSENT` Item 的 `new_version_id` 为空，并从 `machine_current_configurations` 删除对应 Current Row。
+5. 历史 Absence 仍由 DeploymentItem 保留，不删除旧 Facts。
+
+PARTIAL Finalize：
+
+- 只更新 Batch 中明确出现且成功的 Items。
+- 未出现的 Component 保持不变。
+- 不得从 Partial Observation 中缺少某 Component 推导它已被移除。
+
+Item Action 至少支持：
+
+- `SET_VERSION`：安装、升级或观测到 Version 存在。
+- `REMOVE`：已知发生真实移除行为。
+- `ABSENT`：Full Snapshot/Observation 明确表明 Component 不存在，但不宣称发生了卸载行为。
+
+## I4. Import Semantics
+
+- Excel/CSV 导入现有 Current Configuration 使用 `INITIAL_SNAPSHOT`。
+- 已有历史基础上的盘点使用 `OBSERVATION`。
+- Import 未确认前只存在于 Staging。
+- Preview 必须显示 FULL/PARTIAL 及 FULL 将产生的 ABSENT Items。
+- Finalized Success Fact 才能更新 Current Projection。
+- Initial Snapshot 进入统一 History，使 Historical Trace 不需要特殊分支。
+
+## I5. Current Configuration Time Semantics
+
+`machine_current_configurations` 保存：
+
+```text
+state_effective_at
+known_installed_at nullable
+source_deployment_item_id
+```
+
+- `state_effective_at` 来自当前获胜 Fact 的 `effective_at`。
+- INSTALL/UPGRADE 可以填写真实 `known_installed_at`。
+- INITIAL_SNAPSHOT/OBSERVATION 只有来源明确提供真实安装时间时才允许填写。
+- Observation Time 不能复制到 `known_installed_at`。
+- ABSENT/REMOVE 会删除 Current Row；历史时间仍可从 Facts 重建。
+
+UI 必须分别显示：
+
+- Installed At：真实时间或 Unknown。
+- Last Observed/State Effective：当前状态对应的工程时间。
+
+## I6. Results
+
+Batch Status：
+
+- Draft
+- Finalized
+- Cancelled
+
+Batch Result：
+
+- Succeeded
+- Partial
+- Failed
+
+Item Result：
+
+- Pending
+- Succeeded
+- Failed
+- Skipped
+- Cancelled
+
+只有 Succeeded Item 更新 Current Projection。Partial Batch 应用成功 Items，失败 Items 保留旧 Current State。
+
+## I7. Rollback/Correction Extension
+
+Schema 从 Core V1 预留：
+
+- `operation_type`
+- `related_batch_id`
+- `relation_type`
+- `effective_at`
+- `recorded_at`
+
+V1.1 再增加完整命令、权限和 UI。
+
+---
+
+# J. Drift Engine
+
+## J1. Match Algorithm
+
+对 Target Baseline Items 与 Machine Current Configuration 的 Component 并集比较：
+
+```text
+No Target                          → Unknown
+Required Expected + No Actual      → Missing
+Optional Expected + No Actual      → Missing, informational compliance
+No Expected + Actual               → Extra
+Actual Version unresolved          → Unknown
+Expected Version == Actual Version → Matched
+Otherwise                          → Mismatch
+```
+
+## J2. Risk
+
+Risk Severity：
+
+```text
+None < Info < Warning < High < Critical
+```
+
+Core Risk Codes：
+
+| Risk | Severity |
+|---|---|
+| Installed Version Blocked | Critical |
+| Target/Baseline Version Blocked | Critical |
+| Unknown Installed Version | High |
+| No Target Baseline | High |
+| Deprecated Version Installed | Warning |
+| Target Baseline Deprecated | Warning |
+| Maintenance Version New Install | Warning |
+| Optional Missing | Info |
+| Extra Component | Info/Warning |
+
+## J3. Simplified Hybrid
+
+- Machine Detail/Compare 实时计算 Item-level Match/Risk。
+- Machine List/Dashboard 使用 `machine_drift_summaries`。
+- Block/Target/Actual 变化将 Summary 标记 stale，并提交 Background Job。
+- 安全关键命令和页面直接读取源关系，不依赖投影。
+
+---
+
+# K. Compare Engine
+
+Core V1 支持：
+
+- Baseline vs Baseline。
+- Machine vs Baseline。
+
+V1.1 支持：
+
+- Machine vs Machine。
+- Machine Current vs Historical。
+
+统一 `ConfigurationSnapshot`：
+
+```text
+source_type
+source_id
+configuration_time
+risk_time
+project_id
+nodes[]
+```
+
+Node：
+
+```text
+component_id
+lineage_key
+component_code/path
+parent_lineage_key
+version_id/observed_version
+requirement
+lifecycle_now
+risk_findings[]
+```
+
+内部 Difference：
+
+- SAME
+- CHANGED
+- ONLY_A
+- ONLY_B
+- UNKNOWN
+
+显示映射：
+
+- Baseline vs Baseline：Same/Changed/Added/Removed。
+- Machine vs Baseline：Matched/Mismatch/Missing/Extra/Unknown。
+
+默认 Risk Time 为 Now，因此历史版本今天 Blocked 时仍显示当前风险。
+
+---
+
+# L. Version Impact Analysis
+
+Core V1 使用实时关系查询：
+
+- Used By Baselines：`baseline_items.version_id`。
+- Current Installed Machines：`machine_current_configurations.version_id`。
+- Historical Machines：成功的 `deployment_items.new_version_id` 去重。
+- Target Machines：Current Target Assignment → Baseline Items。
+- Affected Projects：以上关系对应 Project 去重。
+- Recent Facts：Deployment Items → Batch。
+
+Version Block 页面必须立即显示：
+
+- Baselines。
+- Current Installed Machines。
+- Target Machines。
+- Historical Machines。
+- Affected Projects。
+- Recent Deployment/Observation Facts。
+
+Core V1 不创建 Exposure Snapshot Tables。Block-time Snapshot 进入 V1.1。
+
+---
+
+# M. Traceability Queries
+
+| # | Query | Database Path |
+|---|---|---|
+| 1 | Machine → Current Versions | Machine → Current Configuration → Version |
+| 2 | Machine → Historical Versions | Machine → Batch → Item → Version |
+| 3 | Version → Current Machines | Version → Current Configuration → Machine |
+| 4 | Version → Historical Machines | Version → Successful Items → Batch → Machine |
+| 5 | Version → Baselines | Version → Baseline Item → Baseline |
+| 6 | Version → Target Machines | Version → Baseline Item → Current Target Assignment → Machine |
+| 7 | Blocked Version → Affected Machines | Current Installed UNION Current Target |
+| 8 | Blocked Version → Affected Baselines | Version → Baseline Items |
+| 9 | Baseline → Target Machines | Baseline → Current Target Assignments |
+| 10 | Baseline → Drift | Baseline → Target Machines → Drift Summary/Live Detail |
+| 11 | Main Version → Baselines | Top Version → Configuration Baselines |
+| 12 | Project → Historical Standard | Project → Standard Assignment As-of → Baseline Items |
+| 13 | Machine → Target History | Machine → Target Assignments → Baselines |
+| 14 | Fact Batch → Changed Versions | Batch → Items → Previous/New Version |
+| 15 | Version → Recent Observations | Version → Items → Batch filtered OBSERVATION |
+
+---
+
+# N. API Architecture
+
+API Prefix：`/api/v1`。
+
+主要 Endpoint Groups：
+
+```text
+/projects
+/projects/{id}/clone-preview
+/projects/{id}/clone
+/projects/{id}/standard-assignments
+
+/components/{id}
+/components/{id}/versions
+/versions/{id}
+/versions/{id}/lifecycle
+/versions/{id}/block
+/versions/{id}/unblock
+/versions/{id}/recommendations
+/versions/{id}/impact
+
+/baselines
+/baseline-series/{id}/revisions
+/baselines/{id}/release
+/baselines/{id}/deprecate
+/baselines/{id}/compare
+
+/machines
+/machines/{id}
+/machines/{id}/target-assignments
+/machines/{id}/configuration
+/machines/{id}/configuration?asOf=...
+/machines/{id}/drift
+/machines/{id}/timeline
+
+/deployment-batches/preview
+/deployment-batches
+/deployment-batches/{id}/finalize
+/deployment-batches/{id}/cancel
+
+/compare
+/search
+/imports
+/audit-events
+/admin/users
+/admin/roles
+```
+
+Rules：
+
+- 状态转换使用命令 Endpoint，不使用任意 PATCH。
+- Import Commit、Deployment/Observation Finalize、Machine Target Assignment、Baseline Release、Version Block/Unblock 强制要求 Idempotency Key。
+- API 使用持久化 `idempotency_records`；进程重启后仍能识别重试。
+- 同 Key 不同 Request Hash 返回 Conflict。
+- Directory/Agent/API 外部事实同时使用 `(source_type, external_event_id)` Partial Unique Constraint。
+- Deployment/Import Preview 必须显示并确认 FULL/PARTIAL Coverage；FULL Preview 列出将产生的 ABSENT Items。
+- Draft 编辑使用 Version Token/If-Match。
+- Problem Details 返回错误。
+- 历史列表使用 Cursor Pagination。
+- Block、Release、Target Change、Import Commit 返回 Audit ID。
+
+---
+
+# O. UI Information Architecture
+
+主导航：
+
+```text
+Dashboard
+Projects
+Baselines
+Software
+Machines
+Deployments
+Compare
+Search
+Administration
+```
+
+Ant Design 只作为 Base Component Library。核心产品不能采用“菜单 + CRUD Table + Edit Modal”的传统后台模板。
+
+交互围绕：
+
+- Configuration Explorer。
+- Component Tree。
+- Expected vs Actual。
+- Diff。
+- Timeline。
+- Traceability。
+- Search。
+- Engineering Context。
+
+Core V1 页面优先级：
+
+### P0
+
+1. Project Detail / Component Explorer。
+2. Baseline Detail / Configuration Tree。
+3. Machine Detail / Expected vs Installed。
+4. Version Detail / Lifecycle + Impact。
+5. Machine vs Baseline Compare。
+
+### P1
+
+6. Machine List。
+7. Baseline vs Baseline Compare。
+8. Global Search。
+9. Dashboard。
+10. Deployment/Observation Record 与 Timeline。
+11. Import Preview。
+
+### P2
+
+12. Project Clone Preview。
+13. Block Impact Confirmation。
+14. Target Assignment History。
+15. Audit Search。
+16. Operations Health。
+
+---
+
+# P. Key Page Wireframes
+
+## Dashboard
+
+```text
+┌──────────────────────────────────────────────────────────────────────┐
+│ Global Search                         Project: All        User        │
+├──────────────────────────────────────────────────────────────────────┤
+│ Projects │ Machines │ Drift │ Unknown │ Blocked │ Critical Risk     │
+├───────────────────────────────┬──────────────────────────────────────┤
+│ ACTION REQUIRED               │ RECENT CHANGES                       │
+│ Machines on Blocked       37  │ Baseline Released                   │
+│ Baselines with Blocked      4  │ Version Blocked                     │
+│ Unknown Configuration      18  │ Initial Snapshot Imported           │
+└───────────────────────────────┴──────────────────────────────────────┘
+```
+
+## Machine Detail
+
+```text
+SN001  Project A  Target BL-108  Match: MISMATCH  Risk: CRITICAL
+WARNING: Installed Driver V3.6.17 is BLOCKED
+
+Component │ Expected │ Installed │ Match    │ Maturity │ Safety │ Risk
+UI        │ V2.5     │ V2.5      │ Matched  │ Released │ Clear  │ -
+Control   │ V4.1     │ V4.0      │ Mismatch │ Released │ Clear  │ Warning
+Driver    │ V3.6     │ V3.6.17   │ Mismatch │ Released │ Blocked│ Critical
+
+Tabs: Current | Timeline | Target History | Compare | Attachments
+```
+
+## Baseline Detail
+
+```text
+BL-2026-08-001 Rev 3  RELEASED  Top V3.2  Risk: CRITICAL
+[Compare] [Create Revision] [Target Machines]
+
+Component Tree       Version    Maturity     Safety    Requirement
+Main Software        V3.2       Released     Clear     Required
+├─ Control           V4.1       Released     Clear     Required
+└─ Driver            V3.6.17    Released     Blocked   Required
+```
+
+## Version Detail
+
+```text
+Driver V3.6.17   Sequence 3617   BLOCKED
+Critical stability issue
+
+Baselines 4 │ Current Machines 37 │ Target Machines 52 │ Historical 83
+
+Tabs: Overview | Lifecycle | Baselines | Current | Target | Historical | Facts
+```
+
+## Compare
+
+```text
+A: Machine SN001 Current     B: Baseline BL-108
+
+Component │ Version A │ Version B │ Status   │ Lifecycle │ Risk
+Control   │ V4.0      │ V4.1      │ Changed  │ Rel/Rel   │ Warning
+Driver    │ V3.6.17   │ V3.6      │ Changed  │ Block/Rel │ Critical
+Firmware  │ --        │ V7.2      │ Missing  │ --/Rel    │ High
+```
+
+---
+
+# Q. Import Architecture
+
+统一 Pipeline：
+
+```text
+Source Adapter
+  → Acquire & Checksum
+  → Parse
+  → Canonical Staging
+  → Normalize
+  → Validate
+  → Resolve References
+  → Detect Conflicts
+  → Preview / Dry Run
+  → User Resolution
+  → Confirm
+  → Domain Command Commit
+  → Audit / Result Report
+```
+
+Core V1 Adapters：Excel、CSV。
+
+Future Adapters：Directory、Agent、API。
+
+新发现 Version：
+
+- Ingestion Status 可以是 Discovered。
+- Domain Maturity 必须是 Draft。
+- 不允许自动 Released/Recommended。
+- `sequence_no` 必须由来源明确提供或由 Engineer 在 Commit 前确认，不能从 Version Number 推导。
+
+现有 Machine Configuration 导入：
+
+- 第一次导入使用 INITIAL_SNAPSHOT。
+- 后续盘点使用 OBSERVATION。
+- 不伪造 INSTALL/UPGRADE。
+
+---
+
+# R. RBAC
+
+MVP Roles：
+
+- Admin。
+- Senior Engineer。
+- Engineer。
+- Viewer。
+
+| Permission | Viewer | Engineer | Senior | Admin |
+|---|---:|---:|---:|---:|
+| Read/Search/Compare | ✓ | ✓ | ✓ | ✓ |
+| Create/Edit Draft |  | ✓ | ✓ | ✓ |
+| Clone Project |  | ✓ | ✓ | ✓ |
+| Submit Testing |  | ✓ | ✓ | ✓ |
+| Release Version |  |  | ✓ | ✓ |
+| Recommend Version |  |  | ✓ | ✓ |
+| Release Baseline |  |  | ✓ | ✓ |
+| Block/Unblock |  |  | ✓ | ✓ |
+| Record Deployment/Observation |  | ✓ | ✓ | ✓ |
+| Import Preview |  | ✓ | ✓ | ✓ |
+| Import Commit |  | Limited | ✓ | ✓ |
+| User Administration |  |  |  | ✓ |
+
+Block 与 Unblock 是独立 Permission。Project-level Permission 进入 Phase 2。
+
+---
+
+# S. Audit Architecture
+
+必须审计：
+
+- Project Create/Edit/Clone/Archive。
+- Component Create/Move/Rename/Archive。
+- Version Create/Sequence Change/Metadata Change。
+- 所有 Version Lifecycle Transition。
+- Recommendation Assign/Revoke。
+- Baseline Create/Release/Deprecate/Archive。
+- Project Standard Change。
+- Machine Create/Edit/Archive。
+- Target Assignment Change。
+- Deployment/Observation Finalize/Cancel/Partial/Failed。
+- Import Upload/Resolve/Commit。
+- Attachment Upload/Replace。
+- User/Role/Permission Change。
+
+Audit Fields：Actor、Time、Entity、Action、Before、After、Reason、Source、Request ID、Client Info。
+
+Audit 表 Append-only；应用账号无 Update/Delete 权限。领域历史仍由 Lifecycle/Assignment/Fact Tables 负责，Audit 不替代领域事实。
+
+---
+
+# T. Recommended Tech Stack
+
+## Frontend
+
+- React 19。
+- TypeScript Strict。
+- Vite。
+- Ant Design。
+- TanStack Query。
+- TanStack Virtual。
+- Playwright。
+
+## Backend
+
+- ASP.NET Core / .NET 10 LTS。
+- EF Core 10。
+- Npgsql。
+- ASP.NET Core Identity。
+- Cookie Authentication。
+- OpenAPI。
+- .NET Worker Service。
+
+## Database
+
+- PostgreSQL 18 最新受支持 Minor。
+- `pg_trgm`。
+- GIN/FTS。
+- Range/Exclusion Constraint。
+- Recursive CTE。
+- Partial Index。
+
+## Search
+
+Core V1 直接查询 Project、Component、Version、Baseline、Machine 业务表，使用 B-tree、Trigram 和必要的 FTS。暂不建立 `search_documents`，暂不引入 Elasticsearch。
+
+---
+
+# U. Pure Windows Deployment and Operations
+
+## U1. Single IIS Application
+
+```text
+Browser HTTPS 443
+  → IIS
+    → ConfigHub ASP.NET Core Application
+      ├─ /api/v1/* REST API
+      ├─ /assets/* React Assets
+      ├─ /index.html
+      └─ SPA Fallback
+```
+
+React Vite Build 输出复制到 ASP.NET Core `wwwroot`。API Route 先映射，静态资源随后映射，最后对非 API Route fallback 到 `index.html`。API 404 不得被 SPA Fallback 吞掉。
+
+最终只有：
+
+- 一个 IIS Site。
+- 一个 Application Pool。
+- 一个 ASP.NET Core Publish Directory。
+- 一个 `web.config`。
+- 一个 HTTPS Binding。
+
+## U2. Worker and PostgreSQL
+
+- `ConfigHub.Worker` 作为低权限 Windows Service。
+- PostgreSQL 18 作为 Native Windows Service。
+- API 与 Worker 使用独立数据库账号。
+- PostgreSQL 只允许本机应用连接。
+- Worker 负责 Import、Background Jobs、Drift Summary Refresh。
+
+## U3. Directories
+
+```text
+C:\Program Files\ConfigHub\
+├─ releases\<version>\
+└─ current\
+
+C:\ProgramData\ConfigHub\
+├─ config\
+├─ logs\
+│  ├─ api\
+│  ├─ worker\
+│  ├─ deployment\
+│  └─ backup\
+├─ data\
+│  ├─ import\
+│  ├─ staging\
+│  └─ jobs\
+├─ files\
+│  ├─ attachments\
+│  └─ quarantine\
+└─ backup\
+   ├─ staging\
+   └─ manifests\
+```
+
+## U4. File Invariants
+
+- File Object 发布后不可原地修改。
+- 替换创建新 File Object。
+- 上传顺序：Temp → Validate → Checksum → Atomic Move → DB Commit。
+- Core V1 不立即物理删除已发布文件。
+- Package 默认保存 UNC/SMB Locator 和 Checksum，不把系统变成下载站。
+
+## U5. Nightly Online Backup
+
+正常 Nightly Backup：
+
+1. 不停止 IIS、API 或 Worker。
+2. 使用 `pg_dump --format=custom` 创建一致性数据库备份。
+3. 在线备份 File Store。
+4. 生成 Application/Schema/File Manifest 和 Checksum。
+5. 验证 Dump 可读取。
+6. 上传 NAS/Network Share。
+7. 写 Backup Log 并执行 Retention。
+
+不可变文件和“文件先落盘、数据库后提交引用”的不变量保证 Online File Backup 可恢复。数据库快照后新增而一并复制的文件只是无害冗余。
+
+## U6. Upgrade/Maintenance Quiesced Backup
+
+升级前：
+
+1. IIS Maintenance Mode 阻止新写入。
+2. 等待现有写事务结束。
+3. Stop Worker。
+4. Backup Database。
+5. Backup File Store、Config、Release Manifest。
+6. Verify Dump/Checksum。
+7. Upgrade/Migrate。
+8. Health Check。
+9. Start Worker 并退出 Maintenance Mode。
+
+## U7. Windows Deployment Bundle
+
+```text
+ConfigHub-<version>\
+├─ App\
+│  ├─ wwwroot\
+│  └─ ConfigHub.Host.exe
+├─ Worker\
+├─ Database\migrations\
+├─ Scripts\
+│  ├─ install.ps1
+│  ├─ start.ps1
+│  ├─ stop.ps1
+│  ├─ health-check.ps1
+│  ├─ backup.ps1
+│  ├─ restore.ps1
+│  ├─ upgrade.ps1
+│  ├─ collect-logs.ps1
+│  └─ uninstall.ps1
+├─ ConfigTemplates\
+├─ Checksums\
+└─ RELEASE_NOTES.md
+```
+
+V1 使用 PowerShell，不开发 MSI。Uninstall 默认绝不删除 Database、File Store 或 Backup。
+
+## U8. Start/Stop
+
+Start：
+
+```text
+PostgreSQL → Worker → IIS → Health Check
+```
+
+Stop：
+
+```text
+IIS → Worker → PostgreSQL（仅完整维护时）
+```
+
+## U9. Logging
+
+- API Structured Rolling Files。
+- Worker Structured Rolling Files + Windows Event Log。
+- IIS Access Log。
+- PostgreSQL Log。
+- Deployment/Upgrade/Backup Script Log。
+- Correlation ID 跨 API、Worker、Audit。
+- 日志不得包含密码、Cookie、Connection String 或文件内容。
+
+---
+
+# V. Recommended Core V1
+
+Core V1 必须形成完整可用闭环，不追求所有高级能力。
+
+## V1 Scope
+
+- Project。
+- Project Clone Preview/Commit。
+- Component Tree。
+- Component Version + Explicit Sequence。
+- Version Maturity/Safety/Basic Recommendation。
+- Baseline Series/Revision。
+- Released Baseline Immutability。
+- Project Current Standard History。
+- Machine Registry。
+- Machine Target History。
+- Deployment/Initial Snapshot/Observation Batch + Items。
+- FULL/PARTIAL Coverage 和 ABSENT Semantics。
+- Partial Result。
+- Current Machine Configuration。
+- State Effective Time 与 Nullable Known Installed Time。
+- Persistent Command Idempotency。
+- Basic Drift/Risk。
+- Machine vs Baseline Compare。
+- Baseline vs Baseline Compare。
+- Machine/Version Bidirectional Traceability。
+- Real-time Version Impact。
+- Global Search。
+- Excel/CSV Import。
+- Basic Audit/RBAC。
+- Pure Windows Install/Backup/Restore/Upgrade。
+
+## V1 Acceptance Scenarios
+
+1. Released Baseline 无法通过 UI、API 或 Domain Service 修改。
+2. 同一 Top Version 可拥有多个独立 Baseline Revision。
+3. Project Standard=BL-108、Machine Target=BL-107、Actual=BL-107 时 Machine 为 Matched。
+4. Expected=Installed 且 Version 后续 Blocked 时显示 Matched+Critical。
+5. Block 不改变历史 Baseline 或 Current Actual。
+6. Blocked Version 的 Baseline/Current/Target/Historical Impact 实时准确。
+7. Partial Batch 只应用成功 Items。
+8. FULL Snapshot 对未出现的旧 Current Component 生成 ABSENT Fact 并移除 Current Row。
+9. PARTIAL Observation 未出现的 Component 保持不变。
+10. Initial Snapshot 不显示为软件安装行为，也不伪造 Installed At。
+11. UI 对未知安装时间显示 Unknown，并显示 State Effective/Last Observed Time。
+12. Observation 晚于 Current Fact 时可更新；较早 Observation 不覆盖更新状态。
+13. Machine Target 和 Project Standard Assignment 时间不能重叠，且结束时间必须晚于开始时间。
+14. Current Projection 可从 Fact History 重建并得到相同结果。
+15. Version List 按 Explicit Sequence 排序，不解析 Version Number。
+16. Excel/CSV Preview、Dry Run、Coverage、Conflict、Commit 完整且重复提交幂等。
+17. 同 Idempotency Scope/Key/Hash 重试返回原结果；同 Key 不同 Hash 返回 Conflict。
+18. 重复 External Event 不能形成重复 Fact。
+19. Engineer 不能 Release Baseline 或 Block Version。
+20. 单 IIS URL 同时提供 SPA 与 API，Client Route 刷新不 404。
+21. Nightly Backup 期间系统保持可用，并能恢复到新数据库。
+
+---
+
+# W. V1.1 / Phase 2 / Phase 3
+
+## V1.1
+
+- Baseline Review Workflow。
+- Rollback/Correction Commands 和 UI。
+- Bulk Target/Bulk Deployment。
+- `bulk_operations`。
+- Machine vs Machine Compare。
+- Machine Current vs Historical Compare。
+- Historical Snapshot UI。
+- Block-time Exposure Snapshot Tables。
+- Deployment Global Search。
+- Compare/Impact Export。
+- Baseline/Deployment Attachments。
+- Import Mapping Template。
+- Lightweight Saved Views。
+
+## Phase 2
+
+- Recommendation Scope：Customer/Machine Type/Hardware Revision/Machine。
+- Compatibility/Dependency Rules。
+- Conditional Baseline Items。
+- Version EOL/Support Window。
+- Fleet Upgrade Campaign。
+- Canary Assignment。
+- Directory Watcher。
+- Automatic Version Discovery。
+- Notifications。
+- Project-level Permission。
+- Windows Authentication/AD/LDAP/OIDC。
+- 双人审批。
+- Antivirus Scan。
+- Historical Configuration Checkpoints。
+- Search/Closure/Drift Detail Projection，仅在性能数据证明需要时增加。
+
+## Phase 3
+
+- Machine Agent。
+- Automatic Actual Reporting。
+- Heartbeat/Data Freshness Risk。
+- Remote Deployment/Rollback。
+- Multi-site。
+- PostgreSQL HA/Read Replica。
+- Fleet Optimization。
+- Rule Simulation。
+- External Search 或 Microservices，仅在真实规模和团队边界证明需要时评估。
+
+---
+
+# X. Recommended Project Structure
+
+```text
+/
+├─ PLAN.md
+├─ src/
+│  ├─ web/
+│  │  ├─ app/
+│  │  ├─ features/
+│  │  ├─ components/
+│  │  └─ api/
+│  └─ server/
+│     ├─ ConfigHub.sln
+│     ├─ Host/
+│     ├─ Worker/
+│     ├─ SharedKernel/
+│     └─ Modules/
+│        ├─ Identity/
+│        ├─ Projects/
+│        ├─ Catalog/
+│        ├─ VersionLifecycle/
+│        ├─ Baselines/
+│        ├─ Machines/
+│        ├─ Deployments/
+│        ├─ ConfigurationState/
+│        ├─ Drift/
+│        ├─ Compare/
+│        ├─ Traceability/
+│        ├─ Search/
+│        ├─ Imports/
+│        ├─ Attachments/
+│        └─ Audit/
+├─ tests/
+│  ├─ Unit/
+│  ├─ Integration/
+│  ├─ Architecture/
+│  ├─ ProjectionRebuild/
+│  ├─ Performance/
+│  └─ E2E/
+├─ deploy/
+│  └─ windows/
+│     ├─ scripts/
+│     ├─ config-templates/
+│     └─ operations/
+└─ docs/
+   ├─ architecture/
+   ├─ adr/
+   ├─ operations/
+   └─ import-formats/
+```
+
+每个 Server Module 内部按需要使用 Domain/Application/Infrastructure/Api/Contracts。避免为每个 Entity 机械创建 Repository/Service/Controller。
+
+---
+
+# Y. Architecture Decision Records
+
+1. **ADR-001 — Pure Windows Production Deployment and Single IIS Application**
+2. **ADR-002 — Modular Monolith and Single PostgreSQL Database**
+3. **ADR-003 — ConfigurationComponent Boundary and Explicit Component Version Sequence**
+4. **ADR-004 — Version Lifecycle Three-axis Model**
+5. **ADR-005 — BaselineSeries and Independent Immutable Revision**
+6. **ADR-006 — Project Standard, Machine Target and Actual Separation**
+7. **ADR-007 — Assignment History, GiST Temporal Exclusion and No Current Pointer**
+8. **ADR-008 — Deployment History and Current Configuration Time Projection**
+9. **ADR-009 — DeploymentBatch Operation, Source and Coverage Semantics**
+10. **ADR-010 — Component Adjacency List and Recursive CTE**
+11. **ADR-011 — Simplified Drift/Risk and Live Impact**
+12. **ADR-012 — Project Clone Copies Template Data Only**
+13. **ADR-013 — Relational Core and Restricted JSONB Usage**
+14. **ADR-014 — Immutable File Objects and Online/Quiesced Backup Modes**
+15. **ADR-015 — Unified Import Pipeline, Persistent Idempotency and Phased Delivery**
+
+---
+
+# Recommended Implementation Order
+
+采用 Vertical Slice Incremental Development，不一次性实现全部 Core V1。
+
+## Step 0 — Decision Lock
+
+- 将本 PLAN 作为架构基线。
+- 建立 ADR-001 至 ADR-015。
+- 确认 Windows Server、DNS、TLS、Service Accounts、PostgreSQL Ownership、Backup Destination。
+- 准备一个真实 Project 的脱敏样本。
+
+## Step 1 — Windows Production Skeleton
+
+### Slice 1A: Single IIS Application
+
+- ASP.NET Core Host。
+- React/Vite Shell 构建进 `wwwroot`。
+- `/api/v1/system/version`。
+- `/health/live`、`/health/ready`。
+- SPA Fallback。
+- IIS Publish。
+
+### Slice 1B: PostgreSQL and Worker
+
+- PostgreSQL Windows Service Connectivity。
+- Migration Infrastructure。
+- Worker Windows Service。
+- Database-backed Background Jobs。
+- Rolling Logs/Event Log。
+
+### Slice 1C: Windows Operations
+
+- Install/Start/Stop/Health Scripts。
+- Online Backup/Restore Smoke Test。
+- Maintenance Mode/Upgrade Skeleton。
+- Log Collection。
+
+## Step 2 — Foundation
+
+- Identity、Cookie、RBAC、Audit、Correlation、React Shell。
+
+## Step 3 — Project → Component → Version
+
+- Project/Clone、Component Tree、Version Sequence、Lifecycle、Version Detail。
+
+## Step 4 — Baseline
+
+- Series/Revision、Tree Editor、Release、Immutability、Project Standard、Compare。
+
+## Step 5 — Machine → Target
+
+- Registry、Target History、Machine Header/List。
+
+## Step 6 — Facts → Current Actual
+
+- Deployment/Initial Snapshot/Observation、Partial Result、Current Projection、Timeline。
+
+## Step 7 — Drift/Risk/Compare
+
+- Live Detail、Summary Projection、Machine Detail、Compare。
+
+## Step 8 — Trace/Impact/Search
+
+- Bidirectional Trace、Version Impact、Global Search、Dashboard。
+
+## Step 9 — Import
+
+- Excel/CSV Preview、Validation、Conflict、Dry Run、Commit。
+
+## Step 10 — Production Hardening
+
+- Permission、Immutability、Temporal、Projection Rebuild、Performance、Backup Restore、Upgrade、Security Tests。
+
+## Step 11 — Internal Pilot
+
+- 一个真实 Project、20–50 台 Machine、现有 Excel 数据和真实工程师验收。
+
+---
+
+# Before Coding — Product/IT Decisions
+
+以下不会改变核心 Domain Model，但 Step 1 前必须落实：
+
+1. Windows Server 2022 或 2025 的正式版本。
+2. 正式 DNS，例如 `https://config-server/`。
+3. HTTPS 证书来源和更新责任。
+4. IIS/Worker/PostgreSQL Service Account 模型。
+5. PostgreSQL 是专用实例还是 IT 维护的现有实例。
+6. NAS/Network Share Backup Destination 和 Retention。
+7. Baseline Release 角色与 `approved_by` 默认策略。
+8. Machine Serial Number 是否全局唯一；默认是。
+9. Unknown Version Import 处理；默认保留 Unknown Actual 或创建 Draft。
+10. Project Clone 默认复制范围。
+11. 试点 Project、Excel 样本和业务验收负责人。
+
+---
+
+# Coding Readiness
+
+架构已经适合开始 Core V1 Coding。
+
+核心 Domain Model、Version Sequence、Target/Actual、Baseline Immutability、Deployment/Observation Semantics、Temporal History、Drift/Risk、Pure Windows Deployment 和 Backup 模式均已明确。
+
+实际开发从 Step 0 和 Step 1 开始，并严格采用 Vertical Slice Incremental Development。完成 Windows Production Skeleton 验收后，再进入 Project → Component → Version，不提前实现整个 Core V1。
