@@ -1829,13 +1829,26 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - Maintenance Mode/Upgrade Skeleton。
 - Log Collection。
 
+### Step 1 实际验收记录（2026-08-29）
+
+- 本地功能验收已完成：.NET 10、React 生产构建、PostgreSQL 17、Foundation Migration、Host、数据库健康检查和 PostgreSQL-backed Worker 已在单机环境连通。
+- 本机 PostgreSQL 17 为当前用户目录下的开发实例，仅允许本机应用连接；它不是已安装和受运维管理的正式 Windows Service。
+- **Production Integration Pending**：IIS Application Pool 与 Worker Windows Service、正式服务账户、Machine 环境变量保护、HTTPS/TLS、DNS、Windows Firewall、NAS 备份/恢复演练及正式 PostgreSQL Ownership 仍待在目标 Windows Server 上验收。
+- 因此 Step 1C 可作为本地功能基础进入 Step 2/3，但不能标记为生产部署验收完成。
+
 ## Step 2 — Foundation
 
 - Identity、Cookie、RBAC、Audit、Correlation、React Shell。
+- 状态：进行中。
+- 已交付：React 中文操作壳、请求 `X-Correlation-ID` 传播、追加式 `audit_events`、项目/组件/版本写入审计与只读审计查询。
+- 待完成：本地用户、Cookie 登录、角色初始化与 RBAC 授权策略。
 
 ## Step 3 — Project → Component → Version
 
 - Project/Clone、Component Tree、Version Sequence、Lifecycle、Version Detail。
+- 状态：进行中；先交付 Project → Component → Version 的可用闭环，Clone 与完整 Lifecycle 扩展随后补齐。
+- 已交付：Project 创建/列表/详情、根 Component 创建、ComponentVersion 创建、每个 Component 的显式递增 `sequence_no`、规范化编码与版本号唯一约束，以及中文操作界面。
+- 待完成：深层组件树编辑、Project Clone Preview/Commit、Version Lifecycle Transition、版本详情/影响查询和 RBAC 接入。
 
 ## Step 4 — Baseline
 

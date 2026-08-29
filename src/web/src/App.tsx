@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { createComponent, createComponentVersion, createProject, getProject, getProjects } from './catalog-api'
 import { enqueueNoopJob, getSystemStatus, getSystemVersion, type BackgroundJobStatus } from './system-api'
 
 const navigation = [
   { id: 'overview', label: '运行总览', available: true },
   { id: 'jobs', label: '后台任务', available: true },
-  { id: 'projects', label: '项目', available: false },
+  { id: 'projects', label: '项目', available: true },
   { id: 'baselines', label: '基线', available: false },
   { id: 'software', label: '软件版本', available: false },
   { id: 'machines', label: '机台', available: false },
@@ -33,14 +34,50 @@ function formatTime(value: string | null | undefined) {
 function App() {
   const [activePage, setActivePage] = useState('overview')
   const [note, setNote] = useState('')
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
+  const [projectCode, setProjectCode] = useState('')
+  const [projectName, setProjectName] = useState('')
+  const [projectDescription, setProjectDescription] = useState('')
+  const [componentCode, setComponentCode] = useState('')
+  const [componentName, setComponentName] = useState('')
+  const [versionComponentId, setVersionComponentId] = useState('')
+  const [versionNumber, setVersionNumber] = useState('')
   const queryClient = useQueryClient()
   const system = useQuery({ queryKey: ['system-version'], queryFn: getSystemVersion })
   const status = useQuery({ queryKey: ['system-status'], queryFn: getSystemStatus, refetchInterval: 5_000 })
+  const projects = useQuery({ queryKey: ['projects'], queryFn: getProjects })
+  const projectDetail = useQuery({ queryKey: ['project', selectedProjectId], queryFn: () => getProject(selectedProjectId!), enabled: selectedProjectId !== null })
   const enqueue = useMutation({
     mutationFn: enqueueNoopJob,
     onSuccess: async () => {
       setNote('')
       await queryClient.invalidateQueries({ queryKey: ['system-status'] })
+    },
+  })
+  const addProject = useMutation({
+    mutationFn: createProject,
+    onSuccess: async ({ id }) => {
+      setProjectCode('')
+      setProjectName('')
+      setProjectDescription('')
+      setSelectedProjectId(id)
+      await queryClient.invalidateQueries({ queryKey: ['projects'] })
+    },
+  })
+  const addComponent = useMutation({
+    mutationFn: ({ projectId, code, name }: { projectId: string; code: string; name: string }) => createComponent(projectId, { code, name, parentComponentId: null }),
+    onSuccess: async () => {
+      setComponentCode('')
+      setComponentName('')
+      await queryClient.invalidateQueries({ queryKey: ['project', selectedProjectId] })
+      await queryClient.invalidateQueries({ queryKey: ['projects'] })
+    },
+  })
+  const addVersion = useMutation({
+    mutationFn: ({ componentId, number }: { componentId: string; number: string }) => createComponentVersion(componentId, { versionNumber: number }),
+    onSuccess: async () => {
+      setVersionNumber('')
+      await queryClient.invalidateQueries({ queryKey: ['project', selectedProjectId] })
     },
   })
 
@@ -112,6 +149,32 @@ function App() {
                 <div className="panel-heading"><div><span className="section-index">最近任务</span><h3>执行记录</h3></div><button type="button" onClick={() => void status.refetch()} disabled={status.isFetching}>{status.isFetching ? '正在刷新' : '刷新'}</button></div>
                 {status.data?.jobs.length ? <div className="job-list">{status.data.jobs.map((job) => <article className="job-row" key={job.id}><div><strong>{jobTypeText[job.jobType] ?? job.jobType}</strong><span>{formatTime(job.createdAt)}</span></div><span className={`job-state ${job.status.toLowerCase()}`}>{statusText[job.status]}</span><small>第 {job.attempts} 次</small>{job.lastError && <p>{job.lastError}</p>}</article>)}</div> : <p className="empty-state">还没有任务记录。提交一条连通性任务即可开始验证。</p>}
               </section>
+            </>}
+
+            {activePage === 'projects' && <>
+              <section className="status-panel catalog-panel">
+                <div className="panel-heading"><div><span className="section-index">项目目录</span><h3>创建项目</h3></div></div>
+                <form className="catalog-form" onSubmit={(event) => { event.preventDefault(); addProject.mutate({ code: projectCode, name: projectName, description: projectDescription }) }}>
+                  <label>项目编码<input value={projectCode} maxLength={50} placeholder="例如：LINE-A" onChange={(event) => setProjectCode(event.target.value)} required /></label>
+                  <label>项目名称<input value={projectName} maxLength={200} placeholder="例如：产线 A 配置" onChange={(event) => setProjectName(event.target.value)} required /></label>
+                  <label className="wide-field">说明<textarea value={projectDescription} maxLength={2000} onChange={(event) => setProjectDescription(event.target.value)} /></label>
+                  <button className="primary-action" type="submit" disabled={addProject.isPending}>{addProject.isPending ? '正在创建' : '创建项目'}</button>
+                </form>
+                {addProject.isError && <p className="error-strip">{addProject.error.message}</p>}
+              </section>
+              <section className="status-panel catalog-panel">
+                <div className="panel-heading"><div><span className="section-index">已建项目</span><h3>项目列表</h3></div><span className="count">{projects.data?.length ?? 0}</span></div>
+                <div className="catalog-list">{projects.data?.map((project) => <button key={project.id} type="button" className={project.id === selectedProjectId ? 'project-row selected' : 'project-row'} onClick={() => { setSelectedProjectId(project.id); setVersionComponentId('') }}><span><strong>{project.code}</strong><small>{project.name}</small></span><em>{project.componentCount} 个组件</em></button>) ?? <p className="empty-state">正在读取项目。</p>}</div>
+              </section>
+              {projectDetail.data && <section className="status-panel catalog-detail">
+                <div className="panel-heading"><div><span className="section-index">{projectDetail.data.project.code}</span><h3>{projectDetail.data.project.name}</h3></div></div>
+                <div className="catalog-actions">
+                  <form className="inline-form" onSubmit={(event) => { event.preventDefault(); addComponent.mutate({ projectId: projectDetail.data.project.id, code: componentCode, name: componentName }) }}><label>组件编码<input value={componentCode} placeholder="例如：PLC" onChange={(event) => setComponentCode(event.target.value)} required /></label><label>组件名称<input value={componentName} placeholder="例如：主控程序" onChange={(event) => setComponentName(event.target.value)} required /></label><button type="submit" disabled={addComponent.isPending}>{addComponent.isPending ? '正在新增' : '新增组件'}</button></form>
+                  <form className="inline-form" onSubmit={(event) => { event.preventDefault(); addVersion.mutate({ componentId: versionComponentId, number: versionNumber }) }}><label>目标组件<select value={versionComponentId} onChange={(event) => setVersionComponentId(event.target.value)} required><option value="">请选择组件</option>{projectDetail.data.components.map((component) => <option key={component.id} value={component.id}>{component.code} · {component.name}</option>)}</select></label><label>版本号<input value={versionNumber} placeholder="例如：2026.08.29" onChange={(event) => setVersionNumber(event.target.value)} required /></label><button type="submit" disabled={addVersion.isPending}>{addVersion.isPending ? '正在登记' : '登记版本'}</button></form>
+                </div>
+                {(addComponent.isError || addVersion.isError) && <p className="error-strip">{addComponent.error?.message ?? addVersion.error?.message}</p>}
+                <div className="component-list">{projectDetail.data.components.map((component) => <article className="component-row" key={component.id}><div><strong>{component.code}</strong><span>{component.name}</span></div><div className="version-tags">{component.versions.length ? component.versions.map((version) => <span key={version.id}>{version.versionNumber}<small>序列 {version.sequenceNo}</small></span>) : <em>尚未登记版本</em>}</div></article>)}</div>
+              </section>}
             </>}
           </div>
         ) : (

@@ -10,6 +10,14 @@ public sealed class ConfigHubDbContext(DbContextOptions<ConfigHubDbContext> opti
 
     public DbSet<BackgroundJob> BackgroundJobs => Set<BackgroundJob>();
 
+    public DbSet<Project> Projects => Set<Project>();
+
+    public DbSet<ConfigurationComponent> ConfigurationComponents => Set<ConfigurationComponent>();
+
+    public DbSet<ComponentVersion> ComponentVersions => Set<ComponentVersion>();
+
+    public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ConfigHubModel.Configure(modelBuilder);

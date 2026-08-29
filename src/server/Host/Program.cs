@@ -1,4 +1,5 @@
 using ConfigHub.Host.Health;
+using ConfigHub.Host.Catalog;
 using ConfigHub.Host.System;
 using ConfigHub.Infrastructure.Persistence;
 using ConfigHub.Infrastructure.Persistence.Entities;
@@ -44,6 +45,19 @@ builder.Services
     .AddCheck<DatabaseHealthCheck>("postgresql", tags: ["ready"]);
 
 var app = builder.Build();
+
+app.Use(async (context, next) =>
+{
+    var correlationId = context.Request.Headers["X-Correlation-ID"].FirstOrDefault();
+    if (string.IsNullOrWhiteSpace(correlationId) || correlationId.Length > 128)
+    {
+        correlationId = Guid.NewGuid().ToString("N");
+    }
+
+    context.Items["CorrelationId"] = correlationId;
+    context.Response.Headers["X-Correlation-ID"] = correlationId;
+    await next(context);
+});
 
 if (migrateRequested)
 {
@@ -150,6 +164,8 @@ app.MapPost("/api/v1/system/jobs/noop", async (
 
     return TypedResults.Accepted($"/api/v1/system/jobs/{job.Id}", new { id = job.Id });
 });
+
+app.MapCatalogEndpoints();
 
 app.MapFallback("/api/{**path}", () => Results.Problem(
     statusCode: StatusCodes.Status404NotFound,
