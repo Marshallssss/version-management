@@ -16,6 +16,8 @@ public static class CatalogEndpoints
         projects.MapPost("", CreateProjectAsync).RequireAuthorization("Engineer");
         projects.MapGet("/{projectId:guid}", GetProjectAsync);
         projects.MapPost("/{projectId:guid}/components", CreateComponentAsync).RequireAuthorization("Engineer");
+        projects.MapPost("/{projectId:guid}/clone-preview", ClonePreviewAsync).RequireAuthorization("Engineer");
+        projects.MapPost("/{projectId:guid}/clone", CloneAsync).RequireAuthorization("Engineer");
 
         endpoints.MapPost("/api/v1/components/{componentId:guid}/versions", CreateVersionAsync).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/component-versions/{versionId:guid}/maturity", ChangeMaturityAsync).RequireAuthorization("SeniorEngineer");
@@ -97,6 +99,40 @@ public static class CatalogEndpoints
             })
             .ToListAsync(cancellationToken);
         return TypedResults.Ok(new { project, components });
+    }
+
+    private static async Task<IResult> ClonePreviewAsync(Guid projectId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        await using var database = await factory.CreateDbContextAsync(cancellationToken);
+        var project = await database.Projects.AsNoTracking().SingleOrDefaultAsync(item => item.Id == projectId, cancellationToken);
+        if (project is null) return Results.NotFound();
+        var components = await database.ConfigurationComponents.CountAsync(item => item.ProjectId == projectId, cancellationToken);
+        var versions = await database.ConfigurationComponents.Where(item => item.ProjectId == projectId).Join(database.ComponentVersions, component => component.Id, version => version.ComponentId, (_, _) => 1).CountAsync(cancellationToken);
+        return TypedResults.Ok(new { sourceProject = project.Code, copiedComponents = components, excludedVersions = versions, excludedBaselines = true, excludedMachines = true });
+    }
+
+    private static async Task<IResult> CloneAsync(Guid projectId, CloneProjectRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        var validation = ValidateIdentifier(request.Code, "项目编码", 50) ?? ValidateRequired(request.Name, "项目名称", 200) ?? ValidateRequired(request.Reason, "克隆原因", 500);
+        if (validation is not null) return Results.ValidationProblem(validation);
+        await using var database = await factory.CreateDbContextAsync(cancellationToken);
+        var source = await database.Projects.SingleOrDefaultAsync(item => item.Id == projectId, cancellationToken);
+        if (source is null) return Results.NotFound();
+        var normalizedCode = Normalize(request.Code!);
+        if (await database.Projects.AnyAsync(item => item.NormalizedCode == normalizedCode, cancellationToken)) return Results.Conflict(new { message = "项目编码已存在。" });
+        var actor = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required.");
+        var now = DateTimeOffset.UtcNow;
+        var target = new Project { Id = Guid.NewGuid(), Code = request.Code!.Trim(), NormalizedCode = normalizedCode, Name = request.Name!.Trim(), Description = source.Description, CreatedAt = now, UpdatedAt = now };
+        var sourceComponents = await database.ConfigurationComponents.AsNoTracking().Where(item => item.ProjectId == projectId).OrderBy(item => item.LineageKey).ToListAsync(cancellationToken);
+        var ids = sourceComponents.ToDictionary(item => item.Id, _ => Guid.NewGuid());
+        foreach (var sourceComponent in sourceComponents)
+        {
+            database.ConfigurationComponents.Add(new ConfigurationComponent { Id = ids[sourceComponent.Id], ProjectId = target.Id, ParentComponentId = sourceComponent.ParentComponentId is null ? null : ids[sourceComponent.ParentComponentId.Value], ComponentCode = sourceComponent.ComponentCode, NormalizedComponentCode = sourceComponent.NormalizedComponentCode, LineageKey = sourceComponent.LineageKey, Name = sourceComponent.Name, SortOrder = sourceComponent.SortOrder, CreatedAt = now });
+        }
+        database.Projects.Add(target);
+        AddAuditEvent(database, context, "ProjectCloned", "Project", target.Id, new { sourceProjectId = source.Id, reason = request.Reason!.Trim(), actor });
+        await database.SaveChangesAsync(cancellationToken);
+        return TypedResults.Created($"/api/v1/projects/{target.Id}", new { id = target.Id });
     }
 
     private static async Task<IResult> CreateProjectAsync(
@@ -398,3 +434,4 @@ public sealed record CreateProjectRequest(string? Code, string? Name, string? De
 public sealed record CreateComponentRequest(string? Code, string? Name, Guid? ParentComponentId);
 public sealed record CreateComponentVersionRequest(string? VersionNumber);
 public sealed record LifecycleRequest(string? State, string? Reason);
+public sealed record CloneProjectRequest(string? Code, string? Name, string? Reason);

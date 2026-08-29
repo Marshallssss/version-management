@@ -51,4 +51,8 @@ if ($blocked.safety -ne 'Blocked' -or $clear.safety -ne 'Clear') { throw 'Expect
 
 $audit = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/audit?entityId=$($project.id)"))
 if ($audit.Count -lt 1 -or $audit[0].actor -ne $Email -or [string]::IsNullOrWhiteSpace($audit[0].correlationId)) { throw 'Expected authenticated audit event.' }
+
+$clone = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/clone")) -ContentType 'application/json' -Body (@{ code = "CLONE-$suffix"; name = 'Cloned project'; reason = '自动化克隆验收' } | ConvertTo-Json)
+$cloneDetail = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($clone.id)"))
+if ($cloneDetail.components.Count -ne 1 -or $cloneDetail.components[0].versions.Count -ne 0) { throw 'Clone must copy components but not versions.' }
 Write-Host "Catalog acceptance passed for project $($project.id)."
