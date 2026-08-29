@@ -20,6 +20,10 @@ public sealed class ConfigHubDbContext(DbContextOptions<ConfigHubDbContext> opti
 
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
 
+    public DbSet<VersionLifecycleTransition> VersionLifecycleTransitions => Set<VersionLifecycleTransition>();
+
+    public DbSet<VersionRecommendation> VersionRecommendations => Set<VersionRecommendation>();
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);

@@ -46,6 +46,7 @@ builder.Services.AddIdentityCore<ApplicationUser>(options => options.Password.Re
     .AddSignInManager();
 builder.Services.AddAuthentication(IdentityConstants.ApplicationScheme).AddIdentityCookies();
 builder.Services.AddAuthorizationBuilder().AddPolicy("Engineer", policy => policy.RequireRole("Engineer", "SeniorEngineer", "Admin"));
+builder.Services.AddAuthorizationBuilder().AddPolicy("SeniorEngineer", policy => policy.RequireRole("SeniorEngineer", "Admin"));
 
 builder.Services
     .AddHealthChecks()

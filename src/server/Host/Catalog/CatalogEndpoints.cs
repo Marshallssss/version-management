@@ -18,6 +18,9 @@ public static class CatalogEndpoints
         projects.MapPost("/{projectId:guid}/components", CreateComponentAsync).RequireAuthorization("Engineer");
 
         endpoints.MapPost("/api/v1/components/{componentId:guid}/versions", CreateVersionAsync).RequireAuthorization("Engineer");
+        endpoints.MapPost("/api/v1/component-versions/{versionId:guid}/maturity", ChangeMaturityAsync).RequireAuthorization("SeniorEngineer");
+        endpoints.MapPost("/api/v1/component-versions/{versionId:guid}/safety", ChangeSafetyAsync).RequireAuthorization("SeniorEngineer");
+        endpoints.MapPost("/api/v1/component-versions/{versionId:guid}/recommend", RecommendAsync).RequireAuthorization("SeniorEngineer");
         endpoints.MapGet("/api/v1/audit", ListAuditEventsAsync);
         return endpoints;
     }
@@ -287,6 +290,70 @@ public static class CatalogEndpoints
         return TypedResults.Created($"/api/v1/components/{componentId}/versions/{version.Id}", new { id = version.Id, sequenceNo = version.SequenceNo });
     }
 
+    private static async Task<IResult> ChangeMaturityAsync(Guid versionId, LifecycleRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        if (!Enum.TryParse<VersionMaturity>(request.State, true, out var next) || string.IsNullOrWhiteSpace(request.Reason)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = ["必须提供有效状态和原因。"] });
+        await using var database = await factory.CreateDbContextAsync(cancellationToken);
+        var version = await database.ComponentVersions.SingleOrDefaultAsync(item => item.Id == versionId, cancellationToken);
+        if (version is null) return Results.NotFound();
+        if (!IsAllowedMaturityTransition(version.Maturity, next)) return Results.Conflict(new { message = "不允许的成熟度转换。" });
+        var actor = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required.");
+        var previous = version.Maturity;
+        version.Maturity = next;
+        database.VersionLifecycleTransitions.Add(new VersionLifecycleTransition { Id = Guid.NewGuid(), ComponentVersionId = version.Id, Axis = LifecycleAxis.Maturity, FromState = previous.ToString(), ToState = next.ToString(), Reason = request.Reason.Trim(), Actor = actor, OccurredAt = DateTimeOffset.UtcNow });
+        AddAuditEvent(database, context, "VersionMaturityChanged", "ComponentVersion", version.Id, new { from = previous.ToString(), to = next.ToString(), reason = request.Reason.Trim() });
+        await database.SaveChangesAsync(cancellationToken);
+        return TypedResults.Ok(new { maturity = version.Maturity.ToString(), safety = version.Safety.ToString() });
+    }
+
+    private static async Task<IResult> ChangeSafetyAsync(Guid versionId, LifecycleRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        if (!Enum.TryParse<VersionSafety>(request.State, true, out var next) || string.IsNullOrWhiteSpace(request.Reason)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = ["必须提供有效状态和原因。"] });
+        await using var database = await factory.CreateDbContextAsync(cancellationToken);
+        var version = await database.ComponentVersions.SingleOrDefaultAsync(item => item.Id == versionId, cancellationToken);
+        if (version is null) return Results.NotFound();
+        if (version.Safety == next) return Results.Conflict(new { message = "状态没有变化。" });
+        var actor = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required.");
+        var previous = version.Safety;
+        version.Safety = next;
+        database.VersionLifecycleTransitions.Add(new VersionLifecycleTransition { Id = Guid.NewGuid(), ComponentVersionId = version.Id, Axis = LifecycleAxis.Safety, FromState = previous.ToString(), ToState = next.ToString(), Reason = request.Reason.Trim(), Actor = actor, OccurredAt = DateTimeOffset.UtcNow });
+        if (next == VersionSafety.Blocked)
+        {
+            var active = await database.VersionRecommendations.SingleOrDefaultAsync(item => item.ComponentVersionId == version.Id && item.RevokedAt == null, cancellationToken);
+            if (active is not null) { active.RevokedAt = DateTimeOffset.UtcNow; active.RevokedBy = actor; active.RevokeReason = "版本已被阻断。"; }
+        }
+        AddAuditEvent(database, context, "VersionSafetyChanged", "ComponentVersion", version.Id, new { from = previous.ToString(), to = next.ToString(), reason = request.Reason.Trim() });
+        await database.SaveChangesAsync(cancellationToken);
+        return TypedResults.Ok(new { maturity = version.Maturity.ToString(), safety = version.Safety.ToString() });
+    }
+
+    private static async Task<IResult> RecommendAsync(Guid versionId, LifecycleRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Reason)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["reason"] = ["必须提供推荐原因。"] });
+        await using var database = await factory.CreateDbContextAsync(cancellationToken);
+        var version = await database.ComponentVersions.SingleOrDefaultAsync(item => item.Id == versionId, cancellationToken);
+        if (version is null) return Results.NotFound();
+        if (version.Maturity is not VersionMaturity.Released and not VersionMaturity.Maintenance || version.Safety == VersionSafety.Blocked) return Results.Conflict(new { message = "只有未阻断的已发布或维护版本可以推荐。" });
+        var component = await database.ConfigurationComponents.SingleAsync(item => item.Id == version.ComponentId, cancellationToken);
+        var actor = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required.");
+        var active = await database.VersionRecommendations.SingleOrDefaultAsync(item => item.ComponentId == component.Id && item.RevokedAt == null, cancellationToken);
+        if (active is not null) { active.RevokedAt = DateTimeOffset.UtcNow; active.RevokedBy = actor; active.RevokeReason = "被新的推荐替代。"; }
+        database.VersionRecommendations.Add(new VersionRecommendation { Id = Guid.NewGuid(), ComponentId = component.Id, ComponentVersionId = version.Id, AssignedBy = actor, Reason = request.Reason.Trim(), AssignedAt = DateTimeOffset.UtcNow });
+        AddAuditEvent(database, context, "VersionRecommended", "ComponentVersion", version.Id, new { reason = request.Reason.Trim() });
+        await database.SaveChangesAsync(cancellationToken);
+        return TypedResults.Ok(new { recommended = true });
+    }
+
+    private static bool IsAllowedMaturityTransition(VersionMaturity current, VersionMaturity next) =>
+        (current, next) switch
+        {
+            (VersionMaturity.Draft, VersionMaturity.Testing) => true,
+            (VersionMaturity.Testing, VersionMaturity.Draft or VersionMaturity.Released) => true,
+            (VersionMaturity.Released, VersionMaturity.Maintenance or VersionMaturity.Deprecated) => true,
+            (VersionMaturity.Maintenance, VersionMaturity.Deprecated) => true,
+            _ => false
+        };
+
     private static Dictionary<string, string[]>? ValidateIdentifier(string? value, string fieldName, int maxLength)
     {
         var required = ValidateRequired(value, fieldName, maxLength);
@@ -330,3 +397,4 @@ public static class CatalogEndpoints
 public sealed record CreateProjectRequest(string? Code, string? Name, string? Description, string? Reason);
 public sealed record CreateComponentRequest(string? Code, string? Name, Guid? ParentComponentId);
 public sealed record CreateComponentVersionRequest(string? VersionNumber);
+public sealed record LifecycleRequest(string? State, string? Reason);

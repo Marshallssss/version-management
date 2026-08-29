@@ -56,3 +56,9 @@ export const createComponent = (projectId: string, input: { code: string; name: 
   request<{ id: string }>(`/api/v1/projects/${projectId}/components`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
 export const createComponentVersion = (componentId: string, input: { versionNumber: string }) =>
   request<{ id: string; sequenceNo: number }>(`/api/v1/components/${componentId}/versions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
+export const changeVersionMaturity = (versionId: string, state: string, reason: string) =>
+  request<{ maturity: string; safety: string }>(`/api/v1/component-versions/${versionId}/maturity`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ state, reason }) })
+export const changeVersionSafety = (versionId: string, state: string, reason: string) =>
+  request<{ maturity: string; safety: string }>(`/api/v1/component-versions/${versionId}/safety`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ state, reason }) })
+export const recommendVersion = (versionId: string, reason: string) =>
+  request<{ recommended: boolean }>(`/api/v1/component-versions/${versionId}/recommend`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ state: '', reason }) })

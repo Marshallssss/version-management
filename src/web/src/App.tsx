@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { createComponent, createComponentVersion, createProject, getCurrentUser, getProject, getProjects, login, logout } from './catalog-api'
+import { changeVersionMaturity, changeVersionSafety, createComponent, createComponentVersion, createProject, getCurrentUser, getProject, getProjects, login, logout, recommendVersion } from './catalog-api'
 import { enqueueNoopJob, getSystemStatus, getSystemVersion, type BackgroundJobStatus } from './system-api'
 
 const navigation = [
@@ -45,6 +45,9 @@ function App() {
   const [componentName, setComponentName] = useState('')
   const [versionComponentId, setVersionComponentId] = useState('')
   const [versionNumber, setVersionNumber] = useState('')
+  const [lifecycleVersionId, setLifecycleVersionId] = useState('')
+  const [lifecycleAction, setLifecycleAction] = useState('Testing')
+  const [lifecycleReason, setLifecycleReason] = useState('')
   const queryClient = useQueryClient()
   const system = useQuery({ queryKey: ['system-version'], queryFn: getSystemVersion })
   const status = useQuery({ queryKey: ['system-status'], queryFn: getSystemStatus, refetchInterval: 5_000 })
@@ -86,6 +89,20 @@ function App() {
       setVersionNumber('')
       await queryClient.invalidateQueries({ queryKey: ['project', selectedProjectId] })
     },
+  })
+  const lifecycle = useMutation({
+    mutationFn: async ({ versionId, action, reason }: { versionId: string; action: string; reason: string }) => {
+      if (action === 'Recommended') {
+        await recommendVersion(versionId, reason)
+        return
+      }
+      if (action === 'Blocked' || action === 'Clear') {
+        await changeVersionSafety(versionId, action, reason)
+        return
+      }
+      await changeVersionMaturity(versionId, action, reason)
+    },
+    onSuccess: async () => { setLifecycleReason(''); await queryClient.invalidateQueries({ queryKey: ['project', selectedProjectId] }) },
   })
 
   const connectivity = system.isSuccess ? 'online' : system.isError ? 'offline' : 'checking'
@@ -181,9 +198,10 @@ function App() {
                 <div className="catalog-actions">
                   <form className="inline-form" onSubmit={(event) => { event.preventDefault(); addComponent.mutate({ projectId: projectDetail.data.project.id, code: componentCode, name: componentName }) }}><label>组件编码<input value={componentCode} placeholder="例如：PLC" onChange={(event) => setComponentCode(event.target.value)} required /></label><label>组件名称<input value={componentName} placeholder="例如：主控程序" onChange={(event) => setComponentName(event.target.value)} required /></label><button type="submit" disabled={addComponent.isPending}>{addComponent.isPending ? '正在新增' : '新增组件'}</button></form>
                   <form className="inline-form" onSubmit={(event) => { event.preventDefault(); addVersion.mutate({ componentId: versionComponentId, number: versionNumber }) }}><label>目标组件<select value={versionComponentId} onChange={(event) => setVersionComponentId(event.target.value)} required><option value="">请选择组件</option>{projectDetail.data.components.map((component) => <option key={component.id} value={component.id}>{component.code} · {component.name}</option>)}</select></label><label>版本号<input value={versionNumber} placeholder="例如：2026.08.29" onChange={(event) => setVersionNumber(event.target.value)} required /></label><button type="submit" disabled={addVersion.isPending}>{addVersion.isPending ? '正在登记' : '登记版本'}</button></form>
+                  <form className="inline-form" onSubmit={(event) => { event.preventDefault(); lifecycle.mutate({ versionId: lifecycleVersionId, action: lifecycleAction, reason: lifecycleReason }) }}><label>目标版本<select value={lifecycleVersionId} onChange={(event) => setLifecycleVersionId(event.target.value)} required><option value="">请选择版本</option>{projectDetail.data.components.flatMap((component) => component.versions.map((version) => <option key={version.id} value={version.id}>{component.code} · {version.versionNumber}</option>))}</select></label><label>生命周期动作<select value={lifecycleAction} onChange={(event) => setLifecycleAction(event.target.value)}><option value="Testing">提交测试</option><option value="Released">发布</option><option value="Maintenance">进入维护</option><option value="Deprecated">废弃</option><option value="Blocked">阻断</option><option value="Clear">解除阻断</option><option value="Recommended">设为推荐</option></select></label><label>原因<input value={lifecycleReason} onChange={(event) => setLifecycleReason(event.target.value)} required /></label><button type="submit" disabled={lifecycle.isPending}>{lifecycle.isPending ? '正在更新' : '更新状态'}</button></form>
                 </div>
-                {(addComponent.isError || addVersion.isError) && <p className="error-strip">{addComponent.error?.message ?? addVersion.error?.message}</p>}
-                <div className="component-list">{projectDetail.data.components.map((component) => <article className="component-row" key={component.id}><div><strong>{component.code}</strong><span>{component.name}</span></div><div className="version-tags">{component.versions.length ? component.versions.map((version) => <span key={version.id}>{version.versionNumber}<small>序列 {version.sequenceNo}</small></span>) : <em>尚未登记版本</em>}</div></article>)}</div>
+                {(addComponent.isError || addVersion.isError || lifecycle.isError) && <p className="error-strip">{addComponent.error?.message ?? addVersion.error?.message ?? lifecycle.error?.message}</p>}
+                <div className="component-list">{projectDetail.data.components.map((component) => <article className="component-row" key={component.id}><div><strong>{component.code}</strong><span>{component.name}</span></div><div className="version-tags">{component.versions.length ? component.versions.map((version) => <span key={version.id}>{version.versionNumber}<small>序列 {version.sequenceNo} · {version.maturity} · {version.safety}</small></span>) : <em>尚未登记版本</em>}</div></article>)}</div>
               </section>}
             </>}
           </div>

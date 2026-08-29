@@ -135,5 +135,39 @@ internal static class ConfigHubModel
                 .HasDatabaseName("ix_audit_events_entity_occurred_at");
             entity.HasIndex(auditEvent => auditEvent.CorrelationId).HasDatabaseName("ix_audit_events_correlation_id");
         });
+
+        modelBuilder.Entity<VersionLifecycleTransition>(entity =>
+        {
+            entity.ToTable("version_lifecycle_transitions");
+            entity.HasKey(transition => transition.Id);
+            entity.Property(transition => transition.Id).HasColumnName("id");
+            entity.Property(transition => transition.ComponentVersionId).HasColumnName("component_version_id");
+            entity.Property(transition => transition.Axis).HasColumnName("axis").HasMaxLength(32).HasConversion<string>();
+            entity.Property(transition => transition.FromState).HasColumnName("from_state").HasMaxLength(32);
+            entity.Property(transition => transition.ToState).HasColumnName("to_state").HasMaxLength(32);
+            entity.Property(transition => transition.Reason).HasColumnName("reason").HasMaxLength(500);
+            entity.Property(transition => transition.Actor).HasColumnName("actor").HasMaxLength(160);
+            entity.Property(transition => transition.OccurredAt).HasColumnName("occurred_at");
+            entity.HasIndex(transition => new { transition.ComponentVersionId, transition.OccurredAt }).HasDatabaseName("ix_version_lifecycle_transitions_version_occurred_at");
+            entity.HasOne<ComponentVersion>().WithMany().HasForeignKey(transition => transition.ComponentVersionId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<VersionRecommendation>(entity =>
+        {
+            entity.ToTable("version_recommendations");
+            entity.HasKey(recommendation => recommendation.Id);
+            entity.Property(recommendation => recommendation.Id).HasColumnName("id");
+            entity.Property(recommendation => recommendation.ComponentId).HasColumnName("component_id");
+            entity.Property(recommendation => recommendation.ComponentVersionId).HasColumnName("component_version_id");
+            entity.Property(recommendation => recommendation.AssignedBy).HasColumnName("assigned_by").HasMaxLength(160);
+            entity.Property(recommendation => recommendation.Reason).HasColumnName("reason").HasMaxLength(500);
+            entity.Property(recommendation => recommendation.AssignedAt).HasColumnName("assigned_at");
+            entity.Property(recommendation => recommendation.RevokedAt).HasColumnName("revoked_at");
+            entity.Property(recommendation => recommendation.RevokedBy).HasColumnName("revoked_by").HasMaxLength(160);
+            entity.Property(recommendation => recommendation.RevokeReason).HasColumnName("revoke_reason").HasMaxLength(500);
+            entity.HasIndex(recommendation => recommendation.ComponentId).IsUnique().HasFilter("revoked_at IS NULL").HasDatabaseName("ux_version_recommendations_active_component");
+            entity.HasOne<ConfigurationComponent>().WithMany().HasForeignKey(recommendation => recommendation.ComponentId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ComponentVersion>().WithMany().HasForeignKey(recommendation => recommendation.ComponentVersionId).OnDelete(DeleteBehavior.Restrict);
+        });
     }
 }

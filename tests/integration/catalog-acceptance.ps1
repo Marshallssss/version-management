@@ -37,6 +37,18 @@ $firstVersion = Invoke-JsonPost "/api/v1/components/$($component.id)/versions" @
 $secondVersion = Invoke-JsonPost "/api/v1/components/$($component.id)/versions" @{ versionNumber = 'opaque-b' }
 if ($firstVersion.sequenceNo -ne 10 -or $secondVersion.sequenceNo -ne 20) { throw 'Expected version sequence 10/20.' }
 
+function Invoke-Lifecycle([string]$Path, [string]$State, [string]$Reason) {
+    Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, $Path)) -ContentType 'application/json' -Body (@{ state = $State; reason = $Reason } | ConvertTo-Json)
+}
+
+$testing = Invoke-Lifecycle "/api/v1/component-versions/$($firstVersion.id)/maturity" 'Testing' '自动化提交测试'
+$released = Invoke-Lifecycle "/api/v1/component-versions/$($firstVersion.id)/maturity" 'Released' '自动化发布'
+if ($testing.maturity -ne 'Testing' -or $released.maturity -ne 'Released') { throw 'Expected Draft -> Testing -> Released lifecycle.' }
+Invoke-Lifecycle "/api/v1/component-versions/$($firstVersion.id)/recommend" '' '自动化推荐' | Out-Null
+$blocked = Invoke-Lifecycle "/api/v1/component-versions/$($firstVersion.id)/safety" 'Blocked' '自动化阻断'
+$clear = Invoke-Lifecycle "/api/v1/component-versions/$($firstVersion.id)/safety" 'Clear' '自动化解除阻断'
+if ($blocked.safety -ne 'Blocked' -or $clear.safety -ne 'Clear') { throw 'Expected independent safety transitions.' }
+
 $audit = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/audit?entityId=$($project.id)"))
 if ($audit.Count -lt 1 -or $audit[0].actor -ne $Email -or [string]::IsNullOrWhiteSpace($audit[0].correlationId)) { throw 'Expected authenticated audit event.' }
 Write-Host "Catalog acceptance passed for project $($project.id)."
