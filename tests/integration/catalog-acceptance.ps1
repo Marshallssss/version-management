@@ -33,6 +33,15 @@ function Invoke-JsonPost([string]$Path, [hashtable]$Body) {
 }
 
 $component = Invoke-JsonPost "/api/v1/projects/$($project.id)/components" @{ code = 'CONTROL'; name = 'Control'; parentComponentId = $null }
+$child = Invoke-JsonPost "/api/v1/projects/$($project.id)/components" @{ code = 'CHILD'; name = 'Child'; parentComponentId = $component.id }
+try {
+    Invoke-JsonPost "/api/v1/components/$($component.id)/move" @{ parentComponentId = $child.id; reason = '自动化环检测' } | Out-Null
+    throw 'Component cycle unexpectedly succeeded.'
+} catch {
+    if ($_.Exception.Message -match 'unexpectedly succeeded') { throw }
+    if ($_.Exception.Response.StatusCode.value__ -ne 409) { throw }
+}
+Invoke-JsonPost "/api/v1/components/$($child.id)/move" @{ parentComponentId = $null; reason = '自动化移动到根节点' } | Out-Null
 $firstVersion = Invoke-JsonPost "/api/v1/components/$($component.id)/versions" @{ versionNumber = 'opaque-a' }
 $secondVersion = Invoke-JsonPost "/api/v1/components/$($component.id)/versions" @{ versionNumber = 'opaque-b' }
 if ($firstVersion.sequenceNo -ne 10 -or $secondVersion.sequenceNo -ne 20) { throw 'Expected version sequence 10/20.' }
@@ -54,5 +63,5 @@ if ($audit.Count -lt 1 -or $audit[0].actor -ne $Email -or [string]::IsNullOrWhit
 
 $clone = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/clone")) -ContentType 'application/json' -Body (@{ code = "CLONE-$suffix"; name = 'Cloned project'; reason = '自动化克隆验收' } | ConvertTo-Json)
 $cloneDetail = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($clone.id)"))
-if ($cloneDetail.components.Count -ne 1 -or $cloneDetail.components[0].versions.Count -ne 0) { throw 'Clone must copy components but not versions.' }
+if ($cloneDetail.components.Count -ne 2 -or @($cloneDetail.components | Where-Object { $_.versions.Count -ne 0 }).Count -ne 0) { throw 'Clone must copy the complete component tree but not versions.' }
 Write-Host "Catalog acceptance passed for project $($project.id)."

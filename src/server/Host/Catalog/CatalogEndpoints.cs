@@ -16,6 +16,7 @@ public static class CatalogEndpoints
         projects.MapPost("", CreateProjectAsync).RequireAuthorization("Engineer");
         projects.MapGet("/{projectId:guid}", GetProjectAsync);
         projects.MapPost("/{projectId:guid}/components", CreateComponentAsync).RequireAuthorization("Engineer");
+        endpoints.MapPost("/api/v1/components/{componentId:guid}/move", MoveComponentAsync).RequireAuthorization("Engineer");
         projects.MapPost("/{projectId:guid}/clone-preview", ClonePreviewAsync).RequireAuthorization("Engineer");
         projects.MapPost("/{projectId:guid}/clone", CloneAsync).RequireAuthorization("Engineer");
 
@@ -326,6 +327,25 @@ public static class CatalogEndpoints
         return TypedResults.Created($"/api/v1/components/{componentId}/versions/{version.Id}", new { id = version.Id, sequenceNo = version.SequenceNo });
     }
 
+    private static async Task<IResult> MoveComponentAsync(Guid componentId, MoveComponentRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Reason)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["reason"] = ["必须提供移动原因。"] });
+        await using var database = await factory.CreateDbContextAsync(cancellationToken);
+        var component = await database.ConfigurationComponents.SingleOrDefaultAsync(item => item.Id == componentId, cancellationToken);
+        if (component is null) return Results.NotFound();
+        var parent = request.ParentComponentId is null ? null : await database.ConfigurationComponents.SingleOrDefaultAsync(item => item.Id == request.ParentComponentId, cancellationToken);
+        if (request.ParentComponentId is not null && (parent is null || parent.ProjectId != component.ProjectId)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["parentComponentId"] = ["父组件不存在或不属于同一项目。"] });
+        if (parent?.Id == component.Id || parent?.LineageKey.StartsWith(component.LineageKey + "/", StringComparison.Ordinal) == true) return Results.Conflict(new { message = "不能将组件移动到自身或其后代。" });
+        var oldLineage = component.LineageKey;
+        var newLineage = parent is null ? component.NormalizedComponentCode : $"{parent.LineageKey}/{component.NormalizedComponentCode}";
+        var descendants = await database.ConfigurationComponents.Where(item => item.ProjectId == component.ProjectId && (item.LineageKey == oldLineage || item.LineageKey.StartsWith(oldLineage + "/"))).ToListAsync(cancellationToken);
+        component.ParentComponentId = parent?.Id;
+        foreach (var descendant in descendants) descendant.LineageKey = newLineage + descendant.LineageKey[oldLineage.Length..];
+        AddAuditEvent(database, context, "ComponentMoved", "ConfigurationComponent", component.Id, new { from = oldLineage, to = newLineage, reason = request.Reason.Trim() });
+        await database.SaveChangesAsync(cancellationToken);
+        return TypedResults.Ok(new { id = component.Id, lineageKey = component.LineageKey });
+    }
+
     private static async Task<IResult> ChangeMaturityAsync(Guid versionId, LifecycleRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
     {
         if (!Enum.TryParse<VersionMaturity>(request.State, true, out var next) || string.IsNullOrWhiteSpace(request.Reason)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = ["必须提供有效状态和原因。"] });
@@ -435,3 +455,4 @@ public sealed record CreateComponentRequest(string? Code, string? Name, Guid? Pa
 public sealed record CreateComponentVersionRequest(string? VersionNumber);
 public sealed record LifecycleRequest(string? State, string? Reason);
 public sealed record CloneProjectRequest(string? Code, string? Name, string? Reason);
+public sealed record MoveComponentRequest(Guid? ParentComponentId, string? Reason);

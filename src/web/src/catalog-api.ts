@@ -65,3 +65,5 @@ export const recommendVersion = (versionId: string, reason: string) =>
 export const previewProjectClone = (projectId: string) => request<{ copiedComponents: number; excludedVersions: number }>(`/api/v1/projects/${projectId}/clone-preview`, { method: 'POST' })
 export const cloneProject = (projectId: string, input: { code: string; name: string; reason: string }) =>
   request<{ id: string }>(`/api/v1/projects/${projectId}/clone`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
+export const moveComponent = (componentId: string, input: { parentComponentId: string | null; reason: string }) =>
+  request<{ id: string; lineageKey: string }>(`/api/v1/components/${componentId}/move`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
