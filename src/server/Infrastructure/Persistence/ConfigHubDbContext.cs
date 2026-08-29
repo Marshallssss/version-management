@@ -24,6 +24,12 @@ public sealed class ConfigHubDbContext(DbContextOptions<ConfigHubDbContext> opti
 
     public DbSet<VersionRecommendation> VersionRecommendations => Set<VersionRecommendation>();
 
+    public DbSet<BaselineSeries> BaselineSeries => Set<BaselineSeries>();
+
+    public DbSet<ConfigurationBaseline> ConfigurationBaselines => Set<ConfigurationBaseline>();
+
+    public DbSet<BaselineItem> BaselineItems => Set<BaselineItem>();
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);

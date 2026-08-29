@@ -1853,13 +1853,14 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 已交付：Project 创建/列表/详情、根 Component 创建、ComponentVersion 创建、每个 Component 的显式递增 `sequence_no`、规范化编码与版本号唯一约束，以及中文操作界面。
 - 已交付补充：`lineage_key`、同项目唯一约束、PostgreSQL 父组件/环检测触发器、版本 `max(sequence_no) + 10` 间隔与 `tests/integration/catalog-acceptance.ps1` 自动验收脚本（含 10/20 序列、重复版本 HTTP 409、Audit/Correlation 断言）。
 - 组件树移动切片已交付：中文移动表单与受授权的 Move Command 会更新整个子树的 `lineage_key`；自动验收覆盖子节点移动和移动到后代时 HTTP 409。
-- 生命周期切片进行中：独立 Maturity/Safety Transition History 与 Recommendation History 已落库；API/UI/自动测试覆盖 Draft→Testing→Released、推荐、Block 自动撤销推荐以及 Unblock 不自动恢复。
+- 生命周期切片已交付：独立 Maturity/Safety Transition History 与 Recommendation History 已落库；API/UI/自动测试覆盖 Draft→Testing→Released、推荐、Block 自动撤销推荐以及 Unblock 不自动恢复。
 - Clone 切片已交付：中文 Preview/Commit 表单只复制 Project 与 Component Tree，不复制 ComponentVersion、Baseline、Machine 或运行历史；自动验收断言新项目组件存在且版本为空。
-- 待完成：深层组件树移动/编辑、Project Clone Preview/Commit、Version Lifecycle Transition、版本详情/影响查询和 RBAC 接入。
+- 待完成：深层组件树编辑、版本详情/影响查询，以及基于资源范围的 Project RBAC；当前已具备角色级 API 授权。
 
 ## Step 4 — Baseline
 
 - Series/Revision、Tree Editor、Release、Immutability、Project Standard、Compare。
+- 4A 已交付：Series 与独立 Draft Revision 由真实 EF 模型创建；创建草稿时快照整个 Component Tree、组件身份、版本身份、排序与父子关系。命令要求 SeniorEngineer、actor、reason、correlation id、`Idempotency-Key`，并写入 Audit；中文界面支持创建与查看快照。`tests/integration/catalog-acceptance.ps1` 已覆盖完整快照、Revision 1、Draft 状态和幂等重放。Release、不可变 Trigger 与 Project Standard 留在后续独立切片，绝不以 Project 的 current_baseline_id 取代 Assignment History。
 
 ## Step 5 — Machine → Target
 

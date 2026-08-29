@@ -44,6 +44,7 @@ try {
 Invoke-JsonPost "/api/v1/components/$($child.id)/move" @{ parentComponentId = $null; reason = '自动化移动到根节点' } | Out-Null
 $firstVersion = Invoke-JsonPost "/api/v1/components/$($component.id)/versions" @{ versionNumber = 'opaque-a' }
 $secondVersion = Invoke-JsonPost "/api/v1/components/$($component.id)/versions" @{ versionNumber = 'opaque-b' }
+$childVersion = Invoke-JsonPost "/api/v1/components/$($child.id)/versions" @{ versionNumber = 'opaque-child' }
 if ($firstVersion.sequenceNo -ne 10 -or $secondVersion.sequenceNo -ne 20) { throw 'Expected version sequence 10/20.' }
 
 function Invoke-Lifecycle([string]$Path, [string]$State, [string]$Reason) {
@@ -57,6 +58,14 @@ Invoke-Lifecycle "/api/v1/component-versions/$($firstVersion.id)/recommend" '' '
 $blocked = Invoke-Lifecycle "/api/v1/component-versions/$($firstVersion.id)/safety" 'Blocked' '自动化阻断'
 $clear = Invoke-Lifecycle "/api/v1/component-versions/$($firstVersion.id)/safety" 'Clear' '自动化解除阻断'
 if ($blocked.safety -ne 'Blocked' -or $clear.safety -ne 'Clear') { throw 'Expected independent safety transitions.' }
+
+$baselineBody = @{ seriesCode = "SERIES-$suffix"; baselineCode = "BL-$suffix"; description = 'Created by integration test'; reason = '自动化基线快照验收' } | ConvertTo-Json
+$baselineHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString(); 'X-Correlation-ID' = "baseline-$suffix" }
+$baseline = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/baselines")) -Headers $baselineHeaders -ContentType 'application/json' -Body $baselineBody
+$baselineReplay = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/baselines")) -Headers $baselineHeaders -ContentType 'application/json' -Body $baselineBody
+if ($baseline.itemCount -ne 2 -or $baseline.revisionNo -ne 1 -or $baseline.id -ne $baselineReplay.id) { throw 'Expected idempotent complete baseline draft snapshot.' }
+$baselineList = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/baselines"))
+if ($baselineList.Count -ne 1 -or $baselineList[0].itemCount -ne 2 -or $baselineList[0].state -ne 'Draft') { throw 'Expected listed baseline draft snapshot.' }
 
 $audit = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/audit?entityId=$($project.id)"))
 if ($audit.Count -lt 1 -or $audit[0].actor -ne $Email -or [string]::IsNullOrWhiteSpace($audit[0].correlationId)) { throw 'Expected authenticated audit event.' }

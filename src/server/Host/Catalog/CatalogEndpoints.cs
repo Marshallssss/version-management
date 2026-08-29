@@ -19,6 +19,8 @@ public static class CatalogEndpoints
         endpoints.MapPost("/api/v1/components/{componentId:guid}/move", MoveComponentAsync).RequireAuthorization("Engineer");
         projects.MapPost("/{projectId:guid}/clone-preview", ClonePreviewAsync).RequireAuthorization("Engineer");
         projects.MapPost("/{projectId:guid}/clone", CloneAsync).RequireAuthorization("Engineer");
+        projects.MapGet("/{projectId:guid}/baselines", ListBaselinesAsync);
+        projects.MapPost("/{projectId:guid}/baselines", CreateBaselineAsync).RequireAuthorization("SeniorEngineer");
 
         endpoints.MapPost("/api/v1/components/{componentId:guid}/versions", CreateVersionAsync).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/component-versions/{versionId:guid}/maturity", ChangeMaturityAsync).RequireAuthorization("SeniorEngineer");
@@ -134,6 +136,123 @@ public static class CatalogEndpoints
         AddAuditEvent(database, context, "ProjectCloned", "Project", target.Id, new { sourceProjectId = source.Id, reason = request.Reason!.Trim(), actor });
         await database.SaveChangesAsync(cancellationToken);
         return TypedResults.Created($"/api/v1/projects/{target.Id}", new { id = target.Id });
+    }
+
+    private static async Task<IResult> ListBaselinesAsync(Guid projectId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        await using var database = await factory.CreateDbContextAsync(cancellationToken);
+        var baselines = await database.ConfigurationBaselines.AsNoTracking()
+            .Where(item => item.ProjectId == projectId)
+            .OrderByDescending(item => item.CreatedAt)
+            .Select(item => new
+            {
+                id = item.Id,
+                code = item.BaselineCode,
+                revisionNo = item.RevisionNo,
+                seriesCode = database.BaselineSeries.Where(series => series.Id == item.BaselineSeriesId).Select(series => series.SeriesCode).Single(),
+                state = item.State.ToString(),
+                itemCount = database.BaselineItems.Count(baselineItem => baselineItem.ConfigurationBaselineId == item.Id),
+                createdAt = item.CreatedAt
+            })
+            .ToListAsync(cancellationToken);
+        return TypedResults.Ok(baselines);
+    }
+
+    private static async Task<IResult> CreateBaselineAsync(
+        Guid projectId,
+        CreateBaselineRequest request,
+        HttpContext context,
+        IDbContextFactory<ConfigHubDbContext> factory,
+        CancellationToken cancellationToken)
+    {
+        var validation = ValidateIdentifier(request.SeriesCode, "基线系列编码", 80)
+            ?? ValidateIdentifier(request.BaselineCode, "基线编码", 100)
+            ?? ValidateRequired(request.Reason, "创建原因", 500);
+        if (validation is not null) return Results.ValidationProblem(validation);
+
+        var idempotencyKey = context.Request.Headers["Idempotency-Key"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(idempotencyKey) || idempotencyKey.Length > 200)
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["创建基线必须提供不超过 200 个字符的 Idempotency-Key。"] });
+
+        var now = DateTimeOffset.UtcNow;
+        var requestHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request))));
+        var scope = $"baselines.create:{projectId}";
+        await using var database = await factory.CreateDbContextAsync(cancellationToken);
+        var existing = await database.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == idempotencyKey, cancellationToken);
+        if (existing is not null)
+        {
+            if (existing.RequestHash != requestHash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" });
+            if (existing.Result is not null) return TypedResults.Ok(existing.Result.RootElement.Clone());
+            return Results.Conflict(new { message = "该请求仍在处理。" });
+        }
+
+        if (!await database.Projects.AnyAsync(item => item.Id == projectId, cancellationToken)) return Results.NotFound();
+        var normalizedCode = Normalize(request.BaselineCode!);
+        if (await database.ConfigurationBaselines.AnyAsync(item => item.ProjectId == projectId && item.NormalizedBaselineCode == normalizedCode, cancellationToken))
+            return Results.Conflict(new { message = "该项目中的基线编码已存在。" });
+
+        var components = await database.ConfigurationComponents
+            .Where(item => item.ProjectId == projectId)
+            .OrderBy(item => item.LineageKey)
+            .ToListAsync(cancellationToken);
+        if (components.Count == 0) return Results.Conflict(new { message = "基线必须从至少一个组件开始创建。" });
+        var componentIds = components.Select(item => item.Id).ToArray();
+        var versions = await database.ComponentVersions
+            .Where(item => componentIds.Contains(item.ComponentId))
+            .OrderByDescending(item => item.SequenceNo)
+            .ToListAsync(cancellationToken);
+        var versionsByComponent = versions.GroupBy(item => item.ComponentId).ToDictionary(group => group.Key, group => group.First());
+        var missing = components.Where(item => !versionsByComponent.ContainsKey(item.Id)).Select(item => item.ComponentCode).ToArray();
+        if (missing.Length > 0) return Results.Conflict(new { message = $"以下组件没有可快照的版本：{string.Join("、", missing)}。" });
+
+        var normalizedSeries = Normalize(request.SeriesCode!);
+        var series = await database.BaselineSeries.SingleOrDefaultAsync(item => item.ProjectId == projectId && item.NormalizedSeriesCode == normalizedSeries, cancellationToken);
+        var nextRevision = series is null
+            ? 1
+            : (await database.ConfigurationBaselines.Where(item => item.BaselineSeriesId == series.Id).Select(item => (int?)item.RevisionNo).MaxAsync(cancellationToken) ?? 0) + 1;
+        series ??= new BaselineSeries { Id = Guid.NewGuid(), ProjectId = projectId, SeriesCode = request.SeriesCode!.Trim(), NormalizedSeriesCode = normalizedSeries, CreatedAt = now };
+        var actor = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required.");
+        var baseline = new ConfigurationBaseline
+        {
+            Id = Guid.NewGuid(),
+            ProjectId = projectId,
+            BaselineSeriesId = series.Id,
+            BaselineCode = request.BaselineCode!.Trim(),
+            NormalizedBaselineCode = normalizedCode,
+            RevisionNo = nextRevision,
+            Description = NormalizeOptional(request.Description, 2000),
+            CreatedBy = actor,
+            CreatedAt = now
+        };
+        var baselineItemIds = components.ToDictionary(item => item.Id, _ => Guid.NewGuid());
+
+        await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
+        database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = idempotencyKey, RequestHash = requestHash, CreatedAt = now, ExpiresAt = now.AddDays(7) });
+        if (database.Entry(series).State == EntityState.Detached) database.BaselineSeries.Add(series);
+        database.ConfigurationBaselines.Add(baseline);
+        foreach (var component in components)
+        {
+            database.BaselineItems.Add(new BaselineItem
+            {
+                Id = baselineItemIds[component.Id],
+                ConfigurationBaselineId = baseline.Id,
+                ConfigurationComponentId = component.Id,
+                ComponentVersionId = versionsByComponent[component.Id].Id,
+                ParentBaselineItemId = component.ParentComponentId is null ? null : baselineItemIds[component.ParentComponentId.Value],
+                ComponentCodeSnapshot = component.ComponentCode,
+                ComponentNameSnapshot = component.Name,
+                LineageKeySnapshot = component.LineageKey,
+                SortOrder = component.SortOrder
+            });
+        }
+        AddAuditEvent(database, context, "BaselineDraftCreated", "ConfigurationBaseline", baseline.Id, new { baseline.BaselineCode, baseline.RevisionNo, baseline.BaselineSeriesId, reason = request.Reason!.Trim(), itemCount = components.Count });
+        await database.SaveChangesAsync(cancellationToken);
+        var record = await database.IdempotencyRecords.SingleAsync(item => item.Scope == scope && item.IdempotencyKey == idempotencyKey, cancellationToken);
+        record.Status = IdempotencyRecordStatus.Completed;
+        record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = baseline.Id, revisionNo = baseline.RevisionNo, itemCount = components.Count }));
+        await database.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return TypedResults.Created($"/api/v1/baselines/{baseline.Id}", new { id = baseline.Id, revisionNo = baseline.RevisionNo, itemCount = components.Count });
     }
 
     private static async Task<IResult> CreateProjectAsync(
@@ -456,3 +575,4 @@ public sealed record CreateComponentVersionRequest(string? VersionNumber);
 public sealed record LifecycleRequest(string? State, string? Reason);
 public sealed record CloneProjectRequest(string? Code, string? Name, string? Reason);
 public sealed record MoveComponentRequest(Guid? ParentComponentId, string? Reason);
+public sealed record CreateBaselineRequest(string? SeriesCode, string? BaselineCode, string? Description, string? Reason);

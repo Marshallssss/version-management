@@ -1,13 +1,13 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { changeVersionMaturity, changeVersionSafety, cloneProject, createComponent, createComponentVersion, createProject, getCurrentUser, getProject, getProjects, login, logout, moveComponent, previewProjectClone, recommendVersion } from './catalog-api'
+import { changeVersionMaturity, changeVersionSafety, cloneProject, createBaseline, createComponent, createComponentVersion, createProject, getBaselines, getCurrentUser, getProject, getProjects, login, logout, moveComponent, previewProjectClone, recommendVersion } from './catalog-api'
 import { enqueueNoopJob, getSystemStatus, getSystemVersion, type BackgroundJobStatus } from './system-api'
 
 const navigation = [
   { id: 'overview', label: '运行总览', available: true },
   { id: 'jobs', label: '后台任务', available: true },
   { id: 'projects', label: '项目', available: true },
-  { id: 'baselines', label: '基线', available: false },
+  { id: 'baselines', label: '基线', available: true },
   { id: 'software', label: '软件版本', available: false },
   { id: 'machines', label: '机台', available: false },
   { id: 'deployments', label: '部署记录', available: false },
@@ -54,12 +54,18 @@ function App() {
   const [moveComponentId, setMoveComponentId] = useState('')
   const [moveParentId, setMoveParentId] = useState('')
   const [moveReason, setMoveReason] = useState('')
+  const [baselineProjectId, setBaselineProjectId] = useState('')
+  const [baselineSeriesCode, setBaselineSeriesCode] = useState('')
+  const [baselineCode, setBaselineCode] = useState('')
+  const [baselineDescription, setBaselineDescription] = useState('')
+  const [baselineReason, setBaselineReason] = useState('')
   const queryClient = useQueryClient()
   const system = useQuery({ queryKey: ['system-version'], queryFn: getSystemVersion })
   const status = useQuery({ queryKey: ['system-status'], queryFn: getSystemStatus, refetchInterval: 5_000 })
   const projects = useQuery({ queryKey: ['projects'], queryFn: getProjects })
   const currentUser = useQuery({ queryKey: ['current-user'], queryFn: getCurrentUser, retry: false })
   const projectDetail = useQuery({ queryKey: ['project', selectedProjectId], queryFn: () => getProject(selectedProjectId!), enabled: selectedProjectId !== null })
+  const baselines = useQuery({ queryKey: ['baselines', baselineProjectId], queryFn: () => getBaselines(baselineProjectId), enabled: baselineProjectId !== '' })
   const enqueue = useMutation({
     mutationFn: enqueueNoopJob,
     onSuccess: async () => {
@@ -113,6 +119,7 @@ function App() {
   const clonePreview = useMutation({ mutationFn: previewProjectClone })
   const clone = useMutation({ mutationFn: ({ projectId, code, name, reason }: { projectId: string; code: string; name: string; reason: string }) => cloneProject(projectId, { code, name, reason }), onSuccess: async ({ id }) => { setSelectedProjectId(id); setCloneCode(''); setCloneName(''); setCloneReason(''); await queryClient.invalidateQueries({ queryKey: ['projects'] }) } })
   const move = useMutation({ mutationFn: ({ componentId, parentComponentId, reason }: { componentId: string; parentComponentId: string | null; reason: string }) => moveComponent(componentId, { parentComponentId, reason }), onSuccess: async () => { setMoveReason(''); await queryClient.invalidateQueries({ queryKey: ['project', selectedProjectId] }) } })
+  const addBaseline = useMutation({ mutationFn: ({ projectId, seriesCode, code, description, reason }: { projectId: string; seriesCode: string; code: string; description: string; reason: string }) => createBaseline(projectId, { seriesCode, baselineCode: code, description, reason }), onSuccess: async () => { setBaselineCode(''); setBaselineDescription(''); setBaselineReason(''); await queryClient.invalidateQueries({ queryKey: ['baselines', baselineProjectId] }) } })
 
   const connectivity = system.isSuccess ? 'online' : system.isError ? 'offline' : 'checking'
   const selectedNavigation = navigation.find((item) => item.id === activePage) ?? navigation[0]
@@ -214,6 +221,26 @@ function App() {
                 {(addComponent.isError || addVersion.isError || lifecycle.isError) && <p className="error-strip">{addComponent.error?.message ?? addVersion.error?.message ?? lifecycle.error?.message}</p>}
                 <div className="component-list">{projectDetail.data.components.map((component) => <article className="component-row" key={component.id}><div><strong>{component.code}</strong><span>{component.name}</span></div><div className="version-tags">{component.versions.length ? component.versions.map((version) => <span key={version.id}>{version.versionNumber}<small>序列 {version.sequenceNo} · {version.maturity} · {version.safety}</small></span>) : <em>尚未登记版本</em>}</div></article>)}</div>
               </section>}
+            </>}
+
+            {activePage === 'baselines' && <>
+              {!currentUser.data && <section className="status-panel catalog-detail"><div className="panel-heading"><div><span className="section-index">身份验证</span><h3>登录后管理基线</h3></div></div><p className="empty-state">请先在“项目”页面登录。</p></section>}
+              <section className="status-panel catalog-panel">
+                <div className="panel-heading"><div><span className="section-index">Step 4A</span><h3>创建基线草稿</h3></div></div>
+                <form className="catalog-form" onSubmit={(event) => { event.preventDefault(); addBaseline.mutate({ projectId: baselineProjectId, seriesCode: baselineSeriesCode, code: baselineCode, description: baselineDescription, reason: baselineReason }) }}>
+                  <label>所属项目<select value={baselineProjectId} onChange={(event) => setBaselineProjectId(event.target.value)} required><option value="">请选择项目</option>{projects.data?.map((project) => <option key={project.id} value={project.id}>{project.code} · {project.name}</option>)}</select></label>
+                  <label>系列编码<input value={baselineSeriesCode} maxLength={80} placeholder="例如：LINE-A" onChange={(event) => setBaselineSeriesCode(event.target.value)} required /></label>
+                  <label>基线编码<input value={baselineCode} maxLength={100} placeholder="例如：BL-001" onChange={(event) => setBaselineCode(event.target.value)} required /></label>
+                  <label>说明<input value={baselineDescription} maxLength={2000} onChange={(event) => setBaselineDescription(event.target.value)} /></label>
+                  <label className="wide-field">创建原因<input value={baselineReason} maxLength={500} onChange={(event) => setBaselineReason(event.target.value)} required /></label>
+                  <button className="primary-action" type="submit" disabled={addBaseline.isPending || !currentUser.data}>{addBaseline.isPending ? '正在创建' : '创建草稿快照'}</button>
+                </form>
+                {addBaseline.isError && <p className="error-strip">{addBaseline.error.message}</p>}
+              </section>
+              <section className="status-panel catalog-panel">
+                <div className="panel-heading"><div><span className="section-index">独立 Revision</span><h3>项目基线</h3></div><span className="count">{baselines.data?.length ?? 0}</span></div>
+                {baselineProjectId === '' ? <p className="empty-state">选择项目后显示其基线草稿与发布版本。</p> : baselines.data?.length ? <div className="catalog-list">{baselines.data.map((baseline) => <article className="project-row" key={baseline.id}><span><strong>{baseline.code}</strong><small>{baseline.seriesCode} · Revision {baseline.revisionNo} · {baseline.itemCount} 个快照项</small></span><em>{baseline.state === 'Draft' ? '草稿' : baseline.state}</em></article>)}</div> : <p className="empty-state">该项目尚未创建基线。</p>}
+              </section>
             </>}
           </div>
         ) : (

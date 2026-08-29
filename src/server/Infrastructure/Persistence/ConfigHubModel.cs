@@ -169,5 +169,70 @@ internal static class ConfigHubModel
             entity.HasOne<ConfigurationComponent>().WithMany().HasForeignKey(recommendation => recommendation.ComponentId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<ComponentVersion>().WithMany().HasForeignKey(recommendation => recommendation.ComponentVersionId).OnDelete(DeleteBehavior.Restrict);
         });
+
+        modelBuilder.Entity<BaselineSeries>(entity =>
+        {
+            entity.ToTable("baseline_series");
+            entity.HasKey(series => series.Id);
+            entity.Property(series => series.Id).HasColumnName("id");
+            entity.Property(series => series.ProjectId).HasColumnName("project_id");
+            entity.Property(series => series.SeriesCode).HasColumnName("series_code").HasMaxLength(80);
+            entity.Property(series => series.NormalizedSeriesCode).HasColumnName("normalized_series_code").HasMaxLength(80);
+            entity.Property(series => series.CreatedAt).HasColumnName("created_at");
+            entity.HasIndex(series => new { series.ProjectId, series.NormalizedSeriesCode }).IsUnique().HasDatabaseName("ux_baseline_series_project_code");
+            entity.HasOne<Project>().WithMany().HasForeignKey(series => series.ProjectId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ConfigurationBaseline>(entity =>
+        {
+            entity.ToTable("configuration_baselines");
+            entity.HasKey(baseline => baseline.Id);
+            entity.Property(baseline => baseline.Id).HasColumnName("id");
+            entity.Property(baseline => baseline.ProjectId).HasColumnName("project_id");
+            entity.Property(baseline => baseline.BaselineSeriesId).HasColumnName("baseline_series_id");
+            entity.Property(baseline => baseline.SupersedesBaselineId).HasColumnName("supersedes_baseline_id");
+            entity.Property(baseline => baseline.TopComponentVersionId).HasColumnName("top_component_version_id");
+            entity.Property(baseline => baseline.BaselineCode).HasColumnName("baseline_code").HasMaxLength(100);
+            entity.Property(baseline => baseline.NormalizedBaselineCode).HasColumnName("normalized_baseline_code").HasMaxLength(100);
+            entity.Property(baseline => baseline.RevisionNo).HasColumnName("revision_no");
+            entity.Property(baseline => baseline.Description).HasColumnName("description").HasMaxLength(2000);
+            entity.Property(baseline => baseline.State).HasColumnName("state").HasMaxLength(32).HasConversion<string>();
+            entity.Property(baseline => baseline.CreatedBy).HasColumnName("created_by").HasMaxLength(160);
+            entity.Property(baseline => baseline.CreatedAt).HasColumnName("created_at");
+            entity.Property(baseline => baseline.ReleasedBy).HasColumnName("released_by").HasMaxLength(160);
+            entity.Property(baseline => baseline.ReleasedAt).HasColumnName("released_at");
+            entity.Property(baseline => baseline.ReleaseReason).HasColumnName("release_reason").HasMaxLength(500);
+            entity.Property(baseline => baseline.ApprovedBy).HasColumnName("approved_by").HasMaxLength(160);
+            entity.HasIndex(baseline => new { baseline.ProjectId, baseline.NormalizedBaselineCode }).IsUnique().HasDatabaseName("ux_configuration_baselines_project_code");
+            entity.HasIndex(baseline => new { baseline.BaselineSeriesId, baseline.RevisionNo }).IsUnique().HasDatabaseName("ux_configuration_baselines_series_revision");
+            entity.HasIndex(baseline => baseline.TopComponentVersionId).HasDatabaseName("ix_configuration_baselines_top_version");
+            entity.HasOne<Project>().WithMany().HasForeignKey(baseline => baseline.ProjectId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<BaselineSeries>().WithMany().HasForeignKey(baseline => baseline.BaselineSeriesId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ConfigurationBaseline>().WithMany().HasForeignKey(baseline => baseline.SupersedesBaselineId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ComponentVersion>().WithMany().HasForeignKey(baseline => baseline.TopComponentVersionId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<BaselineItem>(entity =>
+        {
+            entity.ToTable("baseline_items");
+            entity.HasKey(item => item.Id);
+            entity.Property(item => item.Id).HasColumnName("id");
+            entity.Property(item => item.ConfigurationBaselineId).HasColumnName("configuration_baseline_id");
+            entity.Property(item => item.ConfigurationComponentId).HasColumnName("configuration_component_id");
+            entity.Property(item => item.ComponentVersionId).HasColumnName("component_version_id");
+            entity.Property(item => item.ParentBaselineItemId).HasColumnName("parent_baseline_item_id");
+            entity.Property(item => item.ComponentCodeSnapshot).HasColumnName("component_code_snapshot").HasMaxLength(80);
+            entity.Property(item => item.ComponentNameSnapshot).HasColumnName("component_name_snapshot").HasMaxLength(200);
+            entity.Property(item => item.LineageKeySnapshot).HasColumnName("lineage_key_snapshot").HasMaxLength(1000);
+            entity.Property(item => item.SortOrder).HasColumnName("sort_order");
+            entity.Property(item => item.Requirement).HasColumnName("requirement").HasMaxLength(32).HasConversion<string>();
+            entity.HasIndex(item => new { item.ConfigurationBaselineId, item.ConfigurationComponentId }).IsUnique().HasDatabaseName("ux_baseline_items_baseline_component");
+            entity.HasIndex(item => item.ComponentVersionId).HasDatabaseName("ix_baseline_items_version");
+            entity.HasIndex(item => new { item.ConfigurationBaselineId, item.ParentBaselineItemId, item.SortOrder }).HasDatabaseName("ix_baseline_items_baseline_parent_sort");
+            entity.HasOne<ConfigurationBaseline>().WithMany().HasForeignKey(item => item.ConfigurationBaselineId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ConfigurationComponent>().WithMany().HasForeignKey(item => item.ConfigurationComponentId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ComponentVersion>().WithMany().HasForeignKey(item => item.ComponentVersionId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<BaselineItem>().WithMany().HasForeignKey(item => item.ParentBaselineItemId).OnDelete(DeleteBehavior.Restrict);
+        });
     }
 }
