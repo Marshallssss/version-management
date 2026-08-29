@@ -81,6 +81,8 @@ $standard = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new
 $standardReplay = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/standard")) -Headers $standardHeaders -ContentType 'application/json' -Body $standardBody
 $currentStandard = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/standard"))
 if ($standard.baselineId -ne $baseline.id -or $standard.id -ne $standardReplay.id -or $currentStandard.baselineId -ne $baseline.id) { throw 'Expected idempotent current project standard assignment.' }
+$target = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($machine.id)/target")) -ContentType 'application/json' -Body (@{ configurationBaselineId = $baseline.id; reason = '自动化机台目标验收' } | ConvertTo-Json)
+if ($target.baselineId -ne $baseline.id) { throw 'Expected explicit machine target assignment.' }
 
 if (-not [string]::IsNullOrWhiteSpace($ConnectionString)) {
     $psql = 'C:\Program Files\PostgreSQL\17\bin\psql.exe'

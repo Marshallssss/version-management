@@ -34,6 +34,7 @@ public sealed class ConfigHubDbContext(DbContextOptions<ConfigHubDbContext> opti
 
     public DbSet<ProjectStandardAssignment> ProjectStandardAssignments => Set<ProjectStandardAssignment>();
     public DbSet<Machine> Machines => Set<Machine>();
+    public DbSet<MachineTargetAssignment> MachineTargetAssignments => Set<MachineTargetAssignment>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {

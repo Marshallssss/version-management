@@ -26,6 +26,7 @@ public static class CatalogEndpoints
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/release", ReleaseBaselineAsync).RequireAuthorization("SeniorEngineer");
         endpoints.MapGet("/api/v1/machines", ListMachinesAsync);
         endpoints.MapPost("/api/v1/machines", CreateMachineAsync).RequireAuthorization("Engineer");
+        endpoints.MapPost("/api/v1/machines/{machineId:guid}/target", AssignMachineTargetAsync).RequireAuthorization("SeniorEngineer");
 
         endpoints.MapPost("/api/v1/components/{componentId:guid}/versions", CreateVersionAsync).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/component-versions/{versionId:guid}/maturity", ChangeMaturityAsync).RequireAuthorization("SeniorEngineer");
@@ -73,6 +74,17 @@ public static class CatalogEndpoints
         var machine = new Machine { Id = Guid.NewGuid(), ProjectId = request.ProjectId, SerialNumber = request.SerialNumber!.Trim(), NormalizedSerialNumber = normalized, Name = request.Name!.Trim(), MachineType = NormalizeOptional(request.MachineType, 120), CreatedAt = DateTimeOffset.UtcNow };
         database.Machines.Add(machine); AddAuditEvent(database, context, "MachineCreated", "Machine", machine.Id, new { machine.ProjectId, machine.SerialNumber, reason = request.Reason!.Trim() }); await database.SaveChangesAsync(cancellationToken);
         return TypedResults.Created($"/api/v1/machines/{machine.Id}", new { id = machine.Id });
+    }
+
+    private static async Task<IResult> AssignMachineTargetAsync(Guid machineId, AssignMachineTargetRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        if (request.ConfigurationBaselineId == Guid.Empty || string.IsNullOrWhiteSpace(request.Reason)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = ["必须选择基线并提供原因。"] });
+        await using var database = await factory.CreateDbContextAsync(cancellationToken);
+        var machine = await database.Machines.SingleOrDefaultAsync(item => item.Id == machineId, cancellationToken); var baseline = await database.ConfigurationBaselines.SingleOrDefaultAsync(item => item.Id == request.ConfigurationBaselineId, cancellationToken);
+        if (machine is null || baseline is null || baseline.ProjectId != machine.ProjectId) return Results.ValidationProblem(new Dictionary<string, string[]> { ["configurationBaselineId"] = ["基线不存在或不属于机台项目。"] });
+        if (baseline.State != BaselineState.Released) return Results.Conflict(new { message = "仅可分配已发布基线。" });
+        var now = DateTimeOffset.UtcNow; var old = await database.MachineTargetAssignments.SingleOrDefaultAsync(item => item.MachineId == machineId && item.ValidTo == null, cancellationToken); if (old is not null) old.ValidTo = now;
+        var assignment = new MachineTargetAssignment { Id = Guid.NewGuid(), MachineId = machineId, ConfigurationBaselineId = baseline.Id, ValidFrom = now, AssignedBy = context.User.Identity?.Name ?? "", Reason = request.Reason.Trim() }; database.MachineTargetAssignments.Add(assignment); AddAuditEvent(database, context, "MachineTargetAssigned", "Machine", machineId, new { baselineId = baseline.Id, reason = assignment.Reason }); await database.SaveChangesAsync(cancellationToken); return TypedResults.Ok(new { id = assignment.Id, baselineId = baseline.Id });
     }
 
     private static async Task<IResult> GetProjectAsync(
@@ -703,3 +715,4 @@ public sealed record MoveComponentRequest(Guid? ParentComponentId, string? Reaso
 public sealed record CreateBaselineRequest(string? SeriesCode, string? BaselineCode, string? Description, string? Reason);
 public sealed record AssignProjectStandardRequest(Guid ConfigurationBaselineId, string? Reason);
 public sealed record CreateMachineRequest(Guid ProjectId, string? SerialNumber, string? Name, string? MachineType, string? Reason);
+public sealed record AssignMachineTargetRequest(Guid ConfigurationBaselineId, string? Reason);

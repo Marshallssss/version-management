@@ -277,5 +277,13 @@ internal static class ConfigHubModel
             entity.HasIndex(machine => new { machine.ProjectId, machine.Status, machine.MachineType }).HasDatabaseName("ix_machines_project_status_type");
             entity.HasOne<Project>().WithMany().HasForeignKey(machine => machine.ProjectId).OnDelete(DeleteBehavior.Restrict);
         });
+        modelBuilder.Entity<MachineTargetAssignment>(entity =>
+        {
+            entity.ToTable("machine_target_assignments"); entity.HasKey(item => item.Id);
+            entity.Property(item => item.Id).HasColumnName("id"); entity.Property(item => item.MachineId).HasColumnName("machine_id"); entity.Property(item => item.ConfigurationBaselineId).HasColumnName("configuration_baseline_id");
+            entity.Property(item => item.ValidFrom).HasColumnName("valid_from"); entity.Property(item => item.ValidTo).HasColumnName("valid_to"); entity.Property(item => item.AssignedBy).HasColumnName("assigned_by").HasMaxLength(160); entity.Property(item => item.Reason).HasColumnName("reason").HasMaxLength(500);
+            entity.HasIndex(item => item.MachineId).IsUnique().HasFilter("valid_to IS NULL").HasDatabaseName("ux_machine_target_assignments_current_machine");
+            entity.HasOne<Machine>().WithMany().HasForeignKey(item => item.MachineId).OnDelete(DeleteBehavior.Restrict); entity.HasOne<ConfigurationBaseline>().WithMany().HasForeignKey(item => item.ConfigurationBaselineId).OnDelete(DeleteBehavior.Restrict);
+        });
     }
 }
