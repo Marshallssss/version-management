@@ -72,6 +72,12 @@ $releasedReplay = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri
 if ($releasedBaseline.state -ne 'Released' -or $releasedBaseline.id -ne $releasedReplay.id) { throw 'Expected idempotent baseline release.' }
 $baselineList = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/baselines"))
 if ($baselineList.Count -ne 1 -or $baselineList[0].itemCount -ne 2 -or $baselineList[0].state -ne 'Released') { throw 'Expected listed released baseline snapshot.' }
+$standardBody = @{ configurationBaselineId = $baseline.id; reason = '自动化项目标准验收' } | ConvertTo-Json
+$standardHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString(); 'X-Correlation-ID' = "standard-$suffix" }
+$standard = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/standard")) -Headers $standardHeaders -ContentType 'application/json' -Body $standardBody
+$standardReplay = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/standard")) -Headers $standardHeaders -ContentType 'application/json' -Body $standardBody
+$currentStandard = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/standard"))
+if ($standard.baselineId -ne $baseline.id -or $standard.id -ne $standardReplay.id -or $currentStandard.baselineId -ne $baseline.id) { throw 'Expected idempotent current project standard assignment.' }
 
 if (-not [string]::IsNullOrWhiteSpace($ConnectionString)) {
     $psql = 'C:\Program Files\PostgreSQL\17\bin\psql.exe'
@@ -80,6 +86,10 @@ if (-not [string]::IsNullOrWhiteSpace($ConnectionString)) {
     $result = & $psql $psqlConnection -v ON_ERROR_STOP=1 -c "UPDATE baseline_items SET sort_order = sort_order WHERE configuration_baseline_id = '$($baseline.id)'" 2>&1
     if ($LASTEXITCODE -eq 0 -or ($result -join [Environment]::NewLine) -notmatch 'Items of released baseline cannot be modified') {
         throw 'Released baseline item update was not rejected by the PostgreSQL trigger.'
+    }
+    $overlap = & $psql $psqlConnection -v ON_ERROR_STOP=1 -c "INSERT INTO project_standard_assignments (id, project_id, configuration_baseline_id, valid_from, valid_to, assigned_by, reason) VALUES (gen_random_uuid(), '$($project.id)', '$($baseline.id)', now() - interval '1 minute', now() + interval '1 minute', 'test', 'overlap test')" 2>&1
+    if ($LASTEXITCODE -eq 0 -or ($overlap -join [Environment]::NewLine) -notmatch 'ex_project_standard_assignments_no_overlap') {
+        throw 'Overlapping project standard assignment was not rejected by the PostgreSQL exclusion constraint.'
     }
 }
 

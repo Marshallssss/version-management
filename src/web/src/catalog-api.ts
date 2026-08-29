@@ -82,3 +82,6 @@ export const createBaseline = (projectId: string, input: { seriesCode: string; b
   request<{ id: string; revisionNo: number; itemCount: number }>(`/api/v1/projects/${projectId}/baselines`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify(input) })
 export const releaseBaseline = (baselineId: string, reason: string) =>
   request<{ id: string; state: string }>(`/api/v1/baselines/${baselineId}/release`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ reason }) })
+export const getProjectStandard = (projectId: string) => request<{ baselineId: string; baselineCode: string; validFrom: string } | null>(`/api/v1/projects/${projectId}/standard`)
+export const assignProjectStandard = (projectId: string, baselineId: string, reason: string) =>
+  request<{ id: string; baselineId: string }>(`/api/v1/projects/${projectId}/standard`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ configurationBaselineId: baselineId, reason }) })

@@ -1862,6 +1862,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - Series/Revision、Tree Editor、Release、Immutability、Project Standard、Compare。
 - 4A 已交付：Series 与独立 Draft Revision 由真实 EF 模型创建；创建草稿时快照整个 Component Tree、组件身份、版本身份、排序与父子关系。命令要求 SeniorEngineer、actor、reason、correlation id、`Idempotency-Key`，并写入 Audit；中文界面支持创建与查看快照。`tests/integration/catalog-acceptance.ps1` 已覆盖完整快照、Revision 1、Draft 状态和幂等重放。Release、不可变 Trigger 与 Project Standard 留在后续独立切片，绝不以 Project 的 current_baseline_id 取代 Assignment History。
 - 4B 已交付：Release Command 只允许 Draft，拒绝空快照和包含 Blocked Version 的快照；发布会原子记录 Lifecycle、Audit、actor、reason、correlation id 与 `Idempotency-Key`。PostgreSQL Trigger 拒绝 Released/Deprecated/Archived Baseline 和 Baseline Item 的 Update/Delete，且发布时强制 Release Metadata；中文 UI 支持发布。自动验收覆盖发布与幂等重放；传入 Migration ConnectionString 时，脚本还会直连 PostgreSQL 断言 Released Item 更新被 Trigger 拒绝。
+- 4C 已交付：Project Standard 使用独立 Assignment History 而非 `projects.current_baseline_id`；仅接受同项目的 Released Baseline，并以 `[valid_from, valid_to)` 关闭上一条当前 Assignment。数据库以 partial unique index 与 GiST 排斥约束防止多个当前值和任何时间重叠；中文界面支持查看/显式设置。自动验收覆盖 Assignment 幂等重放和直连数据库的重叠区间拒绝。
 
 ## Step 5 — Machine → Target
 

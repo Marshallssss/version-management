@@ -32,6 +32,8 @@ public sealed class ConfigHubDbContext(DbContextOptions<ConfigHubDbContext> opti
 
     public DbSet<BaselineLifecycleTransition> BaselineLifecycleTransitions => Set<BaselineLifecycleTransition>();
 
+    public DbSet<ProjectStandardAssignment> ProjectStandardAssignments => Set<ProjectStandardAssignment>();
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);

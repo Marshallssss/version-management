@@ -249,5 +249,21 @@ internal static class ConfigHubModel
             entity.HasIndex(transition => new { transition.ConfigurationBaselineId, transition.OccurredAt }).HasDatabaseName("ix_baseline_lifecycle_transitions_baseline_occurred_at");
             entity.HasOne<ConfigurationBaseline>().WithMany().HasForeignKey(transition => transition.ConfigurationBaselineId).OnDelete(DeleteBehavior.Restrict);
         });
+
+        modelBuilder.Entity<ProjectStandardAssignment>(entity =>
+        {
+            entity.ToTable("project_standard_assignments");
+            entity.HasKey(assignment => assignment.Id);
+            entity.Property(assignment => assignment.Id).HasColumnName("id");
+            entity.Property(assignment => assignment.ProjectId).HasColumnName("project_id");
+            entity.Property(assignment => assignment.ConfigurationBaselineId).HasColumnName("configuration_baseline_id");
+            entity.Property(assignment => assignment.ValidFrom).HasColumnName("valid_from");
+            entity.Property(assignment => assignment.ValidTo).HasColumnName("valid_to");
+            entity.Property(assignment => assignment.AssignedBy).HasColumnName("assigned_by").HasMaxLength(160);
+            entity.Property(assignment => assignment.Reason).HasColumnName("reason").HasMaxLength(500);
+            entity.HasIndex(assignment => assignment.ProjectId).IsUnique().HasFilter("valid_to IS NULL").HasDatabaseName("ux_project_standard_assignments_current_project");
+            entity.HasOne<Project>().WithMany().HasForeignKey(assignment => assignment.ProjectId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ConfigurationBaseline>().WithMany().HasForeignKey(assignment => assignment.ConfigurationBaselineId).OnDelete(DeleteBehavior.Restrict);
+        });
     }
 }

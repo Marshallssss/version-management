@@ -21,6 +21,8 @@ public static class CatalogEndpoints
         projects.MapPost("/{projectId:guid}/clone", CloneAsync).RequireAuthorization("Engineer");
         projects.MapGet("/{projectId:guid}/baselines", ListBaselinesAsync);
         projects.MapPost("/{projectId:guid}/baselines", CreateBaselineAsync).RequireAuthorization("SeniorEngineer");
+        projects.MapGet("/{projectId:guid}/standard", GetProjectStandardAsync);
+        projects.MapPost("/{projectId:guid}/standard", AssignProjectStandardAsync).RequireAuthorization("SeniorEngineer");
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/release", ReleaseBaselineAsync).RequireAuthorization("SeniorEngineer");
 
         endpoints.MapPost("/api/v1/components/{componentId:guid}/versions", CreateVersionAsync).RequireAuthorization("Engineer");
@@ -308,6 +310,53 @@ public static class CatalogEndpoints
         await database.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return TypedResults.Ok(new { id = baseline.Id, state = baseline.State.ToString(), releasedAt = baseline.ReleasedAt });
+    }
+
+    private static async Task<IResult> GetProjectStandardAsync(Guid projectId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        await using var database = await factory.CreateDbContextAsync(cancellationToken);
+        var current = await database.ProjectStandardAssignments.AsNoTracking()
+            .Where(item => item.ProjectId == projectId && item.ValidTo == null)
+            .Select(item => new { baselineId = item.ConfigurationBaselineId, validFrom = item.ValidFrom, baselineCode = database.ConfigurationBaselines.Where(baseline => baseline.Id == item.ConfigurationBaselineId).Select(baseline => baseline.BaselineCode).Single() })
+            .SingleOrDefaultAsync(cancellationToken);
+        return TypedResults.Ok(current);
+    }
+
+    private static async Task<IResult> AssignProjectStandardAsync(Guid projectId, AssignProjectStandardRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        var validation = request.ConfigurationBaselineId == Guid.Empty ? new Dictionary<string, string[]> { ["configurationBaselineId"] = ["必须选择基线。"] } : ValidateRequired(request.Reason, "设置原因", 500);
+        if (validation is not null) return Results.ValidationProblem(validation);
+        var key = context.Request.Headers["Idempotency-Key"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["设置项目标准必须提供不超过 200 个字符的 Idempotency-Key。"] });
+        var now = DateTimeOffset.UtcNow;
+        var scope = $"projects.standard:{projectId}";
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request))));
+        await using var database = await factory.CreateDbContextAsync(cancellationToken);
+        var existing = await database.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
+        if (existing is not null)
+        {
+            if (existing.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" });
+            if (existing.Result is not null) return TypedResults.Ok(existing.Result.RootElement.Clone());
+            return Results.Conflict(new { message = "该请求仍在处理。" });
+        }
+        var baseline = await database.ConfigurationBaselines.SingleOrDefaultAsync(item => item.Id == request.ConfigurationBaselineId, cancellationToken);
+        if (baseline is null || baseline.ProjectId != projectId) return Results.ValidationProblem(new Dictionary<string, string[]> { ["configurationBaselineId"] = ["基线不存在或不属于该项目。"] });
+        if (baseline.State != BaselineState.Released) return Results.Conflict(new { message = "只有已发布基线可以设为项目标准。" });
+        var actor = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required.");
+        await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
+        database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) });
+        var old = await database.ProjectStandardAssignments.SingleOrDefaultAsync(item => item.ProjectId == projectId && item.ValidTo == null, cancellationToken);
+        if (old is not null) old.ValidTo = now;
+        var assignment = new ProjectStandardAssignment { Id = Guid.NewGuid(), ProjectId = projectId, ConfigurationBaselineId = baseline.Id, ValidFrom = now, AssignedBy = actor, Reason = request.Reason!.Trim() };
+        database.ProjectStandardAssignments.Add(assignment);
+        AddAuditEvent(database, context, "ProjectStandardAssigned", "Project", projectId, new { baselineId = baseline.Id, reason = assignment.Reason, previousBaselineId = old?.ConfigurationBaselineId });
+        await database.SaveChangesAsync(cancellationToken);
+        var record = await database.IdempotencyRecords.SingleAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
+        record.Status = IdempotencyRecordStatus.Completed;
+        record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = assignment.Id, baselineId = baseline.Id, validFrom = assignment.ValidFrom }));
+        await database.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return TypedResults.Ok(new { id = assignment.Id, baselineId = baseline.Id, validFrom = assignment.ValidFrom });
     }
 
     private static async Task<IResult> CreateProjectAsync(
@@ -631,3 +680,4 @@ public sealed record LifecycleRequest(string? State, string? Reason);
 public sealed record CloneProjectRequest(string? Code, string? Name, string? Reason);
 public sealed record MoveComponentRequest(Guid? ParentComponentId, string? Reason);
 public sealed record CreateBaselineRequest(string? SeriesCode, string? BaselineCode, string? Description, string? Reason);
+public sealed record AssignProjectStandardRequest(Guid ConfigurationBaselineId, string? Reason);
