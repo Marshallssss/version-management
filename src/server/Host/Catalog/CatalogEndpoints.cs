@@ -15,9 +15,9 @@ public static class CatalogEndpoints
         projects.MapGet("", ListProjectsAsync);
         projects.MapPost("", CreateProjectAsync).RequireAuthorization("Engineer");
         projects.MapGet("/{projectId:guid}", GetProjectAsync);
-        projects.MapPost("/{projectId:guid}/components", CreateComponentAsync);
+        projects.MapPost("/{projectId:guid}/components", CreateComponentAsync).RequireAuthorization("Engineer");
 
-        endpoints.MapPost("/api/v1/components/{componentId:guid}/versions", CreateVersionAsync);
+        endpoints.MapPost("/api/v1/components/{componentId:guid}/versions", CreateVersionAsync).RequireAuthorization("Engineer");
         endpoints.MapGet("/api/v1/audit", ListAuditEventsAsync);
         return endpoints;
     }
