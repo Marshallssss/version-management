@@ -4,7 +4,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace ConfigHub.Host.Health;
 
-public sealed class DatabaseHealthCheck(
+public sealed partial class DatabaseHealthCheck(
     IDbContextFactory<ConfigHubDbContext> contextFactory,
     ILogger<DatabaseHealthCheck> logger) : IHealthCheck
 {
@@ -21,8 +21,11 @@ public sealed class DatabaseHealthCheck(
         }
         catch (Exception exception)
         {
-            logger.LogWarning(exception, "PostgreSQL readiness check failed.");
+            LogReadinessCheckFailed(logger, exception);
             return HealthCheckResult.Unhealthy("PostgreSQL readiness check failed.");
         }
     }
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "PostgreSQL readiness check failed.")]
+    private static partial void LogReadinessCheckFailed(ILogger logger, Exception exception);
 }

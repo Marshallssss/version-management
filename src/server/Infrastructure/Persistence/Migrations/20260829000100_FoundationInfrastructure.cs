@@ -7,6 +7,9 @@ namespace ConfigHub.Infrastructure.Persistence.Migrations;
 [Migration("20260829000100_FoundationInfrastructure")]
 public sealed class FoundationInfrastructure : Migration
 {
+    private static readonly string[] BackgroundJobsClaimColumns = ["status", "available_at"];
+    private static readonly string[] IdempotencyRecordsScopeKeyColumns = ["scope", "idempotency_key"];
+
     protected override void Up(MigrationBuilder migrationBuilder)
     {
         migrationBuilder.Sql("CREATE EXTENSION IF NOT EXISTS btree_gist;");
@@ -48,7 +51,7 @@ public sealed class FoundationInfrastructure : Migration
         migrationBuilder.CreateIndex(
             name: "ix_background_jobs_claim",
             table: "background_jobs",
-            columns: new[] { "status", "available_at" });
+            columns: BackgroundJobsClaimColumns);
 
         migrationBuilder.CreateIndex(
             name: "ix_background_jobs_created_at",
@@ -63,7 +66,7 @@ public sealed class FoundationInfrastructure : Migration
         migrationBuilder.CreateIndex(
             name: "ux_idempotency_records_scope_key",
             table: "idempotency_records",
-            columns: new[] { "scope", "idempotency_key" },
+            columns: IdempotencyRecordsScopeKeyColumns,
             unique: true);
     }
 

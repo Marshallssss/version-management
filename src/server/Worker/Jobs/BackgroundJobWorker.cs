@@ -1,12 +1,12 @@
 namespace ConfigHub.Worker.Jobs;
 
-public sealed class BackgroundJobWorker(
+public sealed partial class BackgroundJobWorker(
     BackgroundJobLeaseService leaseService,
     IEnumerable<IBackgroundJobHandler> handlers,
     IConfiguration configuration,
     ILogger<BackgroundJobWorker> logger) : BackgroundService
 {
-    private readonly IReadOnlyDictionary<string, IBackgroundJobHandler> _handlers =
+    private readonly Dictionary<string, IBackgroundJobHandler> _handlers =
         handlers.ToDictionary(handler => handler.JobType, StringComparer.OrdinalIgnoreCase);
 
     private readonly BackgroundJobWorkerOptions _options =
@@ -17,7 +17,7 @@ public sealed class BackgroundJobWorker(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        logger.LogInformation("ConfigHub background worker {WorkerId} started.", _workerId);
+        LogWorkerStarted(logger, _workerId);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -38,7 +38,7 @@ public sealed class BackgroundJobWorker(
             }
             catch (Exception exception)
             {
-                logger.LogError(exception, "Background job polling failed.");
+                LogPollingFailed(logger, exception);
                 await Task.Delay(TimeSpan.FromSeconds(_options.PollIntervalSeconds), stoppingToken);
             }
         }
@@ -55,15 +55,29 @@ public sealed class BackgroundJobWorker(
 
             await handler.HandleAsync(job.Payload, cancellationToken);
             await leaseService.CompleteAsync(job.Id, _workerId, cancellationToken);
-            logger.LogInformation("Completed background job {JobId} ({JobType}).", job.Id, job.JobType);
+            LogJobCompleted(logger, job.Id, job.JobType);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogError(exception, "Background job {JobId} ({JobType}) failed on attempt {Attempt}.",
-                job.Id,
-                job.JobType,
-                job.Attempt);
+            LogJobFailed(logger, exception, job.Id, job.JobType, job.Attempt);
             await leaseService.FailAsync(job.Id, _workerId, exception, cancellationToken);
         }
     }
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "ConfigHub background worker {WorkerId} started.")]
+    private static partial void LogWorkerStarted(ILogger logger, string workerId);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Background job polling failed.")]
+    private static partial void LogPollingFailed(ILogger logger, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Completed background job {JobId} ({JobType}).")]
+    private static partial void LogJobCompleted(ILogger logger, Guid jobId, string jobType);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Background job {JobId} ({JobType}) failed on attempt {Attempt}.")]
+    private static partial void LogJobFailed(
+        ILogger logger,
+        Exception exception,
+        Guid jobId,
+        string jobType,
+        int attempt);
 }

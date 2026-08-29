@@ -3,6 +3,11 @@ using ConfigHub.Worker.Jobs;
 using Microsoft.EntityFrameworkCore;
 
 var builder = Host.CreateApplicationBuilder(args);
+var localConfigurationPath = Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+    "ConfigHub",
+    "appsettings.local.json");
+builder.Configuration.AddJsonFile(localConfigurationPath, optional: true, reloadOnChange: true);
 
 builder.Services.AddWindowsService(options =>
 {
@@ -10,6 +15,12 @@ builder.Services.AddWindowsService(options =>
 });
 
 var connectionString = builder.Configuration.GetConnectionString("ConfigHub");
+if (string.IsNullOrWhiteSpace(connectionString))
+{
+    connectionString = Environment.GetEnvironmentVariable(
+        "ConnectionStrings__ConfigHub",
+        EnvironmentVariableTarget.User);
+}
 if (string.IsNullOrWhiteSpace(connectionString))
 {
     throw new InvalidOperationException(

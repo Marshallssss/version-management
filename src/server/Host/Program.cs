@@ -1,16 +1,30 @@
 using ConfigHub.Host.Health;
+using ConfigHub.Host.System;
 using ConfigHub.Infrastructure.Persistence;
+using ConfigHub.Infrastructure.Persistence.Entities;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 var migrateRequested = args.Contains("--migrate", StringComparer.OrdinalIgnoreCase);
 var hostArguments = args
     .Where(argument => !string.Equals(argument, "--migrate", StringComparison.OrdinalIgnoreCase))
     .ToArray();
 var builder = WebApplication.CreateBuilder(hostArguments);
+var localConfigurationPath = Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+    "ConfigHub",
+    "appsettings.local.json");
+builder.Configuration.AddJsonFile(localConfigurationPath, optional: true, reloadOnChange: true);
 
 var connectionName = migrateRequested ? "ConfigHubMigration" : "ConfigHub";
 var connectionString = builder.Configuration.GetConnectionString(connectionName);
+if (string.IsNullOrWhiteSpace(connectionString))
+{
+    connectionString = Environment.GetEnvironmentVariable(
+        $"ConnectionStrings__{connectionName}",
+        EnvironmentVariableTarget.User);
+}
 if (string.IsNullOrWhiteSpace(connectionString))
 {
     throw new InvalidOperationException(
@@ -71,6 +85,70 @@ app.MapGet("/api/v1/system/version", () =>
         architecture = "windows-single-iis",
         serverTime = DateTimeOffset.UtcNow
     });
+});
+
+app.MapGet("/api/v1/system/status", async (
+    IDbContextFactory<ConfigHubDbContext> contextFactory,
+    CancellationToken cancellationToken) =>
+{
+    await using var database = await contextFactory.CreateDbContextAsync(cancellationToken);
+    var jobs = await database.BackgroundJobs
+        .AsNoTracking()
+        .OrderByDescending(job => job.CreatedAt)
+        .Take(8)
+        .Select(job => new
+        {
+            id = job.Id,
+            jobType = job.JobType,
+            status = job.Status.ToString(),
+            attempts = job.Attempts,
+            createdAt = job.CreatedAt,
+            completedAt = job.CompletedAt,
+            lastError = job.LastError
+        })
+        .ToListAsync(cancellationToken);
+
+    var queue = await database.BackgroundJobs
+        .AsNoTracking()
+        .GroupBy(job => job.Status)
+        .Select(group => new { status = group.Key.ToString(), count = group.Count() })
+        .ToListAsync(cancellationToken);
+
+    return TypedResults.Ok(new { queue, jobs, serverTime = DateTimeOffset.UtcNow });
+});
+
+app.MapPost("/api/v1/system/jobs/noop", async (
+    EnqueueNoopJobRequest request,
+    IDbContextFactory<ConfigHubDbContext> contextFactory,
+    CancellationToken cancellationToken) =>
+{
+    var note = request.Note?.Trim();
+    if (note?.Length > 500)
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["note"] = ["任务说明不能超过 500 个字符。"]
+        });
+    }
+
+    await using var database = await contextFactory.CreateDbContextAsync(cancellationToken);
+    var job = new BackgroundJob
+    {
+        Id = Guid.NewGuid(),
+        JobType = "system.noop",
+        Payload = JsonDocument.Parse(JsonSerializer.Serialize(new
+        {
+            note = string.IsNullOrWhiteSpace(note) ? "来自运行控制台的连通性任务" : note,
+            requestedAt = DateTimeOffset.UtcNow
+        })),
+        AvailableAt = DateTimeOffset.UtcNow,
+        CreatedAt = DateTimeOffset.UtcNow
+    };
+
+    database.BackgroundJobs.Add(job);
+    await database.SaveChangesAsync(cancellationToken);
+
+    return TypedResults.Accepted($"/api/v1/system/jobs/{job.Id}", new { id = job.Id });
 });
 
 app.MapFallback("/api/{**path}", () => Results.Problem(

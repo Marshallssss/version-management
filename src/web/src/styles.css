@@ -87,7 +87,7 @@ h3 {
 
 .nav-item {
   display: grid;
-  grid-template-columns: 28px 1fr;
+  grid-template-columns: 28px 1fr auto;
   width: 100%;
   padding: 11px 12px;
   border: 0;
@@ -95,7 +95,18 @@ h3 {
   color: #8fa1a2;
   background: transparent;
   text-align: left;
-  cursor: default;
+  cursor: pointer;
+}
+
+.nav-item:hover {
+  color: #dce5e5;
+  background: #142124;
+}
+
+.nav-item em {
+  color: #718487;
+  font-size: 10px;
+  font-style: normal;
 }
 
 .nav-item span {
@@ -330,6 +341,206 @@ h1 {
   color: #f0c0ad;
 }
 
+.primary-action {
+  margin-top: 26px;
+  padding: 10px 16px;
+  border: 1px solid #e66d3f;
+  color: #1a1716;
+  background: #e66d3f;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.primary-action:hover:not(:disabled) {
+  background: #f08b61;
+}
+
+.primary-action:disabled,
+.panel-heading button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.runtime-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  border-top: 1px solid #2b3b3e;
+}
+
+.runtime-list div {
+  padding: 14px 0;
+  border-bottom: 1px solid #27383a;
+}
+
+.runtime-list dt,
+.runtime-list dd {
+  margin: 0;
+}
+
+.runtime-list dt,
+.queue-summary span,
+.job-row span,
+.job-row small {
+  color: #718487;
+  font-size: 11px;
+}
+
+.runtime-list dd {
+  margin-top: 6px;
+  color: #dce5e5;
+  font-family: Bahnschrift, "Microsoft YaHei UI", monospace;
+  font-size: 13px;
+}
+
+.queue-panel {
+  min-height: 0;
+}
+
+.queue-summary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.queue-summary div {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid #2b3b3e;
+  background: #101a1d;
+}
+
+.queue-summary b {
+  color: #f0f5f4;
+  font-family: Bahnschrift, monospace;
+  font-size: 24px;
+}
+
+.job-submit-panel {
+  grid-column: span 2;
+}
+
+.job-form {
+  display: grid;
+  align-self: center;
+  gap: 10px;
+  padding: 18px;
+  border: 1px solid #304346;
+  background: #0e181a;
+}
+
+.job-form label {
+  color: #aebbbc;
+  font-size: 13px;
+}
+
+.job-form textarea {
+  min-height: 118px;
+  resize: vertical;
+  padding: 12px;
+  border: 1px solid #3c5356;
+  color: #dce5e5;
+  background: #101a1d;
+  font: inherit;
+}
+
+.job-form textarea:focus {
+  outline: 1px solid #e66d3f;
+  border-color: #e66d3f;
+}
+
+.job-form .primary-action {
+  margin-top: 4px;
+}
+
+.success-strip {
+  margin: 4px 0 0;
+  padding: 10px 12px;
+  border-left: 2px solid #58a47b;
+  color: #a7cbb7;
+  background: rgba(88, 164, 123, 0.08);
+  font-size: 12px;
+}
+
+.jobs-panel {
+  grid-column: span 2;
+}
+
+.job-list {
+  border-top: 1px solid #2b3b3e;
+}
+
+.job-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 90px 66px;
+  gap: 14px;
+  align-items: center;
+  padding: 14px 0;
+  border-bottom: 1px solid #27383a;
+}
+
+.job-row div {
+  display: grid;
+  gap: 4px;
+}
+
+.job-row strong {
+  color: #dce5e5;
+  font-family: Bahnschrift, monospace;
+  font-size: 13px;
+}
+
+.job-state {
+  font-weight: 700;
+  text-align: right;
+}
+
+.job-state.completed {
+  color: #58a47b;
+}
+
+.job-state.pending,
+.job-state.processing {
+  color: #d39a3b;
+}
+
+.job-state.failed {
+  color: #d9514e;
+}
+
+.job-row p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #c99b99;
+  font-size: 12px;
+}
+
+.empty-state {
+  margin: 0;
+  padding: 28px 0 4px;
+  color: #93a4a5;
+}
+
+.pending-page {
+  max-width: 760px;
+  margin: 52px auto;
+  padding: 38px;
+  border-top: 3px solid #d39a3b;
+  background: #172326;
+}
+
+.pending-page h2 {
+  margin: 14px 0;
+  font-size: 32px;
+}
+
+.pending-page p {
+  max-width: 620px;
+  color: #aebbbc;
+  line-height: 1.8;
+}
+
 .telemetry-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -400,6 +611,11 @@ h1 {
   .telemetry-grid {
     grid-template-columns: repeat(2, 1fr);
   }
+
+  .job-submit-panel,
+  .jobs-panel {
+    grid-column: auto;
+  }
 }
 
 @media (max-width: 720px) {
@@ -453,6 +669,16 @@ h1 {
 
   .telemetry-grid {
     grid-template-columns: 1fr;
+  }
+
+  .runtime-list,
+  .queue-summary,
+  .job-row {
+    grid-template-columns: 1fr;
+  }
+
+  .job-state {
+    text-align: left;
   }
 
   .decision-meta {

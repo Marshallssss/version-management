@@ -104,6 +104,8 @@ Project
 13. Lifecycle Transition、Baseline Release、Target Change、Deployment、Import 必须审计。
 14. 核心历史数据原则上不物理删除。
 15. 文件内容不保存在数据库 BLOB；数据库保存 Metadata、Locator 和 Checksum。
+16. 只有已证明来源覆盖完整、且所有 Component 身份与结果均已解析成功的 FULL Fact 才能生成 `ABSENT`；任何未解析、失败或跳过的行都不能被当作“不存在”。
+17. Observation 不得覆盖同一安装实例已知的安装时间；安装时间未知时必须保持 Unknown，而不是用 Observation Time 填充。
 
 ## A3. 关键架构问题结论
 
@@ -738,6 +740,8 @@ INDEX(expires_at)
 - `effective_at`：事实在工程世界生效的时间。
 - `recorded_at`：系统获知事实的时间。
 - `state_effective_at`：产生当前 Machine+Component 状态的最新有效 Fact 工程时间。
+- `observed_at`：来源实际观测到状态的时间；仅用于 INITIAL_SNAPSHOT/OBSERVATION，允许为空。
+- `last_observed_at`：Current Projection 最近一次可靠 Observation 的时间；允许为空，与安装时间独立。
 - `known_installed_at`：只有已知真实安装时间时才保存；允许为空。
 - `valid_from/valid_to`：Assignment 有效区间，采用 `[from, to)`。
 - `occurred_at`：Lifecycle/Audit Action 发生时间。
@@ -765,8 +769,8 @@ INDEX(expires_at)
 - Current Projection 选择每个 Machine+Component 最新有效 Fact。
 - 排序优先级：`effective_at → recorded_at → item_id`。
 - 晚到的旧 Observation 保留历史，但不覆盖更新的 Current Fact。
-- Observation Time 只写入 `state_effective_at`，不能伪造 Software Installed Time。
-- `known_installed_at` 只有 INSTALL/UPGRADE 或来源明确提供真实安装时间时才能填写。
+- Observation Time 写入 Observation Fact 的 `observed_at`，并在该 Fact 获胜时更新 `state_effective_at` 和 `last_observed_at`；不能伪造 Software Installed Time。
+- `known_installed_at` 只有 INSTALL/UPGRADE 或来源明确提供真实安装时间时才能填写。对同一 Component+Version 的后续 Observation 必须保留当前安装实例已有的已知安装时间；Observation 发现不同 Version 且未提供安装时间时，新的安装时间为 Unknown。
 - INITIAL_SNAPSHOT/OBSERVATION 未提供安装时间时，UI 显示 `Installed: Unknown` 和 `Last Observed/State Effective Time`。
 
 ## F5. Historical Snapshot
@@ -902,11 +906,13 @@ Defaults/Validation：
 
 FULL Finalize：
 
-1. 将成功的 Version Items 应用到 Current Projection。
-2. 计算 Finalized Full Fact 覆盖的 Component Set。
-3. 对 Current Configuration 中存在但 Full Set 中不存在的 Component，生成明确的 `ABSENT` DeploymentItem。
-4. `ABSENT` Item 的 `new_version_id` 为空，并从 `machine_current_configurations` 删除对应 Current Row。
-5. 历史 Absence 仍由 DeploymentItem 保留，不删除旧 Facts。
+1. Finalize 前必须确认来源声明的范围完整、Machine 身份已解析、所有行均已成功解析和校验，且不存在 Failed、Skipped、未匹配 Component 或未确认的分页/传输中断。
+2. 上述任一条件不满足时，Batch 不得以 FULL Finalize；必须修复后重试，或由操作者明确改为 PARTIAL。不得生成 `ABSENT`，也不得删除 Current Row。
+3. 将成功的 Version Items 应用到 Current Projection。
+4. 计算已验证的 Finalized Full Fact 覆盖的 Component Set。
+5. 仅对 Current Configuration 中存在但该 Full Set 未包含的 Component，生成明确的 `ABSENT` DeploymentItem。
+6. `ABSENT` Item 的 `new_version_id` 为空，并从 `machine_current_configurations` 删除对应 Current Row。`ABSENT` 只能表示“本次完整观测未发现”，不能表示真实卸载；只有明确卸载证据才使用 `REMOVE`。
+7. 历史 Absence 仍由 DeploymentItem 保留，不删除旧 Facts。
 
 PARTIAL Finalize：
 
@@ -935,13 +941,17 @@ Item Action 至少支持：
 
 ```text
 state_effective_at
+last_observed_at nullable
 known_installed_at nullable
+installation_source_deployment_item_id nullable
 source_deployment_item_id
 ```
 
 - `state_effective_at` 来自当前获胜 Fact 的 `effective_at`。
+- `last_observed_at` 仅由可靠的 INITIAL_SNAPSHOT/OBSERVATION Fact 更新，不用 INSTALL/UPGRADE 时间冒充 Observation Time。
 - INSTALL/UPGRADE 可以填写真实 `known_installed_at`。
-- INITIAL_SNAPSHOT/OBSERVATION 只有来源明确提供真实安装时间时才允许填写。
+- INITIAL_SNAPSHOT/OBSERVATION 只有来源明确提供真实安装时间时才允许填写；`installation_source_deployment_item_id` 指向提供当前安装时间的 Fact。
+- 同一安装实例的后续 Observation 只更新 `source_deployment_item_id`、`state_effective_at` 和 `last_observed_at`，不得清空或改写既有 `known_installed_at`。版本变化、REMOVE 或 ABSENT 会结束该安装实例。
 - Observation Time 不能复制到 `known_installed_at`。
 - ABSENT/REMOVE 会删除 Current Row；历史时间仍可从 Facts 重建。
 
@@ -1638,19 +1648,21 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 6. Blocked Version 的 Baseline/Current/Target/Historical Impact 实时准确。
 7. Partial Batch 只应用成功 Items。
 8. FULL Snapshot 对未出现的旧 Current Component 生成 ABSENT Fact 并移除 Current Row。
-9. PARTIAL Observation 未出现的 Component 保持不变。
-10. Initial Snapshot 不显示为软件安装行为，也不伪造 Installed At。
-11. UI 对未知安装时间显示 Unknown，并显示 State Effective/Last Observed Time。
-12. Observation 晚于 Current Fact 时可更新；较早 Observation 不覆盖更新状态。
-13. Machine Target 和 Project Standard Assignment 时间不能重叠，且结束时间必须晚于开始时间。
-14. Current Projection 可从 Fact History 重建并得到相同结果。
-15. Version List 按 Explicit Sequence 排序，不解析 Version Number。
-16. Excel/CSV Preview、Dry Run、Coverage、Conflict、Commit 完整且重复提交幂等。
-17. 同 Idempotency Scope/Key/Hash 重试返回原结果；同 Key 不同 Hash 返回 Conflict。
-18. 重复 External Event 不能形成重复 Fact。
-19. Engineer 不能 Release Baseline 或 Block Version。
-20. 单 IIS URL 同时提供 SPA 与 API，Client Route 刷新不 404。
-21. Nightly Backup 期间系统保持可用，并能恢复到新数据库。
+9. 含任何 Failed、Skipped、未解析或不完整分页结果的 FULL Snapshot 无法 Finalize，且不能生成 ABSENT Fact。
+10. PARTIAL Observation 未出现的 Component 保持不变。
+11. Initial Snapshot 不显示为软件安装行为，也不伪造 Installed At。
+12. 同一 Component+Version 的后续 Observation 保留已知 Installed At；未提供真实安装时间的新 Version 显示 Unknown。
+13. UI 分别显示 Installed At、Last Observed At 与 State Effective Time，三者不能互相填充。
+14. Observation 晚于 Current Fact 时可更新；较早 Observation 不覆盖更新状态。
+15. Machine Target 和 Project Standard Assignment 时间不能重叠，且结束时间必须晚于开始时间。
+16. Current Projection 可从 Fact History 重建并得到相同结果。
+17. Version List 按 Explicit Sequence 排序，不解析 Version Number。
+18. Excel/CSV Preview、Dry Run、Coverage、Conflict、Commit 完整且重复提交幂等。
+19. 同 Idempotency Scope/Key/Hash 重试返回原结果；同 Key 不同 Hash 返回 Conflict。
+20. 重复 External Event 不能形成重复 Fact。
+21. Engineer 不能 Release Baseline 或 Block Version。
+22. 单 IIS URL 同时提供 SPA 与 API，Client Route 刷新不 404。
+23. Nightly Backup 期间系统保持可用，并能恢复到新数据库。
 
 ---
 
@@ -1776,6 +1788,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 13. **ADR-013 — Relational Core and Restricted JSONB Usage**
 14. **ADR-014 — Immutable File Objects and Online/Quiesced Backup Modes**
 15. **ADR-015 — Unified Import Pipeline, Persistent Idempotency and Phased Delivery**
+16. **ADR-016 — Observation Integrity and Installation-Time Provenance**
 
 ---
 
