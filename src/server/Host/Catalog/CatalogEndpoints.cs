@@ -19,6 +19,8 @@ public static class CatalogEndpoints
         endpoints.MapPost("/api/v1/components/{componentId:guid}/move", MoveComponentAsync).RequireAuthorization("Engineer");
         projects.MapPost("/{projectId:guid}/clone", CloneAsync).RequireAuthorization("Engineer");
         projects.MapGet("/{projectId:guid}/baselines", ListBaselinesAsync);
+        projects.MapGet("/{projectId:guid}/members", ListProjectMembersAsync).RequireAuthorization();
+        projects.MapPost("/{projectId:guid}/members", AssignProjectMemberAsync).RequireAuthorization(policy => policy.RequireRole("Admin"));
         projects.MapPost("/{projectId:guid}/baselines", CreateBaselineAsync).RequireAuthorization("SeniorEngineer");
         projects.MapGet("/{projectId:guid}/standard", GetProjectStandardAsync);
         projects.MapPost("/{projectId:guid}/standard", AssignProjectStandardAsync).RequireAuthorization("SeniorEngineer");
@@ -69,6 +71,25 @@ public static class CatalogEndpoints
             })
             .ToListAsync(cancellationToken);
         return TypedResults.Ok(projects);
+    }
+
+    private static async Task<IResult> ListProjectMembersAsync(Guid projectId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        await using var database = await factory.CreateDbContextAsync(cancellationToken);
+        if (!await database.Projects.AnyAsync(project => project.Id == projectId, cancellationToken)) return Results.NotFound();
+        var members = await database.ProjectMemberships.AsNoTracking().Where(member => member.ProjectId == projectId).Join(database.Users.AsNoTracking(), member => member.UserId, user => user.Id, (member, user) => new { id = member.Id, userId = user.Id, email = user.Email, displayName = user.DisplayName, role = member.Role.ToString(), assignedBy = member.AssignedBy, assignedAt = member.AssignedAt }).OrderBy(member => member.email).ToListAsync(cancellationToken);
+        return TypedResults.Ok(members);
+    }
+
+    private static async Task<IResult> AssignProjectMemberAsync(Guid projectId, AssignProjectMemberRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        if (request.UserId == Guid.Empty || !Enum.TryParse<ProjectMembershipRole>(request.Role, true, out var role) || string.IsNullOrWhiteSpace(request.Reason)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = ["必须提供用户、有效项目角色和原因。"] });
+        var key = context.Request.Headers["Idempotency-Key"].FirstOrDefault(); if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["分配项目成员必须提供不超过 200 个字符的 Idempotency-Key。"] });
+        await using var database = await factory.CreateDbContextAsync(cancellationToken); var scope = $"project-members:{projectId}:{request.UserId}"; var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request)))); var replay = await database.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
+        if (replay is not null) { if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (replay.Result is not null) return TypedResults.Ok(replay.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
+        if (!await database.Projects.AnyAsync(project => project.Id == projectId, cancellationToken) || !await database.Users.AnyAsync(user => user.Id == request.UserId, cancellationToken)) return Results.NotFound();
+        var now = DateTimeOffset.UtcNow; await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken); var record = new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }; database.IdempotencyRecords.Add(record); var member = await database.ProjectMemberships.SingleOrDefaultAsync(item => item.ProjectId == projectId && item.UserId == request.UserId, cancellationToken); if (member is null) { member = new ProjectMembership { Id = Guid.NewGuid(), ProjectId = projectId, UserId = request.UserId, Role = role, AssignedBy = context.User.Identity?.Name ?? "", Reason = request.Reason.Trim(), AssignedAt = now }; database.ProjectMemberships.Add(member); } else { member.Role = role; member.AssignedBy = context.User.Identity?.Name ?? ""; member.Reason = request.Reason.Trim(); member.AssignedAt = now; }
+        AddAuditEvent(database, context, "ProjectMemberAssigned", "ProjectMembership", member.Id, new { projectId, member.UserId, role = role.ToString(), reason = member.Reason }); await database.SaveChangesAsync(cancellationToken); record.Status = IdempotencyRecordStatus.Completed; record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = member.Id, userId = member.UserId, role = role.ToString() })); await database.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken); return TypedResults.Ok(new { id = member.Id, userId = member.UserId, role = role.ToString() });
     }
 
     private static async Task<IResult> ListMachinesAsync(IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
@@ -1002,6 +1023,7 @@ public sealed record CloneProjectRequest(string? Code, string? Name, string? Rea
 public sealed record MoveComponentRequest(Guid? ParentComponentId, string? Reason);
 public sealed record CreateBaselineRequest(string? SeriesCode, string? BaselineCode, string? Description, string? Reason);
 public sealed record AssignProjectStandardRequest(Guid ConfigurationBaselineId, string? Reason);
+public sealed record AssignProjectMemberRequest(Guid UserId, string? Role, string? Reason);
 public sealed record CreateMachineRequest(Guid ProjectId, string? SerialNumber, string? Name, string? MachineType, string? Reason);
 public sealed record AssignMachineTargetRequest(Guid ConfigurationBaselineId, string? Reason);
 public sealed record RecordFactsRequest(string? OperationType, string? Coverage, string? SourceType, string? ExternalEventId, DateTimeOffset? EffectiveAt, string? Reason, List<RecordFactItem>? Items);

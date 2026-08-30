@@ -47,6 +47,12 @@ $headers = @{ 'Idempotency-Key' = $idempotencyKey; 'X-Correlation-ID' = "catalog
 $project = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, '/api/v1/projects')) -Headers $headers -ContentType 'application/json' -Body $projectBody
 $replay = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, '/api/v1/projects')) -Headers $headers -ContentType 'application/json' -Body $projectBody
 if ($project.id -ne $replay.id) { throw 'Idempotent replay did not return the original project.' }
+$membershipHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() }
+$membershipBody = @{ userId = $viewer.id; role = 'Engineer'; reason = '自动化项目成员验收' } | ConvertTo-Json
+$membership = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/members")) -Headers $membershipHeaders -ContentType 'application/json' -Body $membershipBody
+$membershipReplay = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/members")) -Headers $membershipHeaders -ContentType 'application/json' -Body $membershipBody
+$members = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/members"))
+if ($membership.id -ne $membershipReplay.id -or @($members | Where-Object { $_.userId -eq $viewer.id -and $_.role -eq 'Engineer' }).Count -ne 1) { throw 'Project membership assignment must be idempotent and visible.' }
 
 $machineHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() }
 $machineBody = @{ projectId = $project.id; serialNumber = "SN-$suffix"; name = 'Automation machine'; machineType = 'Test'; reason = '自动化机台登记' } | ConvertTo-Json

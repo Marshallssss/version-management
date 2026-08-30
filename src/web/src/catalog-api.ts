@@ -57,6 +57,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const getProjects = () => request<ProjectSummary[]>('/api/v1/projects')
 export const getProject = (projectId: string) => request<ProjectDetail>(`/api/v1/projects/${projectId}`)
+export const getProjectMembers = (projectId: string) => request<Array<{ id: string; userId: string; email: string; displayName: string; role: string; assignedBy: string; assignedAt: string }>>(`/api/v1/projects/${projectId}/members`)
 export const getCurrentUser = () => request<{ name: string; roles: string[] }>('/api/v1/auth/me')
 export const getUsers = () => request<Array<{ id: string; email: string; displayName: string; roles: string[] }>>('/api/v1/admin/users')
 export const createUser = (input: { email: string; displayName: string; password: string; role: string; reason: string }) => request<{ id: string }>('/api/v1/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify(input) })
@@ -67,6 +68,7 @@ export const createProject = (input: { code: string; name: string; description: 
   request<{ id: string }>('/api/v1/projects', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify(input) })
 export const createComponent = (projectId: string, input: { code: string; name: string; parentComponentId: string | null; reason: string }) =>
   request<{ id: string }>(`/api/v1/projects/${projectId}/components`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify(input) })
+export const assignProjectMember = (projectId: string, input: { userId: string; role: string; reason: string }) => request<{ id: string }>(`/api/v1/projects/${projectId}/members`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify(input) })
 export const createComponentVersion = (componentId: string, input: { versionNumber: string; reason: string }) =>
   request<{ id: string; sequenceNo: number }>(`/api/v1/components/${componentId}/versions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify(input) })
 export const changeVersionMaturity = (versionId: string, state: string, reason: string) =>
