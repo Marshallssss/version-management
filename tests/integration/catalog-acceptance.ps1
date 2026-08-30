@@ -40,7 +40,11 @@ function Invoke-JsonPost([string]$Path, [hashtable]$Body) {
     Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, $Path)) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() } -ContentType 'application/json' -Body ($Body | ConvertTo-Json)
 }
 
-$component = Invoke-JsonPost "/api/v1/projects/$($project.id)/components" @{ code = 'CONTROL'; name = 'Control'; parentComponentId = $null; reason = '自动化组件创建' }
+$componentHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() }
+$componentBody = @{ code = 'CONTROL'; name = 'Control'; parentComponentId = $null; reason = '自动化组件创建' } | ConvertTo-Json
+$component = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/components")) -Headers $componentHeaders -ContentType 'application/json' -Body $componentBody
+$componentReplay = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/components")) -Headers $componentHeaders -ContentType 'application/json' -Body $componentBody
+if ($component.id -ne $componentReplay.id) { throw 'Expected idempotent component creation.' }
 $child = Invoke-JsonPost "/api/v1/projects/$($project.id)/components" @{ code = 'CHILD'; name = 'Child'; parentComponentId = $component.id; reason = '自动化子组件创建' }
 try {
     Invoke-JsonPost "/api/v1/components/$($component.id)/move" @{ parentComponentId = $child.id; reason = '自动化环检测' } | Out-Null
@@ -50,7 +54,11 @@ try {
     if ($_.Exception.Response.StatusCode.value__ -ne 409) { throw }
 }
 Invoke-JsonPost "/api/v1/components/$($child.id)/move" @{ parentComponentId = $null; reason = '自动化移动到根节点' } | Out-Null
-$firstVersion = Invoke-JsonPost "/api/v1/components/$($component.id)/versions" @{ versionNumber = 'opaque-a'; reason = '自动化版本创建' }
+$versionHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() }
+$versionBody = @{ versionNumber = 'opaque-a'; reason = '自动化版本创建' } | ConvertTo-Json
+$firstVersion = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/components/$($component.id)/versions")) -Headers $versionHeaders -ContentType 'application/json' -Body $versionBody
+$firstVersionReplay = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/components/$($component.id)/versions")) -Headers $versionHeaders -ContentType 'application/json' -Body $versionBody
+if ($firstVersion.id -ne $firstVersionReplay.id -or $firstVersion.sequenceNo -ne $firstVersionReplay.sequenceNo) { throw 'Expected idempotent version creation.' }
 $secondVersion = Invoke-JsonPost "/api/v1/components/$($component.id)/versions" @{ versionNumber = 'opaque-b'; reason = '自动化版本创建' }
 $childVersion = Invoke-JsonPost "/api/v1/components/$($child.id)/versions" @{ versionNumber = 'opaque-child'; reason = '自动化版本创建' }
 if ($firstVersion.sequenceNo -ne 10 -or $secondVersion.sequenceNo -ne 20) { throw 'Expected version sequence 10/20.' }
