@@ -85,3 +85,7 @@ export const releaseBaseline = (baselineId: string, reason: string) =>
 export const getProjectStandard = (projectId: string) => request<{ baselineId: string; baselineCode: string; validFrom: string } | null>(`/api/v1/projects/${projectId}/standard`)
 export const assignProjectStandard = (projectId: string, baselineId: string, reason: string) =>
   request<{ id: string; baselineId: string }>(`/api/v1/projects/${projectId}/standard`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ configurationBaselineId: baselineId, reason }) })
+export interface MachineSummary { id: string; projectId: string; serialNumber: string; name: string; machineType: string | null; status: string }
+export const getMachines = () => request<MachineSummary[]>('/api/v1/machines')
+export const createMachine = (input: { projectId: string; serialNumber: string; name: string; machineType: string; reason: string }) => request<{ id: string }>('/api/v1/machines', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
+export const getMachineConfiguration = (machineId: string) => request<Array<{ componentId: string; versionId: string | null; state: string; stateEffectiveAt: string; knownInstalledAt: string | null }>>(`/api/v1/machines/${machineId}/configuration`)

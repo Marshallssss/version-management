@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { assignProjectStandard, changeVersionMaturity, changeVersionSafety, cloneProject, createBaseline, createComponent, createComponentVersion, createProject, getBaselines, getCurrentUser, getProject, getProjectStandard, getProjects, login, logout, moveComponent, previewProjectClone, recommendVersion, releaseBaseline } from './catalog-api'
+import { assignProjectStandard, changeVersionMaturity, changeVersionSafety, cloneProject, createBaseline, createComponent, createComponentVersion, createMachine, createProject, getBaselines, getCurrentUser, getMachineConfiguration, getMachines, getProject, getProjectStandard, getProjects, login, logout, moveComponent, previewProjectClone, recommendVersion, releaseBaseline } from './catalog-api'
 import { enqueueNoopJob, getSystemStatus, getSystemVersion, type BackgroundJobStatus } from './system-api'
 
 const navigation = [
@@ -9,7 +9,7 @@ const navigation = [
   { id: 'projects', label: '项目', available: true },
   { id: 'baselines', label: '基线', available: true },
   { id: 'software', label: '软件版本', available: false },
-  { id: 'machines', label: '机台', available: false },
+  { id: 'machines', label: '机台', available: true },
   { id: 'deployments', label: '部署记录', available: false },
   { id: 'compare', label: '配置比对', available: false },
   { id: 'imports', label: '导入', available: false },
@@ -62,6 +62,12 @@ function App() {
   const [releaseReason, setReleaseReason] = useState('')
   const [standardBaselineId, setStandardBaselineId] = useState('')
   const [standardReason, setStandardReason] = useState('')
+  const [machineProjectId, setMachineProjectId] = useState('')
+  const [machineSerial, setMachineSerial] = useState('')
+  const [machineName, setMachineName] = useState('')
+  const [machineType, setMachineType] = useState('')
+  const [machineReason, setMachineReason] = useState('')
+  const [selectedMachineId, setSelectedMachineId] = useState('')
   const queryClient = useQueryClient()
   const system = useQuery({ queryKey: ['system-version'], queryFn: getSystemVersion })
   const status = useQuery({ queryKey: ['system-status'], queryFn: getSystemStatus, refetchInterval: 5_000 })
@@ -70,6 +76,8 @@ function App() {
   const projectDetail = useQuery({ queryKey: ['project', selectedProjectId], queryFn: () => getProject(selectedProjectId!), enabled: selectedProjectId !== null })
   const baselines = useQuery({ queryKey: ['baselines', baselineProjectId], queryFn: () => getBaselines(baselineProjectId), enabled: baselineProjectId !== '' })
   const standard = useQuery({ queryKey: ['project-standard', baselineProjectId], queryFn: () => getProjectStandard(baselineProjectId), enabled: baselineProjectId !== '' })
+  const machines = useQuery({ queryKey: ['machines'], queryFn: getMachines })
+  const machineConfiguration = useQuery({ queryKey: ['machine-configuration', selectedMachineId], queryFn: () => getMachineConfiguration(selectedMachineId), enabled: selectedMachineId !== '' })
   const enqueue = useMutation({
     mutationFn: enqueueNoopJob,
     onSuccess: async () => {
@@ -126,6 +134,7 @@ function App() {
   const addBaseline = useMutation({ mutationFn: ({ projectId, seriesCode, code, description, reason }: { projectId: string; seriesCode: string; code: string; description: string; reason: string }) => createBaseline(projectId, { seriesCode, baselineCode: code, description, reason }), onSuccess: async () => { setBaselineCode(''); setBaselineDescription(''); setBaselineReason(''); await queryClient.invalidateQueries({ queryKey: ['baselines', baselineProjectId] }) } })
   const release = useMutation({ mutationFn: ({ baselineId, reason }: { baselineId: string; reason: string }) => releaseBaseline(baselineId, reason), onSuccess: async () => { setReleaseReason(''); await queryClient.invalidateQueries({ queryKey: ['baselines', baselineProjectId] }) } })
   const assignStandard = useMutation({ mutationFn: ({ projectId, baselineId, reason }: { projectId: string; baselineId: string; reason: string }) => assignProjectStandard(projectId, baselineId, reason), onSuccess: async () => { setStandardReason(''); await queryClient.invalidateQueries({ queryKey: ['project-standard', baselineProjectId] }) } })
+  const addMachine = useMutation({ mutationFn: createMachine, onSuccess: async () => { setMachineSerial(''); setMachineName(''); setMachineType(''); setMachineReason(''); await queryClient.invalidateQueries({ queryKey: ['machines'] }) } })
 
   const connectivity = system.isSuccess ? 'online' : system.isError ? 'offline' : 'checking'
   const selectedNavigation = navigation.find((item) => item.id === activePage) ?? navigation[0]
@@ -258,6 +267,11 @@ function App() {
                 </form>
                 {assignStandard.isError && <p className="error-strip">{assignStandard.error.message}</p>}
               </section>
+            </>}
+
+            {activePage === 'machines' && <>
+              <section className="status-panel catalog-panel"><div className="panel-heading"><div><span className="section-index">机台登记</span><h3>创建机台</h3></div></div><form className="catalog-form" onSubmit={(event) => { event.preventDefault(); addMachine.mutate({ projectId: machineProjectId, serialNumber: machineSerial, name: machineName, machineType, reason: machineReason }) }}><label>所属项目<select value={machineProjectId} onChange={(event) => setMachineProjectId(event.target.value)} required><option value="">请选择项目</option>{projects.data?.map((project) => <option key={project.id} value={project.id}>{project.code} · {project.name}</option>)}</select></label><label>序列号<input value={machineSerial} onChange={(event) => setMachineSerial(event.target.value)} required /></label><label>机台名称<input value={machineName} onChange={(event) => setMachineName(event.target.value)} required /></label><label>机型<input value={machineType} onChange={(event) => setMachineType(event.target.value)} /></label><label className="wide-field">创建原因<input value={machineReason} onChange={(event) => setMachineReason(event.target.value)} required /></label><button className="primary-action" type="submit" disabled={addMachine.isPending}>{addMachine.isPending ? '正在创建' : '创建机台'}</button></form>{addMachine.isError && <p className="error-strip">{addMachine.error.message}</p>}</section>
+              <section className="status-panel catalog-panel"><div className="panel-heading"><div><span className="section-index">机台列表</span><h3>当前实际配置</h3></div><span className="count">{machines.data?.length ?? 0}</span></div><div className="catalog-list">{machines.data?.map((machine) => <button type="button" className={machine.id === selectedMachineId ? 'project-row selected' : 'project-row'} key={machine.id} onClick={() => setSelectedMachineId(machine.id)}><span><strong>{machine.serialNumber}</strong><small>{machine.name}{machine.machineType ? ` · ${machine.machineType}` : ''}</small></span><em>{machine.status === 'Active' ? '在用' : '归档'}</em></button>)}</div>{selectedMachineId && <div className="component-list">{machineConfiguration.data?.map((item) => <article className="component-row" key={item.componentId}><div><strong>{item.state === 'Present' ? '存在' : '缺失'}</strong><span>组件 {item.componentId}</span></div><div className="version-tags"><span>{item.versionId ?? '无版本'}<small>状态时间 {formatTime(item.stateEffectiveAt)}</small></span></div></article>)}</div>}</section>
             </>}
           </div>
         ) : (
