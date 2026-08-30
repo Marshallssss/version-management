@@ -87,8 +87,11 @@ $standard = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new
 $standardReplay = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/standard")) -Headers $standardHeaders -ContentType 'application/json' -Body $standardBody
 $currentStandard = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/standard"))
 if ($standard.baselineId -ne $baseline.id -or $standard.id -ne $standardReplay.id -or $currentStandard.baselineId -ne $baseline.id) { throw 'Expected idempotent current project standard assignment.' }
-$target = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($machine.id)/target")) -ContentType 'application/json' -Body (@{ configurationBaselineId = $baseline.id; reason = '自动化机台目标验收' } | ConvertTo-Json)
-if ($target.baselineId -ne $baseline.id) { throw 'Expected explicit machine target assignment.' }
+$targetHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() }
+$targetBody = @{ configurationBaselineId = $baseline.id; reason = '自动化机台目标验收' } | ConvertTo-Json
+$target = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($machine.id)/target")) -Headers $targetHeaders -ContentType 'application/json' -Body $targetBody
+$targetReplay = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($machine.id)/target")) -Headers $targetHeaders -ContentType 'application/json' -Body $targetBody
+if ($target.baselineId -ne $baseline.id -or $target.id -ne $targetReplay.id) { throw 'Expected idempotent explicit machine target assignment.' }
 $fullFacts = @{ operationType = 'InitialSnapshot'; coverage = 'Full'; sourceType = 'automation'; reason = '自动化完整快照'; items = @(@{ componentId = $component.id; versionId = $secondVersion.id; absent = $false; knownInstalledAt = $null }, @{ componentId = $child.id; versionId = $childVersion.id; absent = $false; knownInstalledAt = $null }) } | ConvertTo-Json -Depth 5
 Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($machine.id)/facts")) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() } -ContentType 'application/json' -Body $fullFacts | Out-Null
 $blockedForRisk = Invoke-Lifecycle "/api/v1/component-versions/$($secondVersion.id)/safety" 'Blocked' '自动化风险验收'
