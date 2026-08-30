@@ -64,7 +64,7 @@ $childVersion = Invoke-JsonPost "/api/v1/components/$($child.id)/versions" @{ ve
 if ($firstVersion.sequenceNo -ne 10 -or $secondVersion.sequenceNo -ne 20) { throw 'Expected version sequence 10/20.' }
 
 function Invoke-Lifecycle([string]$Path, [string]$State, [string]$Reason) {
-    Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, $Path)) -ContentType 'application/json' -Body (@{ state = $State; reason = $Reason } | ConvertTo-Json)
+    Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, $Path)) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() } -ContentType 'application/json' -Body (@{ state = $State; reason = $Reason } | ConvertTo-Json)
 }
 
 $testing = Invoke-Lifecycle "/api/v1/component-versions/$($firstVersion.id)/maturity" 'Testing' '自动化提交测试'
