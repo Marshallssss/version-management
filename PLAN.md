@@ -1894,6 +1894,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 6D 已交付：中文“部署记录”页可按机台读取 Deployment/Observation Batch 历史，明确展示操作、覆盖范围、记录时间和生效时间；`catalog-acceptance.ps1` 覆盖 FULL InitialSnapshot 与 PARTIAL Observation 历史读取。
 - 6C 已交付：中文机台页支持创建、列表、Current Actual 读取和手工 Observation 录入；默认 `PARTIAL`，只有用户显式选择才发送 `FULL`，并要求填写原因。
 - 6C 复核补强进行中：手工 Observation 不再要求输入组件/版本 GUID，而是按所选机台所属项目显示中文组件与版本选择器；切换机台或组件会清空不再有效的选择。
+- 6B 验收补强进行中：自动化验收新增 FULL Observation 遗漏组件投影为 Absent 的断言，并验证 Observation 的时间不会回填为 `KnownInstalledAt`。
 
 ## Step 7 — Drift/Risk/Compare
 
