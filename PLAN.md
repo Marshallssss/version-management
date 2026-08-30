@@ -1887,7 +1887,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 7A 已交付：Machine Detail 实时比较显式 Machine Target 与 Current Actual；Match 与 Risk 分离，实际或目标 Version 被 Blocked 时即使版本匹配也必须返回 `Matched + Critical`。
 - 7A 验收补充：`catalog-acceptance.ps1` 已覆盖 Target=Actual 且 Version 后续 Blocked 的 `Matched + Critical` 场景。
 - 7B 已交付：中文机台详情实时显示独立的“配置匹配”和“风险等级”字段，避免把 Match 与 Risk 合并成单一状态。
-- 7C 已交付：Core V1 Compare 支持 Baseline vs Baseline，仅返回 Same/Changed/Added/Removed 的快照差异；不扩展 Machine vs Machine 或通用 Compare。`catalog-acceptance.ps1` 已覆盖版本变化被标记为 `Changed`。
+- 7C 已交付：Core V1 Compare 支持 Baseline vs Baseline，仅返回 Same/Changed/Added/Removed 的快照差异；不扩展 Machine vs Machine 或通用 Compare。中文“配置比对”页已接入，`catalog-acceptance.ps1` 覆盖版本变化被标记为 `Changed`。
 - 7D 已交付：机台列表使用可重建的 `machine_drift_summaries` 投影，投影保存独立 Match 与 Risk，并在事实、目标和版本安全状态改变后刷新。列表提供摘要字段，单机摘要 API 用于自动化验收；真实 PostgreSQL Migration、Release build 和 `catalog-acceptance.ps1` 已通过。
 
 ## Step 8 — Trace/Impact/Search

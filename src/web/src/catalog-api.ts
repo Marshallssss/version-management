@@ -78,6 +78,7 @@ export const cloneProject = (projectId: string, input: { code: string; name: str
 export const moveComponent = (componentId: string, input: { parentComponentId: string | null; reason: string }) =>
   request<{ id: string; lineageKey: string }>(`/api/v1/components/${componentId}/move`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify(input) })
 export const getBaselines = (projectId: string) => request<BaselineSummary[]>(`/api/v1/projects/${projectId}/baselines`)
+export const compareBaselines = (leftBaselineId: string, rightBaselineId: string) => request<{ items: Array<{ componentId: string; status: string; leftVersionId: string | null; rightVersionId: string | null }> }>(`/api/v1/baselines/${leftBaselineId}/compare/${rightBaselineId}`)
 export const createBaseline = (projectId: string, input: { seriesCode: string; baselineCode: string; description: string; reason: string }) =>
   request<{ id: string; revisionNo: number; itemCount: number }>(`/api/v1/projects/${projectId}/baselines`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify(input) })
 export const releaseBaseline = (baselineId: string, reason: string) =>
