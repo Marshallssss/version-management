@@ -211,12 +211,20 @@ public static class CatalogEndpoints
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         if (!await db.Projects.AnyAsync(item => item.Id == request.ProjectId, cancellationToken)) return Results.NotFound();
         var batch = new ImportBatch { Id = Guid.NewGuid(), ProjectId = request.ProjectId, SourceFileName = request.SourceFileName.Trim(), CreatedBy = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required."), Reason = request.Reason.Trim(), CreatedAt = DateTimeOffset.UtcNow };
+        var componentCodes = request.Rows.Where(row => !string.IsNullOrWhiteSpace(row.ComponentCode)).Select(row => Normalize(row.ComponentCode!)).Distinct().ToArray();
+        var components = await db.ConfigurationComponents.Where(item => item.ProjectId == request.ProjectId && componentCodes.Contains(item.NormalizedComponentCode)).ToDictionaryAsync(item => item.NormalizedComponentCode, cancellationToken);
+        var existingVersions = await db.ComponentVersions.Where(item => components.Values.Select(component => component.Id).Contains(item.ComponentId)).Select(item => new { item.ComponentId, item.NormalizedVersionNumber }).ToListAsync(cancellationToken);
+        var seen = new HashSet<string>();
         var errors = 0;
         foreach (var row in request.Rows.Select((value, index) => new { value, index }))
         {
-            var invalid = string.IsNullOrWhiteSpace(row.value.ComponentCode) || string.IsNullOrWhiteSpace(row.value.VersionNumber);
-            if (invalid) errors++;
-            db.ImportRows.Add(new ImportRow { Id = Guid.NewGuid(), ImportBatchId = batch.Id, RowNumber = row.index + 1, Payload = JsonDocument.Parse(JsonSerializer.Serialize(row.value)), ValidationError = invalid ? "componentCode 和 versionNumber 为必填项。" : null });
+            string? error = null;
+            if (string.IsNullOrWhiteSpace(row.value.ComponentCode) || string.IsNullOrWhiteSpace(row.value.VersionNumber)) error = "componentCode 和 versionNumber 为必填项。";
+            else if (!components.TryGetValue(Normalize(row.value.ComponentCode), out var component)) error = "组件不存在或不属于该项目。";
+            else if (existingVersions.Any(version => version.ComponentId == component.Id && version.NormalizedVersionNumber == Normalize(row.value.VersionNumber))) error = "版本已存在。";
+            else if (!seen.Add($"{component.Id}:{Normalize(row.value.VersionNumber)}")) error = "同一导入批次中存在重复版本。";
+            if (error is not null) errors++;
+            db.ImportRows.Add(new ImportRow { Id = Guid.NewGuid(), ImportBatchId = batch.Id, RowNumber = row.index + 1, Payload = JsonDocument.Parse(JsonSerializer.Serialize(row.value)), ValidationError = error });
         }
         batch.Status = errors == 0 ? ImportBatchStatus.Validated : ImportBatchStatus.Staged;
         db.ImportBatches.Add(batch);
