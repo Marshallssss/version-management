@@ -67,9 +67,12 @@ function Invoke-Lifecycle([string]$Path, [string]$State, [string]$Reason) {
     Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, $Path)) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() } -ContentType 'application/json' -Body (@{ state = $State; reason = $Reason } | ConvertTo-Json)
 }
 
-$testing = Invoke-Lifecycle "/api/v1/component-versions/$($firstVersion.id)/maturity" 'Testing' '自动化提交测试'
+$maturityHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() }
+$maturityBody = @{ state = 'Testing'; reason = '自动化提交测试' } | ConvertTo-Json
+$testing = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/component-versions/$($firstVersion.id)/maturity")) -Headers $maturityHeaders -ContentType 'application/json' -Body $maturityBody
+$testingReplay = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/component-versions/$($firstVersion.id)/maturity")) -Headers $maturityHeaders -ContentType 'application/json' -Body $maturityBody
 $released = Invoke-Lifecycle "/api/v1/component-versions/$($firstVersion.id)/maturity" 'Released' '自动化发布'
-if ($testing.maturity -ne 'Testing' -or $released.maturity -ne 'Released') { throw 'Expected Draft -> Testing -> Released lifecycle.' }
+if ($testing.maturity -ne 'Testing' -or $testingReplay.maturity -ne 'Testing' -or $released.maturity -ne 'Released') { throw 'Expected idempotent Draft -> Testing -> Released lifecycle.' }
 Invoke-Lifecycle "/api/v1/component-versions/$($firstVersion.id)/recommend" '' '自动化推荐' | Out-Null
 $blocked = Invoke-Lifecycle "/api/v1/component-versions/$($firstVersion.id)/safety" 'Blocked' '自动化阻断'
 $clear = Invoke-Lifecycle "/api/v1/component-versions/$($firstVersion.id)/safety" 'Clear' '自动化解除阻断'
