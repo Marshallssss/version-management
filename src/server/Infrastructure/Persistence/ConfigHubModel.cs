@@ -306,5 +306,15 @@ internal static class ConfigHubModel
             entity.Property(item => item.MachineId).HasColumnName("machine_id"); entity.Property(item => item.ConfigurationComponentId).HasColumnName("configuration_component_id"); entity.Property(item => item.ComponentVersionId).HasColumnName("component_version_id"); entity.Property(item => item.State).HasColumnName("state").HasMaxLength(32).HasConversion<string>(); entity.Property(item => item.StateEffectiveAt).HasColumnName("state_effective_at"); entity.Property(item => item.KnownInstalledAt).HasColumnName("known_installed_at"); entity.Property(item => item.SourceDeploymentItemId).HasColumnName("source_deployment_item_id");
             entity.HasIndex(item => new { item.ComponentVersionId, item.MachineId }).HasDatabaseName("ix_machine_current_configurations_version_machine"); entity.HasOne<Machine>().WithMany().HasForeignKey(item => item.MachineId).OnDelete(DeleteBehavior.Restrict); entity.HasOne<ConfigurationComponent>().WithMany().HasForeignKey(item => item.ConfigurationComponentId).OnDelete(DeleteBehavior.Restrict); entity.HasOne<ComponentVersion>().WithMany().HasForeignKey(item => item.ComponentVersionId).OnDelete(DeleteBehavior.Restrict); entity.HasOne<DeploymentItem>().WithMany().HasForeignKey(item => item.SourceDeploymentItemId).OnDelete(DeleteBehavior.Restrict);
         });
+        modelBuilder.Entity<MachineDriftSummary>(entity =>
+        {
+            entity.ToTable("machine_drift_summaries");
+            entity.HasKey(item => item.MachineId);
+            entity.Property(item => item.MachineId).HasColumnName("machine_id");
+            entity.Property(item => item.MatchStatus).HasColumnName("match_status").HasMaxLength(32).HasConversion<string>();
+            entity.Property(item => item.RiskSeverity).HasColumnName("risk_severity").HasMaxLength(32).HasConversion<string>();
+            entity.Property(item => item.CalculatedAt).HasColumnName("calculated_at");
+            entity.HasOne<Machine>().WithMany().HasForeignKey(item => item.MachineId).OnDelete(DeleteBehavior.Restrict);
+        });
     }
 }
