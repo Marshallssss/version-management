@@ -1839,7 +1839,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 ## Step 2 — Foundation
 
 - Identity、Cookie、RBAC、Audit、Correlation、React Shell。
-- 状态：进行中。
+- 状态：已交付；项目范围授权的完整矩阵继续在 Step 10 加固。
 - 已交付：React 中文操作壳、请求 `X-Correlation-ID` 传播、追加式 `audit_events`、项目/组件/版本写入审计与只读审计查询。
 - 已交付补充：ASP.NET Core Identity 用户/角色表、Cookie 登录/退出/当前身份接口、Bootstrap Admin 本机配置、Engineer 以上角色的 API 授权；Project Create 在同一事务中校验 `reason`、`Idempotency-Key`、权限、Audit 与结果重放。
 - 自动验收：`tests/integration/catalog-acceptance.ps1` 覆盖未认证 HTTP 401、Cookie 登录、同 Key 重放、认证 Audit/Correlation、组件版本序列与重复版本冲突。
@@ -1847,26 +1847,26 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 2A 已交付：管理员可读取 Identity 数据库中的用户目录与角色，中文“用户与角色”界面只向 Admin 展示；`catalog-acceptance.ps1` 验证 Bootstrap Admin 与 Admin 角色。用户创建与角色变更仍在下一条写入切片中实施。
 - 2B 已交付：管理员创建用户命令会创建 Identity 用户、分配初始角色、记录 Audit 和持久化 Idempotency；中文界面已接入。`catalog-acceptance.ps1` 覆盖创建与同键重放、Viewer 登录及 Viewer 对 Project Create 的 API HTTP 403；Release、真实 Migration 与完整集成验收均已通过。
 - 2C 已交付：管理员角色变更命令包含最后一个 Admin 保护、Audit、原因和 Idempotency；中文编辑已接入。`catalog-acceptance.ps1` 覆盖 Viewer→Engineer 变更、同键重放和重新登录后的角色 Claim；Release、真实 Migration 与完整集成验收均已通过。
-- 2D 进行中：已由真实 EF 模型生成 `ProjectMemberships` 追加 Migration，成员关系以 Project/User 唯一约束、项目角色、指派人、原因和时间持久化；管理员成员指派 API、中文项目详情和同键重放验收已接入，下一步接入项目写操作授权。
+- 2D 已交付：已由真实 EF 模型生成 `ProjectMemberships` 追加 Migration，成员关系以 Project/User 唯一约束、项目角色、指派人、原因和时间持久化；管理员成员指派 API、中文项目详情和同键重放验收已接入，项目写操作已接入范围授权。
 - 2D 授权补强进行中：Component Create 已要求非 Admin Engineer 具有对应 Project Membership（Engineer/SeniorEngineer），自动验收覆盖“全局 Engineer 但未加入项目”返回 API HTTP 403；其余项目写命令继续逐条接入同一授权服务。
 - 2D 授权补强进行中：Component Version Create 与 Component Move 已复用同一项目范围校验；自动验收覆盖未加入项目的 Engineer 对 Component Create/Version Create/Move 均返回 API HTTP 403。
 - 2D 授权补强进行中：Maturity/Safety/Recommendation 需要项目内 SeniorEngineer Membership；自动验收覆盖全局 SeniorEngineer 但未加入项目时 Lifecycle API HTTP 403。
 - 2D 授权补强进行中：项目克隆、机台创建、机台目标、部署事实、导入暂存/提交均要求项目成员写权限；Baseline 创建、发布和项目标准均要求项目内 SeniorEngineer Membership。
 - 2D 验收补强进行中：自动化拒绝场景覆盖无项目成员的 Baseline Create、Project Clone、Machine Create、Import Stage，以及普通项目 Engineer 的 Baseline Release 和 Project Standard Assignment。
-- 待完成：用户管理界面、角色管理，以及 Component/Version 与后续写命令的原因/幂等协议。
+- 已交付：中文用户管理、角色管理，以及 Component/Version 与后续写命令的原因/幂等协议；完整授权矩阵留在 Step 10 的安全加固验收。
 
 ## Step 3 — Project → Component → Version
 
 - Project/Clone、Component Tree、Version Sequence、Lifecycle、Version Detail。
-- 状态：进行中；先交付 Project → Component → Version 的可用闭环，Clone 与完整 Lifecycle 扩展随后补齐。
+- 状态：已交付；Project、Component Tree、Version、Lifecycle、Clone 与版本详情闭环均已完成。
 - 已交付：Project 创建/列表/详情、根 Component 创建、ComponentVersion 创建、每个 Component 的显式递增 `sequence_no`、规范化编码与版本号唯一约束，以及中文操作界面。
 - 已交付补充：`lineage_key`、同项目唯一约束、PostgreSQL 父组件/环检测触发器、版本 `max(sequence_no) + 10` 间隔与 `tests/integration/catalog-acceptance.ps1` 自动验收脚本（含 10/20 序列、重复版本 HTTP 409、Audit/Correlation 断言）。
 - 组件树移动切片已交付：中文移动表单与受授权的 Move Command 会更新整个子树的 `lineage_key`；自动验收覆盖子节点移动和移动到后代时 HTTP 409。
-- 3B UI 补强进行中：组件创建中文表单已支持显式选择父组件或根组件，复用既有同项目校验、lineage 和环检测；待 Release/Migration/完整集成验证。
+- 3B UI 补强已交付：组件创建中文表单支持显式选择父组件或根组件，复用既有同项目校验、lineage 和环检测；Release/Migration/完整集成验证已通过。
 - 生命周期切片已交付：独立 Maturity/Safety Transition History 与 Recommendation History 已落库；API/UI/自动测试覆盖 Draft→Testing→Released、推荐、Block 自动撤销推荐以及 Unblock 不自动恢复。
 - Clone 切片已交付：中文 Preview/Commit 表单只复制 Project 与 Component Tree，不复制 ComponentVersion、Baseline、Machine 或运行历史；自动验收断言新项目组件存在且版本为空。
 - 3G 已交付：版本详情 API/中文界面显示组件归属、opaque sequence、Maturity/Safety、Recommendation 与生命周期轨迹；`catalog-acceptance.ps1` 已验证版本身份与生命周期记录，Release、真实 Migration 与完整集成验收均已通过。
-- 待完成：深层组件树编辑、版本详情/影响查询，以及基于资源范围的 Project RBAC；当前已具备角色级 API 授权。
+- 已交付：组件树移动、版本详情/影响查询，以及基于资源范围的 Project RBAC；完整授权矩阵继续在 Step 10 加固。
 
 ## Step 4 — Baseline
 
