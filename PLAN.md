@@ -1908,6 +1908,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 3D 补强已交付：版本 Maturity 与 Safety 变更均接入持久化 Idempotency；Safety 在同一事务中写生命周期、Audit、推荐撤销和 Drift Summary。`catalog-acceptance.ps1` 已覆盖 Maturity 同键重放及 Blocked 后 `Matched + Critical`。
 - 3E 补强已交付：版本 Recommendation 变更已接入持久化 Idempotency，与旧推荐撤销、新推荐创建和 Audit 同事务提交；真实完整集成验收已通过。
 - 3F 补强已交付：Project Clone 已接入持久化 Idempotency；真实同键重放验收确认不会复制第二棵组件树，且版本、基线与机台仍被排除。
+- 3B 补强已交付：Component Move 要求 reason 与 Idempotency-Key，在同一事务更新 lineage、Audit 与重放结果；真实集成验收覆盖环检测和根节点移动。
 
 ## Step 10 — Production Hardening
 

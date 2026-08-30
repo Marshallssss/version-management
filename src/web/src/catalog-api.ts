@@ -76,7 +76,7 @@ export const previewProjectClone = (projectId: string) => request<{ copiedCompon
 export const cloneProject = (projectId: string, input: { code: string; name: string; reason: string }) =>
   request<{ id: string }>(`/api/v1/projects/${projectId}/clone`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify(input) })
 export const moveComponent = (componentId: string, input: { parentComponentId: string | null; reason: string }) =>
-  request<{ id: string; lineageKey: string }>(`/api/v1/components/${componentId}/move`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
+  request<{ id: string; lineageKey: string }>(`/api/v1/components/${componentId}/move`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify(input) })
 export const getBaselines = (projectId: string) => request<BaselineSummary[]>(`/api/v1/projects/${projectId}/baselines`)
 export const createBaseline = (projectId: string, input: { seriesCode: string; baselineCode: string; description: string; reason: string }) =>
   request<{ id: string; revisionNo: number; itemCount: number }>(`/api/v1/projects/${projectId}/baselines`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify(input) })
