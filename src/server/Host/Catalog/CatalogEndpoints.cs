@@ -215,9 +215,12 @@ public static class CatalogEndpoints
     private static async Task<IResult> StageImportAsync(StageImportRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
     {
         if (request.ProjectId == Guid.Empty || string.IsNullOrWhiteSpace(request.SourceFileName) || string.IsNullOrWhiteSpace(request.Reason) || request.Rows is null || request.Rows.Count == 0) return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = ["必须提供项目、来源文件、原因和至少一行数据。"] });
+        var key = context.Request.Headers["Idempotency-Key"].FirstOrDefault(); if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["生成导入预览必须提供不超过 200 个字符的 Idempotency-Key。"] });
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var scope = $"imports.stage:{request.ProjectId}"; var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request)))); var replay = await db.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
+        if (replay is not null) { if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (replay.Result is not null) return TypedResults.Ok(replay.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
         if (!await db.Projects.AnyAsync(item => item.Id == request.ProjectId, cancellationToken)) return Results.NotFound();
-        var batch = new ImportBatch { Id = Guid.NewGuid(), ProjectId = request.ProjectId, SourceFileName = request.SourceFileName.Trim(), CreatedBy = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required."), Reason = request.Reason.Trim(), CreatedAt = DateTimeOffset.UtcNow };
+        var now = DateTimeOffset.UtcNow; await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken); db.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }); var batch = new ImportBatch { Id = Guid.NewGuid(), ProjectId = request.ProjectId, SourceFileName = request.SourceFileName.Trim(), CreatedBy = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required."), Reason = request.Reason.Trim(), CreatedAt = now };
         var componentCodes = request.Rows.Where(row => !string.IsNullOrWhiteSpace(row.ComponentCode)).Select(row => Normalize(row.ComponentCode!)).Distinct().ToArray();
         var components = await db.ConfigurationComponents.Where(item => item.ProjectId == request.ProjectId && componentCodes.Contains(item.NormalizedComponentCode)).ToDictionaryAsync(item => item.NormalizedComponentCode, cancellationToken);
         var existingVersions = await db.ComponentVersions.Where(item => components.Values.Select(component => component.Id).Contains(item.ComponentId)).Select(item => new { item.ComponentId, item.NormalizedVersionNumber }).ToListAsync(cancellationToken);
@@ -236,7 +239,7 @@ public static class CatalogEndpoints
         batch.Status = errors == 0 ? ImportBatchStatus.Validated : ImportBatchStatus.Staged;
         db.ImportBatches.Add(batch);
         AddAuditEvent(db, context, "ImportStaged", "ImportBatch", batch.Id, new { batch.ProjectId, rowCount = request.Rows.Count, errors, reason = batch.Reason });
-        await db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken); var record = await db.IdempotencyRecords.SingleAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken); record.Status = IdempotencyRecordStatus.Completed; record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = batch.Id, status = batch.Status.ToString(), rowCount = request.Rows.Count, errorCount = errors })); await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
         return TypedResults.Created($"/api/v1/imports/{batch.Id}", new { id = batch.Id, status = batch.Status.ToString(), rowCount = request.Rows.Count, errorCount = errors });
     }
 
