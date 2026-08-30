@@ -28,6 +28,7 @@ public static class CatalogEndpoints
         endpoints.MapGet("/api/v1/machines", ListMachinesAsync);
         endpoints.MapPost("/api/v1/machines", CreateMachineAsync).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/machines/{machineId:guid}/target", AssignMachineTargetAsync).RequireAuthorization("SeniorEngineer");
+        endpoints.MapGet("/api/v1/machines/{machineId:guid}/target", GetMachineTargetAsync);
         endpoints.MapPost("/api/v1/machines/{machineId:guid}/facts", RecordFactsAsync).RequireAuthorization("Engineer");
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/configuration", GetMachineConfigurationAsync);
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/facts", ListMachineFactsAsync);
@@ -128,6 +129,16 @@ public static class CatalogEndpoints
         if (baseline.State != BaselineState.Released) return Results.Conflict(new { message = "仅可分配已发布基线。" });
         var now = DateTimeOffset.UtcNow; await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken); database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }); var old = await database.MachineTargetAssignments.SingleOrDefaultAsync(item => item.MachineId == machineId && item.ValidTo == null, cancellationToken); if (old is not null) old.ValidTo = now;
         var assignment = new MachineTargetAssignment { Id = Guid.NewGuid(), MachineId = machineId, ConfigurationBaselineId = baseline.Id, ValidFrom = now, AssignedBy = context.User.Identity?.Name ?? "", Reason = request.Reason.Trim() }; database.MachineTargetAssignments.Add(assignment); AddAuditEvent(database, context, "MachineTargetAssigned", "Machine", machineId, new { baselineId = baseline.Id, reason = assignment.Reason }); await database.SaveChangesAsync(cancellationToken); await RefreshMachineDriftSummaryAsync(database, machineId, cancellationToken); var record = await database.IdempotencyRecords.SingleAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken); record.Status = IdempotencyRecordStatus.Completed; record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = assignment.Id, baselineId = baseline.Id })); await database.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken); return TypedResults.Ok(new { id = assignment.Id, baselineId = baseline.Id });
+    }
+
+    private static async Task<IResult> GetMachineTargetAsync(Guid machineId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        await using var database = await factory.CreateDbContextAsync(cancellationToken);
+        var target = await database.MachineTargetAssignments.AsNoTracking()
+            .Where(item => item.MachineId == machineId && item.ValidTo == null)
+            .Select(item => new { baselineId = item.ConfigurationBaselineId, validFrom = item.ValidFrom, baselineCode = database.ConfigurationBaselines.Where(baseline => baseline.Id == item.ConfigurationBaselineId).Select(baseline => baseline.BaselineCode).Single() })
+            .SingleOrDefaultAsync(cancellationToken);
+        return TypedResults.Ok(target);
     }
 
     private static async Task<IResult> RecordFactsAsync(Guid machineId, RecordFactsRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)

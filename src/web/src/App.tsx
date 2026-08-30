@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { assignMachineTarget, assignProjectMember, assignProjectStandard, changeUserRole, changeVersionMaturity, changeVersionSafety, cloneProject, commitImport, compareBaselines, createBaseline, createComponent, createComponentVersion, createMachine, createProject, createUser, getBaselines, getCurrentUser, getDashboard, getImportPreview, getMachineConfiguration, getMachineDrift, getMachineFacts, getMachines, getProject, getProjectMembers, getProjectStandard, getProjects, getUsers, getVersionDetail, getVersionImpact, login, logout, moveComponent, recommendVersion, recordMachineFacts, releaseBaseline, searchCatalog, stageImport } from './catalog-api'
+import { assignMachineTarget, assignProjectMember, assignProjectStandard, changeUserRole, changeVersionMaturity, changeVersionSafety, cloneProject, commitImport, compareBaselines, createBaseline, createComponent, createComponentVersion, createMachine, createProject, createUser, getBaselines, getCurrentUser, getDashboard, getImportPreview, getMachineConfiguration, getMachineDrift, getMachineFacts, getMachineTarget, getMachines, getProject, getProjectMembers, getProjectStandard, getProjects, getUsers, getVersionDetail, getVersionImpact, login, logout, moveComponent, recommendVersion, recordMachineFacts, releaseBaseline, searchCatalog, stageImport } from './catalog-api'
 import { enqueueNoopJob, getSystemStatus, getSystemVersion, type BackgroundJobStatus } from './system-api'
 
 const navigation = [
@@ -118,6 +118,7 @@ function App() {
   const machineProjectDetail = useQuery({ queryKey: ['machine-project', selectedMachine?.projectId], queryFn: () => getProject(selectedMachine!.projectId), enabled: selectedMachine !== undefined })
   const selectedFactComponent = machineProjectDetail.data?.components.find(component => component.id === factComponentId)
   const targetBaselines = useQuery({ queryKey: ['machine-target-baselines', selectedMachine?.projectId], queryFn: () => getBaselines(selectedMachine!.projectId), enabled: selectedMachine !== undefined })
+  const machineTarget = useQuery({ queryKey: ['machine-target', selectedMachineId], queryFn: () => getMachineTarget(selectedMachineId), enabled: selectedMachineId !== '' })
   const machineConfiguration = useQuery({ queryKey: ['machine-configuration', selectedMachineId], queryFn: () => getMachineConfiguration(selectedMachineId), enabled: selectedMachineId !== '' })
   const machineFacts = useQuery({ queryKey: ['machine-facts', selectedMachineId], queryFn: () => getMachineFacts(selectedMachineId), enabled: selectedMachineId !== '' })
   const machineDrift = useQuery({ queryKey: ['machine-drift', selectedMachineId], queryFn: () => getMachineDrift(selectedMachineId), enabled: selectedMachineId !== '' })
@@ -146,7 +147,7 @@ function App() {
     },
   })
   const stageImportMutation = useMutation({ mutationFn: () => stageImport({ projectId: importProjectId, sourceFileName: '手工预览.csv', reason: importReason, rows: importRows.split(/\r?\n/).filter(Boolean).map(line => { const [componentCode = '', versionNumber = ''] = line.split(','); return { componentCode: componentCode.trim(), versionNumber: versionNumber.trim() } }) }), onSuccess: ({ id }) => setImportBatchId(id) })
-  const assignTarget = useMutation({ mutationFn: () => assignMachineTarget(selectedMachineId, targetBaselineId, targetReason), onSuccess: async () => { setTargetBaselineId(''); setTargetReason(''); await queryClient.invalidateQueries({ queryKey: ['machines'] }); await queryClient.invalidateQueries({ queryKey: ['machine-drift', selectedMachineId] }) } })
+  const assignTarget = useMutation({ mutationFn: () => assignMachineTarget(selectedMachineId, targetBaselineId, targetReason), onSuccess: async () => { setTargetBaselineId(''); setTargetReason(''); await queryClient.invalidateQueries({ queryKey: ['machines'] }); await queryClient.invalidateQueries({ queryKey: ['machine-target', selectedMachineId] }); await queryClient.invalidateQueries({ queryKey: ['machine-drift', selectedMachineId] }) } })
   const commitImportMutation = useMutation({ mutationFn: () => commitImport(importBatchId), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ['import-preview', importBatchId] }); await queryClient.invalidateQueries({ queryKey: ['project', selectedProjectId] }) } })
   const signIn = useMutation({ mutationFn: login, onSuccess: async () => { setPassword(''); await queryClient.invalidateQueries({ queryKey: ['current-user'] }) } })
   const signOut = useMutation({ mutationFn: logout, onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ['current-user'] }); setSelectedProjectId(null) } })
