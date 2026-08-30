@@ -1848,6 +1848,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 2B 已交付：管理员创建用户命令会创建 Identity 用户、分配初始角色、记录 Audit 和持久化 Idempotency；中文界面已接入。`catalog-acceptance.ps1` 覆盖创建与同键重放、Viewer 登录及 Viewer 对 Project Create 的 API HTTP 403；Release、真实 Migration 与完整集成验收均已通过。
 - 2C 已交付：管理员角色变更命令包含最后一个 Admin 保护、Audit、原因和 Idempotency；中文编辑已接入。`catalog-acceptance.ps1` 覆盖 Viewer→Engineer 变更、同键重放和重新登录后的角色 Claim；Release、真实 Migration 与完整集成验收均已通过。
 - 2D 进行中：已由真实 EF 模型生成 `ProjectMemberships` 追加 Migration，成员关系以 Project/User 唯一约束、项目角色、指派人、原因和时间持久化；管理员成员指派 API、中文项目详情和同键重放验收已接入，下一步接入项目写操作授权。
+- 2D 授权补强进行中：Component Create 已要求非 Admin Engineer 具有对应 Project Membership（Engineer/SeniorEngineer），自动验收覆盖“全局 Engineer 但未加入项目”返回 API HTTP 403；其余项目写命令继续逐条接入同一授权服务。
 - 待完成：用户管理界面、角色管理，以及 Component/Version 与后续写命令的原因/幂等协议。
 
 ## Step 3 — Project → Component → Version

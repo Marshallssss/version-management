@@ -801,6 +801,7 @@ public static class CatalogEndpoints
         {
             return Results.NotFound();
         }
+        if (!await HasProjectWriteAccessAsync(database, httpContext, projectId, cancellationToken)) return Results.Forbid();
         var parent = request.ParentComponentId is null
             ? null
             : await database.ConfigurationComponents.SingleOrDefaultAsync(component => component.Id == request.ParentComponentId, cancellationToken);
@@ -993,6 +994,14 @@ public static class CatalogEndpoints
             : null;
 
     private static string Normalize(string value) => value.Trim().ToUpperInvariant();
+
+    private static async Task<bool> HasProjectWriteAccessAsync(ConfigHubDbContext database, HttpContext context, Guid projectId, CancellationToken cancellationToken)
+    {
+        if (context.User.IsInRole("Admin")) return true;
+        var userId = context.User.FindFirst(global::System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (!Guid.TryParse(userId, out var parsedUserId)) return false;
+        return await database.ProjectMemberships.AnyAsync(member => member.ProjectId == projectId && member.UserId == parsedUserId && (member.Role == ProjectMembershipRole.Engineer || member.Role == ProjectMembershipRole.SeniorEngineer), cancellationToken);
+    }
 
     private static string? NormalizeOptional(string? value, int maxLength) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim()[..Math.Min(value.Trim().Length, maxLength)];
