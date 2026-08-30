@@ -19,6 +19,7 @@ public static class AuthEndpoints
         var admin = endpoints.MapGroup("/api/v1/admin").RequireAuthorization(policy => policy.RequireRole("Admin"));
         admin.MapGet("/users", ListUsersAsync);
         admin.MapPost("/users", CreateUserAsync);
+        admin.MapPost("/users/{userId:guid}/role", ChangeUserRoleAsync);
         return endpoints;
     }
 
@@ -84,8 +85,25 @@ public static class AuthEndpoints
         await transaction.CommitAsync(cancellationToken);
         return TypedResults.Created($"/api/v1/admin/users/{user.Id}", new { id = user.Id, email = user.Email, role });
     }
+
+    private static async Task<IResult> ChangeUserRoleAsync(Guid userId, ChangeUserRoleRequest request, HttpContext context, UserManager<ApplicationUser> userManager, RoleManager<IdentityRole<Guid>> roleManager, ConfigHubDbContext database, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Role) || string.IsNullOrWhiteSpace(request.Reason)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = ["必须提供角色和变更原因。"] });
+        var key = context.Request.Headers["Idempotency-Key"].FirstOrDefault(); if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["变更角色必须提供不超过 200 个字符的 Idempotency-Key。"] });
+        var role = request.Role.Trim(); if (!await roleManager.RoleExistsAsync(role)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["role"] = ["角色不存在。"] });
+        var scope = $"admin.users.role:{userId}"; var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request)))); var replay = await database.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
+        if (replay is not null) { if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (replay.Result is not null) return TypedResults.Ok(replay.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
+        var user = await userManager.FindByIdAsync(userId.ToString()); if (user is null) return Results.NotFound();
+        var currentRoles = await userManager.GetRolesAsync(user);
+        if (currentRoles.Contains("Admin") && role != "Admin" && await userManager.GetUsersInRoleAsync("Admin") is { Count: 1 }) return Results.Conflict(new { message = "不能移除最后一个管理员。" });
+        var now = DateTimeOffset.UtcNow; await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken); var record = new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }; database.IdempotencyRecords.Add(record);
+        var remove = await userManager.RemoveFromRolesAsync(user, currentRoles); if (!remove.Succeeded) return Results.Problem(statusCode: 500, detail: string.Join(" ", remove.Errors.Select(error => error.Description)));
+        var add = await userManager.AddToRoleAsync(user, role); if (!add.Succeeded) return Results.Problem(statusCode: 500, detail: string.Join(" ", add.Errors.Select(error => error.Description)));
+        database.AuditEvents.Add(new AuditEvent { Id = Guid.NewGuid(), Actor = context.User.Identity?.Name ?? "系统", Action = "UserRoleChanged", EntityType = "ApplicationUser", EntityId = user.Id, CorrelationId = (context.Items["CorrelationId"]?.ToString() ?? context.TraceIdentifier)[..Math.Min((context.Items["CorrelationId"]?.ToString() ?? context.TraceIdentifier).Length, 128)], Data = JsonDocument.Parse(JsonSerializer.Serialize(new { from = currentRoles, to = role, reason = request.Reason.Trim() })), OccurredAt = now }); await database.SaveChangesAsync(cancellationToken); record.Status = IdempotencyRecordStatus.Completed; record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = user.Id, role })); await database.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken); return TypedResults.Ok(new { id = user.Id, role });
+    }
 }
 
 public sealed record LoginRequest(string? Email, string? Password);
 public sealed record CurrentUserResponse(string? Name, string[] Roles);
 public sealed record CreateUserRequest(string? Email, string? DisplayName, string? Password, string? Role, string? Reason);
+public sealed record ChangeUserRoleRequest(string? Role, string? Reason);

@@ -34,6 +34,13 @@ if ($viewer.id -ne $viewerReplay.id) { throw 'Administrator user creation must b
 $viewerLogin = Invoke-WebRequest -UseBasicParsing -SessionVariable viewerSession -Method Post -Uri ([uri]::new($BaseUri, '/api/v1/auth/login')) -ContentType 'application/json' -Body (@{ email = $viewerEmail; password = $viewerPassword } | ConvertTo-Json)
 if ($viewerLogin.StatusCode -ne 204) { throw 'Created Viewer could not log in.' }
 try { Invoke-RestMethod -WebSession $viewerSession -Method Post -Uri ([uri]::new($BaseUri, '/api/v1/projects')) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() } -ContentType 'application/json' -Body $projectBody | Out-Null; throw 'Viewer project creation unexpectedly succeeded.' } catch { if ($_.Exception.Message -match 'unexpectedly succeeded') { throw }; if ($_.Exception.Response.StatusCode.value__ -ne 403) { throw } }
+$roleHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() }
+$roleBody = @{ role = 'Engineer'; reason = '自动化角色变更验收' } | ConvertTo-Json
+$roleChange = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/admin/users/$($viewer.id)/role")) -Headers $roleHeaders -ContentType 'application/json' -Body $roleBody
+$roleReplay = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/admin/users/$($viewer.id)/role")) -Headers $roleHeaders -ContentType 'application/json' -Body $roleBody
+if ($roleChange.role -ne 'Engineer' -or $roleChange.id -ne $roleReplay.id) { throw 'Administrator role change must be idempotent.' }
+$viewerLogin = Invoke-WebRequest -UseBasicParsing -SessionVariable viewerSession -Method Post -Uri ([uri]::new($BaseUri, '/api/v1/auth/login')) -ContentType 'application/json' -Body (@{ email = $viewerEmail; password = $viewerPassword } | ConvertTo-Json)
+if ($viewerLogin.StatusCode -ne 204) { throw 'Updated Engineer could not log in.' }
 
 $idempotencyKey = [Guid]::NewGuid().ToString()
 $headers = @{ 'Idempotency-Key' = $idempotencyKey; 'X-Correlation-ID' = "catalog-$suffix" }
