@@ -59,6 +59,7 @@ export const getProjects = () => request<ProjectSummary[]>('/api/v1/projects')
 export const getProject = (projectId: string) => request<ProjectDetail>(`/api/v1/projects/${projectId}`)
 export const getCurrentUser = () => request<{ name: string; roles: string[] }>('/api/v1/auth/me')
 export const getUsers = () => request<Array<{ id: string; email: string; displayName: string; roles: string[] }>>('/api/v1/admin/users')
+export const createUser = (input: { email: string; displayName: string; password: string; role: string; reason: string }) => request<{ id: string }>('/api/v1/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify(input) })
 export const login = (input: { email: string; password: string }) => request<void>('/api/v1/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
 export const logout = () => request<void>('/api/v1/auth/logout', { method: 'POST' })
 export const createProject = (input: { code: string; name: string; description: string; reason: string }) =>

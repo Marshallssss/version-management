@@ -24,6 +24,16 @@ $login = Invoke-WebRequest -UseBasicParsing -SessionVariable session -Method Pos
 if ($login.StatusCode -ne 204) { throw 'Login did not succeed.' }
 $users = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, '/api/v1/admin/users'))
 if (@($users | Where-Object { $_.email -eq $Email -and $_.roles -contains 'Admin' }).Count -ne 1) { throw 'Administrator user directory must expose the authenticated admin and role.' }
+$viewerEmail = "viewer-$suffix@example.test"
+$viewerPassword = "Viewer-$suffix!"
+$viewerHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() }
+$viewerBody = @{ email = $viewerEmail; displayName = '自动化只读用户'; password = $viewerPassword; role = 'Viewer'; reason = '自动化 RBAC 验收' } | ConvertTo-Json
+$viewer = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, '/api/v1/admin/users')) -Headers $viewerHeaders -ContentType 'application/json' -Body $viewerBody
+$viewerReplay = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, '/api/v1/admin/users')) -Headers $viewerHeaders -ContentType 'application/json' -Body $viewerBody
+if ($viewer.id -ne $viewerReplay.id) { throw 'Administrator user creation must be idempotent.' }
+$viewerLogin = Invoke-WebRequest -UseBasicParsing -SessionVariable viewerSession -Method Post -Uri ([uri]::new($BaseUri, '/api/v1/auth/login')) -ContentType 'application/json' -Body (@{ email = $viewerEmail; password = $viewerPassword } | ConvertTo-Json)
+if ($viewerLogin.StatusCode -ne 204) { throw 'Created Viewer could not log in.' }
+try { Invoke-RestMethod -WebSession $viewerSession -Method Post -Uri ([uri]::new($BaseUri, '/api/v1/projects')) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() } -ContentType 'application/json' -Body $projectBody | Out-Null; throw 'Viewer project creation unexpectedly succeeded.' } catch { if ($_.Exception.Message -match 'unexpectedly succeeded') { throw }; if ($_.Exception.Response.StatusCode.value__ -ne 403) { throw } }
 
 $idempotencyKey = [Guid]::NewGuid().ToString()
 $headers = @{ 'Idempotency-Key' = $idempotencyKey; 'X-Correlation-ID' = "catalog-$suffix" }

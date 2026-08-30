@@ -1,3 +1,7 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using ConfigHub.Infrastructure.Persistence;
 using ConfigHub.Infrastructure.Persistence.Entities;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -14,6 +18,7 @@ public static class AuthEndpoints
         auth.MapGet("/me", Me).RequireAuthorization();
         var admin = endpoints.MapGroup("/api/v1/admin").RequireAuthorization(policy => policy.RequireRole("Admin"));
         admin.MapGet("/users", ListUsersAsync);
+        admin.MapPost("/users", CreateUserAsync);
         return endpoints;
     }
 
@@ -49,7 +54,38 @@ public static class AuthEndpoints
         }
         return TypedResults.Ok(result);
     }
+
+    private static async Task<IResult> CreateUserAsync(CreateUserRequest request, HttpContext context, UserManager<ApplicationUser> userManager, RoleManager<IdentityRole<Guid>> roleManager, ConfigHubDbContext database, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.DisplayName) || string.IsNullOrWhiteSpace(request.Password) || string.IsNullOrWhiteSpace(request.Role) || string.IsNullOrWhiteSpace(request.Reason)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = ["必须提供邮箱、显示名、密码、角色和创建原因。"] });
+        var key = context.Request.Headers["Idempotency-Key"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["创建用户必须提供不超过 200 个字符的 Idempotency-Key。"] });
+        var role = request.Role.Trim();
+        if (!await roleManager.RoleExistsAsync(role)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["role"] = ["角色不存在。"] });
+        var scope = "admin.users.create";
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request))));
+        var replay = await database.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
+        if (replay is not null) { if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (replay.Result is not null) return TypedResults.Ok(replay.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
+        if (await userManager.FindByEmailAsync(request.Email.Trim()) is not null) return Results.Conflict(new { message = "邮箱已存在。" });
+        var now = DateTimeOffset.UtcNow;
+        await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
+        var record = new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) };
+        database.IdempotencyRecords.Add(record);
+        var user = new ApplicationUser { Id = Guid.NewGuid(), UserName = request.Email.Trim(), Email = request.Email.Trim(), DisplayName = request.DisplayName.Trim(), EmailConfirmed = true };
+        var create = await userManager.CreateAsync(user, request.Password);
+        if (!create.Succeeded) return Results.ValidationProblem(new Dictionary<string, string[]> { ["password"] = [.. create.Errors.Select(error => error.Description)] });
+        var assign = await userManager.AddToRoleAsync(user, role);
+        if (!assign.Succeeded) return Results.Problem(statusCode: StatusCodes.Status500InternalServerError, detail: string.Join(" ", assign.Errors.Select(error => error.Description)));
+        database.AuditEvents.Add(new AuditEvent { Id = Guid.NewGuid(), Actor = context.User.Identity?.Name ?? "系统", Action = "UserCreated", EntityType = "ApplicationUser", EntityId = user.Id, CorrelationId = (context.Items["CorrelationId"]?.ToString() ?? context.TraceIdentifier)[..Math.Min((context.Items["CorrelationId"]?.ToString() ?? context.TraceIdentifier).Length, 128)], Data = JsonDocument.Parse(JsonSerializer.Serialize(new { user.Email, user.DisplayName, role, reason = request.Reason.Trim() })), OccurredAt = now });
+        await database.SaveChangesAsync(cancellationToken);
+        record.Status = IdempotencyRecordStatus.Completed;
+        record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = user.Id, email = user.Email, role }));
+        await database.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return TypedResults.Created($"/api/v1/admin/users/{user.Id}", new { id = user.Id, email = user.Email, role });
+    }
 }
 
 public sealed record LoginRequest(string? Email, string? Password);
 public sealed record CurrentUserResponse(string? Name, string[] Roles);
+public sealed record CreateUserRequest(string? Email, string? DisplayName, string? Password, string? Role, string? Reason);
