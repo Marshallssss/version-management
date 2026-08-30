@@ -4,6 +4,7 @@ using System.Text.Json;
 using ConfigHub.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace ConfigHub.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(ConfigHubDbContext))]
-    partial class ConfigHubDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260829172428_DeploymentItemsAndProjectionFoundation")]
+    partial class DeploymentItemsAndProjectionFoundation
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -799,50 +802,6 @@ namespace ConfigHub.Infrastructure.Persistence.Migrations
                     b.ToTable("machines", (string)null);
                 });
 
-            modelBuilder.Entity("ConfigHub.Infrastructure.Persistence.Entities.MachineCurrentConfiguration", b =>
-                {
-                    b.Property<Guid>("MachineId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("machine_id");
-
-                    b.Property<Guid>("ConfigurationComponentId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("configuration_component_id");
-
-                    b.Property<Guid?>("ComponentVersionId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("component_version_id");
-
-                    b.Property<DateTimeOffset?>("KnownInstalledAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("known_installed_at");
-
-                    b.Property<Guid>("SourceDeploymentItemId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("source_deployment_item_id");
-
-                    b.Property<string>("State")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)")
-                        .HasColumnName("state");
-
-                    b.Property<DateTimeOffset>("StateEffectiveAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("state_effective_at");
-
-                    b.HasKey("MachineId", "ConfigurationComponentId");
-
-                    b.HasIndex("ConfigurationComponentId");
-
-                    b.HasIndex("SourceDeploymentItemId");
-
-                    b.HasIndex("ComponentVersionId", "MachineId")
-                        .HasDatabaseName("ix_machine_current_configurations_version_machine");
-
-                    b.ToTable("machine_current_configurations", (string)null);
-                });
-
             modelBuilder.Entity("ConfigHub.Infrastructure.Persistence.Entities.MachineTargetAssignment", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1359,32 +1318,6 @@ namespace ConfigHub.Infrastructure.Persistence.Migrations
                     b.HasOne("ConfigHub.Infrastructure.Persistence.Entities.Project", null)
                         .WithMany()
                         .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("ConfigHub.Infrastructure.Persistence.Entities.MachineCurrentConfiguration", b =>
-                {
-                    b.HasOne("ConfigHub.Infrastructure.Persistence.Entities.ComponentVersion", null)
-                        .WithMany()
-                        .HasForeignKey("ComponentVersionId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("ConfigHub.Infrastructure.Persistence.Entities.ConfigurationComponent", null)
-                        .WithMany()
-                        .HasForeignKey("ConfigurationComponentId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("ConfigHub.Infrastructure.Persistence.Entities.Machine", null)
-                        .WithMany()
-                        .HasForeignKey("MachineId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("ConfigHub.Infrastructure.Persistence.Entities.DeploymentItem", null)
-                        .WithMany()
-                        .HasForeignKey("SourceDeploymentItemId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

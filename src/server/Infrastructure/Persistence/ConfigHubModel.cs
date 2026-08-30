@@ -285,5 +285,26 @@ internal static class ConfigHubModel
             entity.HasIndex(item => item.MachineId).IsUnique().HasFilter("valid_to IS NULL").HasDatabaseName("ux_machine_target_assignments_current_machine");
             entity.HasOne<Machine>().WithMany().HasForeignKey(item => item.MachineId).OnDelete(DeleteBehavior.Restrict); entity.HasOne<ConfigurationBaseline>().WithMany().HasForeignKey(item => item.ConfigurationBaselineId).OnDelete(DeleteBehavior.Restrict);
         });
+        modelBuilder.Entity<DeploymentBatch>(entity =>
+        {
+            entity.ToTable("deployment_batches"); entity.HasKey(item => item.Id);
+            entity.Property(item => item.Id).HasColumnName("id"); entity.Property(item => item.MachineId).HasColumnName("machine_id");
+            entity.Property(item => item.OperationType).HasColumnName("operation_type").HasMaxLength(32).HasConversion<string>(); entity.Property(item => item.Coverage).HasColumnName("coverage").HasMaxLength(32).HasConversion<string>();
+            entity.Property(item => item.SourceType).HasColumnName("source_type").HasMaxLength(80); entity.Property(item => item.ExternalEventId).HasColumnName("external_event_id").HasMaxLength(200); entity.Property(item => item.RecordedAt).HasColumnName("recorded_at"); entity.Property(item => item.EffectiveAt).HasColumnName("effective_at");
+            entity.HasIndex(item => new { item.MachineId, item.EffectiveAt }).HasDatabaseName("ix_deployment_batches_machine_effective_at"); entity.HasIndex(item => new { item.SourceType, item.ExternalEventId }).IsUnique().HasFilter("external_event_id IS NOT NULL").HasDatabaseName("ux_deployment_batches_source_event"); entity.HasOne<Machine>().WithMany().HasForeignKey(item => item.MachineId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<DeploymentItem>(entity =>
+        {
+            entity.ToTable("deployment_items"); entity.HasKey(item => item.Id);
+            entity.Property(item => item.Id).HasColumnName("id"); entity.Property(item => item.DeploymentBatchId).HasColumnName("deployment_batch_id"); entity.Property(item => item.ConfigurationComponentId).HasColumnName("configuration_component_id"); entity.Property(item => item.NewComponentVersionId).HasColumnName("new_component_version_id"); entity.Property(item => item.Result).HasColumnName("result").HasMaxLength(32).HasConversion<string>(); entity.Property(item => item.KnownInstalledAt).HasColumnName("known_installed_at");
+            entity.HasIndex(item => new { item.DeploymentBatchId, item.ConfigurationComponentId }).IsUnique().HasDatabaseName("ux_deployment_items_batch_component"); entity.HasIndex(item => new { item.NewComponentVersionId, item.Result }).HasDatabaseName("ix_deployment_items_version_result");
+            entity.HasOne<DeploymentBatch>().WithMany().HasForeignKey(item => item.DeploymentBatchId).OnDelete(DeleteBehavior.Restrict); entity.HasOne<ConfigurationComponent>().WithMany().HasForeignKey(item => item.ConfigurationComponentId).OnDelete(DeleteBehavior.Restrict); entity.HasOne<ComponentVersion>().WithMany().HasForeignKey(item => item.NewComponentVersionId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<MachineCurrentConfiguration>(entity =>
+        {
+            entity.ToTable("machine_current_configurations"); entity.HasKey(item => new { item.MachineId, item.ConfigurationComponentId });
+            entity.Property(item => item.MachineId).HasColumnName("machine_id"); entity.Property(item => item.ConfigurationComponentId).HasColumnName("configuration_component_id"); entity.Property(item => item.ComponentVersionId).HasColumnName("component_version_id"); entity.Property(item => item.State).HasColumnName("state").HasMaxLength(32).HasConversion<string>(); entity.Property(item => item.StateEffectiveAt).HasColumnName("state_effective_at"); entity.Property(item => item.KnownInstalledAt).HasColumnName("known_installed_at"); entity.Property(item => item.SourceDeploymentItemId).HasColumnName("source_deployment_item_id");
+            entity.HasIndex(item => new { item.ComponentVersionId, item.MachineId }).HasDatabaseName("ix_machine_current_configurations_version_machine"); entity.HasOne<Machine>().WithMany().HasForeignKey(item => item.MachineId).OnDelete(DeleteBehavior.Restrict); entity.HasOne<ConfigurationComponent>().WithMany().HasForeignKey(item => item.ConfigurationComponentId).OnDelete(DeleteBehavior.Restrict); entity.HasOne<ComponentVersion>().WithMany().HasForeignKey(item => item.ComponentVersionId).OnDelete(DeleteBehavior.Restrict); entity.HasOne<DeploymentItem>().WithMany().HasForeignKey(item => item.SourceDeploymentItemId).OnDelete(DeleteBehavior.Restrict);
+        });
     }
 }
