@@ -123,6 +123,9 @@ $impact = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/ap
 if (@($impact.usedBaselineIds | Where-Object { $_ -eq $baseline.id }).Count -ne 1 -or @($impact.targetMachineIds | Where-Object { $_ -eq $machine.id }).Count -ne 1 -or @($impact.historicalMachineIds | Where-Object { $_ -eq $machine.id }).Count -ne 1) { throw 'Version impact must trace baseline, target machine and historical deployment facts.' }
 $search = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/search?query=TEST-$suffix"))
 if (@($search | Where-Object { $_.type -eq 'Project' -and $_.id -eq $project.id }).Count -ne 1) { throw 'Catalog search must find the created project.' }
+$machineSearch = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/search?query=SN-$suffix"))
+$baselineSearch = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/search?query=BL-$suffix"))
+if (@($machineSearch | Where-Object { $_.type -eq 'Machine' -and $_.id -eq $machine.id }).Count -ne 1 -or @($baselineSearch | Where-Object { $_.type -eq 'Baseline' -and $_.id -eq $baseline.id }).Count -ne 1) { throw 'Catalog search must find the created machine and baseline.' }
 $importHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() }
 $importBody = @{ projectId = $project.id; sourceFileName = 'acceptance.csv'; reason = '自动化导入预览'; rows = @(@{ componentCode = 'CONTROL'; versionNumber = 'import-preview' }, @{ componentCode = 'CONTROL'; versionNumber = 'opaque-b' }) } | ConvertTo-Json -Depth 5
 $import = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, '/api/v1/imports')) -Headers $importHeaders -ContentType 'application/json' -Body $importBody

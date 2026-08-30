@@ -209,7 +209,9 @@ public static class CatalogEndpoints
         var projects = await db.Projects.AsNoTracking().Where(item => EF.Functions.ILike(item.Code, pattern) || EF.Functions.ILike(item.Name, pattern)).Select(item => new { type = "Project", id = item.Id, label = item.Code + " · " + item.Name }).Take(20).ToListAsync(cancellationToken);
         var components = await db.ConfigurationComponents.AsNoTracking().Where(item => EF.Functions.ILike(item.ComponentCode, pattern) || EF.Functions.ILike(item.Name, pattern)).Select(item => new { type = "Component", id = item.Id, label = item.ComponentCode + " · " + item.Name }).Take(20).ToListAsync(cancellationToken);
         var versions = await db.ComponentVersions.AsNoTracking().Where(item => EF.Functions.ILike(item.VersionNumber, pattern)).Select(item => new { type = "Version", id = item.Id, label = item.VersionNumber }).Take(20).ToListAsync(cancellationToken);
-        return TypedResults.Ok(projects.Cast<object>().Concat(components).Concat(versions));
+        var baselines = await db.ConfigurationBaselines.AsNoTracking().Where(item => EF.Functions.ILike(item.BaselineCode, pattern)).Select(item => new { type = "Baseline", id = item.Id, label = item.BaselineCode }).Take(20).ToListAsync(cancellationToken);
+        var machines = await db.Machines.AsNoTracking().Where(item => EF.Functions.ILike(item.SerialNumber, pattern) || EF.Functions.ILike(item.Name, pattern)).Select(item => new { type = "Machine", id = item.Id, label = item.SerialNumber + " · " + item.Name }).Take(20).ToListAsync(cancellationToken);
+        return TypedResults.Ok(projects.Cast<object>().Concat(components).Concat(versions).Concat(baselines).Concat(machines));
     }
 
     private static async Task<IResult> StageImportAsync(StageImportRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
