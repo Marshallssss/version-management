@@ -913,6 +913,8 @@ public static class CatalogEndpoints
         if (replay is not null) { if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (replay.Result is not null) return TypedResults.Ok(replay.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
         var version = await database.ComponentVersions.SingleOrDefaultAsync(item => item.Id == versionId, cancellationToken);
         if (version is null) return Results.NotFound();
+        var component = await database.ConfigurationComponents.SingleAsync(item => item.Id == version.ComponentId, cancellationToken);
+        if (!await HasProjectWriteAccessAsync(database, context, component.ProjectId, cancellationToken, requireSeniorMembership: true)) return Results.Forbid();
         if (!IsAllowedMaturityTransition(version.Maturity, next)) return Results.Conflict(new { message = "不允许的成熟度转换。" });
         var now = DateTimeOffset.UtcNow; await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken); database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }); var actor = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required.");
         var previous = version.Maturity;
@@ -932,6 +934,8 @@ public static class CatalogEndpoints
         if (replay is not null) { if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (replay.Result is not null) return TypedResults.Ok(replay.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
         var version = await database.ComponentVersions.SingleOrDefaultAsync(item => item.Id == versionId, cancellationToken);
         if (version is null) return Results.NotFound();
+        var component = await database.ConfigurationComponents.SingleAsync(item => item.Id == version.ComponentId, cancellationToken);
+        if (!await HasProjectWriteAccessAsync(database, context, component.ProjectId, cancellationToken, requireSeniorMembership: true)) return Results.Forbid();
         if (version.Safety == next) return Results.Conflict(new { message = "状态没有变化。" });
         var now = DateTimeOffset.UtcNow; await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken); database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }); var actor = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required.");
         var previous = version.Safety;
@@ -959,8 +963,9 @@ public static class CatalogEndpoints
         if (replay is not null) { if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (replay.Result is not null) return TypedResults.Ok(replay.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
         var version = await database.ComponentVersions.SingleOrDefaultAsync(item => item.Id == versionId, cancellationToken);
         if (version is null) return Results.NotFound();
-        if (version.Maturity is not VersionMaturity.Released and not VersionMaturity.Maintenance || version.Safety == VersionSafety.Blocked) return Results.Conflict(new { message = "只有未阻断的已发布或维护版本可以推荐。" });
         var component = await database.ConfigurationComponents.SingleAsync(item => item.Id == version.ComponentId, cancellationToken);
+        if (!await HasProjectWriteAccessAsync(database, context, component.ProjectId, cancellationToken, requireSeniorMembership: true)) return Results.Forbid();
+        if (version.Maturity is not VersionMaturity.Released and not VersionMaturity.Maintenance || version.Safety == VersionSafety.Blocked) return Results.Conflict(new { message = "只有未阻断的已发布或维护版本可以推荐。" });
         var now = DateTimeOffset.UtcNow; await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken); database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }); var actor = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required.");
         var active = await database.VersionRecommendations.SingleOrDefaultAsync(item => item.ComponentId == component.Id && item.RevokedAt == null, cancellationToken);
         if (active is not null) { active.RevokedAt = DateTimeOffset.UtcNow; active.RevokedBy = actor; active.RevokeReason = "被新的推荐替代。"; }
@@ -999,12 +1004,12 @@ public static class CatalogEndpoints
 
     private static string Normalize(string value) => value.Trim().ToUpperInvariant();
 
-    private static async Task<bool> HasProjectWriteAccessAsync(ConfigHubDbContext database, HttpContext context, Guid projectId, CancellationToken cancellationToken)
+    private static async Task<bool> HasProjectWriteAccessAsync(ConfigHubDbContext database, HttpContext context, Guid projectId, CancellationToken cancellationToken, bool requireSeniorMembership = false)
     {
         if (context.User.IsInRole("Admin")) return true;
         var userId = context.User.FindFirst(global::System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         if (!Guid.TryParse(userId, out var parsedUserId)) return false;
-        return await database.ProjectMemberships.AnyAsync(member => member.ProjectId == projectId && member.UserId == parsedUserId && (member.Role == ProjectMembershipRole.Engineer || member.Role == ProjectMembershipRole.SeniorEngineer), cancellationToken);
+        return await database.ProjectMemberships.AnyAsync(member => member.ProjectId == projectId && member.UserId == parsedUserId && (requireSeniorMembership ? member.Role == ProjectMembershipRole.SeniorEngineer : member.Role == ProjectMembershipRole.Engineer || member.Role == ProjectMembershipRole.SeniorEngineer), cancellationToken);
     }
 
     private static string? NormalizeOptional(string? value, int maxLength) =>
