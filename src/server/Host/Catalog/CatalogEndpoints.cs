@@ -17,7 +17,6 @@ public static class CatalogEndpoints
         projects.MapGet("/{projectId:guid}", GetProjectAsync);
         projects.MapPost("/{projectId:guid}/components", CreateComponentAsync).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/components/{componentId:guid}/move", MoveComponentAsync).RequireAuthorization("Engineer");
-        projects.MapPost("/{projectId:guid}/clone-preview", ClonePreviewAsync).RequireAuthorization("Engineer");
         projects.MapPost("/{projectId:guid}/clone", CloneAsync).RequireAuthorization("Engineer");
         projects.MapGet("/{projectId:guid}/baselines", ListBaselinesAsync);
         projects.MapPost("/{projectId:guid}/baselines", CreateBaselineAsync).RequireAuthorization("SeniorEngineer");
@@ -380,16 +379,6 @@ public static class CatalogEndpoints
             })
             .ToListAsync(cancellationToken);
         return TypedResults.Ok(new { project, components });
-    }
-
-    private static async Task<IResult> ClonePreviewAsync(Guid projectId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
-    {
-        await using var database = await factory.CreateDbContextAsync(cancellationToken);
-        var project = await database.Projects.AsNoTracking().SingleOrDefaultAsync(item => item.Id == projectId, cancellationToken);
-        if (project is null) return Results.NotFound();
-        var components = await database.ConfigurationComponents.CountAsync(item => item.ProjectId == projectId, cancellationToken);
-        var versions = await database.ConfigurationComponents.Where(item => item.ProjectId == projectId).Join(database.ComponentVersions, component => component.Id, version => version.ComponentId, (_, _) => 1).CountAsync(cancellationToken);
-        return TypedResults.Ok(new { sourceProject = project.Code, copiedComponents = components, excludedVersions = versions, excludedBaselines = true, excludedMachines = true });
     }
 
     private static async Task<IResult> CloneAsync(Guid projectId, CloneProjectRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)

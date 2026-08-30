@@ -72,7 +72,6 @@ export const changeVersionSafety = (versionId: string, state: string, reason: st
   request<{ maturity: string; safety: string }>(`/api/v1/component-versions/${versionId}/safety`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ state, reason }) })
 export const recommendVersion = (versionId: string, reason: string) =>
   request<{ recommended: boolean }>(`/api/v1/component-versions/${versionId}/recommend`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ state: '', reason }) })
-export const previewProjectClone = (projectId: string) => request<{ copiedComponents: number; excludedVersions: number }>(`/api/v1/projects/${projectId}/clone-preview`, { method: 'POST' })
 export const cloneProject = (projectId: string, input: { code: string; name: string; reason: string }) =>
   request<{ id: string }>(`/api/v1/projects/${projectId}/clone`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify(input) })
 export const moveComponent = (componentId: string, input: { parentComponentId: string | null; reason: string }) =>
