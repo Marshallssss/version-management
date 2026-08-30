@@ -1879,6 +1879,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 6B 实现中：事实录入命令会在同一事务写入 Batch、Item 和 Current Projection；FULL 缺失组件的 Absent 来源项与 Item Version/Component 归属校验已实现，且命令现强制 reason 并写 Audit。待补持久化幂等和中文事实录入表单后验收提交。
 - 6B 验收补充：`catalog-acceptance.ps1` 覆盖 FULL 初始快照后 PARTIAL Observation 仅更新一个组件，断言未观察组件仍保留其原版本与 Present 状态。
 - 6C 进行中：中文“机台”界面已接入真实机台创建、列表与 Current Actual 读取；事实录入表单将在 Batch Finalize 命令的幂等与版本归属校验完成后开放。
+- 6C 已交付：中文机台页支持创建、列表、Current Actual 读取和手工 Observation 录入；默认 `PARTIAL`，只有用户显式选择才发送 `FULL`，并要求填写原因。
 
 ## Step 7 — Drift/Risk/Compare
 
