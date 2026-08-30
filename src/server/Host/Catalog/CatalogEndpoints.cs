@@ -107,6 +107,7 @@ public static class CatalogEndpoints
         var scope = $"machines.create:{request.ProjectId}"; var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request)))); var existing = await database.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
         if (existing is not null) { if (existing.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (existing.Result is not null) return TypedResults.Ok(existing.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
         if (!await database.Projects.AnyAsync(item => item.Id == request.ProjectId, cancellationToken)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["projectId"] = ["项目不存在。"] });
+        if (!await HasProjectWriteAccessAsync(database, context, request.ProjectId, cancellationToken)) return Results.Forbid();
         var normalized = Normalize(request.SerialNumber!);
         if (await database.Machines.AnyAsync(item => item.NormalizedSerialNumber == normalized, cancellationToken)) return Results.Conflict(new { message = "机台序列号已存在。" });
         var now = DateTimeOffset.UtcNow; await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken); database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }); var machine = new Machine { Id = Guid.NewGuid(), ProjectId = request.ProjectId, SerialNumber = request.SerialNumber!.Trim(), NormalizedSerialNumber = normalized, Name = request.Name!.Trim(), MachineType = NormalizeOptional(request.MachineType, 120), CreatedAt = now };
@@ -123,6 +124,7 @@ public static class CatalogEndpoints
         if (existing is not null) { if (existing.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (existing.Result is not null) return TypedResults.Ok(existing.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
         var machine = await database.Machines.SingleOrDefaultAsync(item => item.Id == machineId, cancellationToken); var baseline = await database.ConfigurationBaselines.SingleOrDefaultAsync(item => item.Id == request.ConfigurationBaselineId, cancellationToken);
         if (machine is null || baseline is null || baseline.ProjectId != machine.ProjectId) return Results.ValidationProblem(new Dictionary<string, string[]> { ["configurationBaselineId"] = ["基线不存在或不属于机台项目。"] });
+        if (!await HasProjectWriteAccessAsync(database, context, machine.ProjectId, cancellationToken, requireSeniorMembership: true)) return Results.Forbid();
         if (baseline.State != BaselineState.Released) return Results.Conflict(new { message = "仅可分配已发布基线。" });
         var now = DateTimeOffset.UtcNow; await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken); database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }); var old = await database.MachineTargetAssignments.SingleOrDefaultAsync(item => item.MachineId == machineId && item.ValidTo == null, cancellationToken); if (old is not null) old.ValidTo = now;
         var assignment = new MachineTargetAssignment { Id = Guid.NewGuid(), MachineId = machineId, ConfigurationBaselineId = baseline.Id, ValidFrom = now, AssignedBy = context.User.Identity?.Name ?? "", Reason = request.Reason.Trim() }; database.MachineTargetAssignments.Add(assignment); AddAuditEvent(database, context, "MachineTargetAssigned", "Machine", machineId, new { baselineId = baseline.Id, reason = assignment.Reason }); await database.SaveChangesAsync(cancellationToken); await RefreshMachineDriftSummaryAsync(database, machineId, cancellationToken); var record = await database.IdempotencyRecords.SingleAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken); record.Status = IdempotencyRecordStatus.Completed; record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = assignment.Id, baselineId = baseline.Id })); await database.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken); return TypedResults.Ok(new { id = assignment.Id, baselineId = baseline.Id });
@@ -136,6 +138,7 @@ public static class CatalogEndpoints
         await using var db = await factory.CreateDbContextAsync(cancellationToken); var existing = await db.IdempotencyRecords.SingleOrDefaultAsync(x => x.Scope == scope && x.IdempotencyKey == key, cancellationToken);
         if (existing is not null) { if (existing.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (existing.Result is not null) return TypedResults.Ok(existing.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
         var machine = await db.Machines.SingleOrDefaultAsync(x => x.Id == machineId, cancellationToken); if (machine is null) return Results.NotFound();
+        if (!await HasProjectWriteAccessAsync(db, context, machine.ProjectId, cancellationToken)) return Results.Forbid();
         var now = DateTimeOffset.UtcNow; await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken); db.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }); var batch = new DeploymentBatch { Id = Guid.NewGuid(), MachineId = machineId, OperationType = operation, Coverage = coverage, SourceType = request.SourceType.Trim(), ExternalEventId = NormalizeOptional(request.ExternalEventId, 200), RecordedAt = now, EffectiveAt = request.EffectiveAt ?? now }; db.DeploymentBatches.Add(batch);
         var componentIds = request.Items.Select(x => x.ComponentId).Distinct().ToArray(); var components = await db.ConfigurationComponents.Where(x => x.ProjectId == machine.ProjectId && componentIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, cancellationToken); if (components.Count != componentIds.Length) return Results.ValidationProblem(new Dictionary<string, string[]> { ["items"] = ["存在不属于机台项目的组件。"] });
         var versionIds = request.Items.Where(x => !x.Absent && x.VersionId is not null).Select(x => x.VersionId!.Value).Distinct().ToArray();
@@ -311,6 +314,7 @@ public static class CatalogEndpoints
         var scope = $"imports.stage:{request.ProjectId}"; var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request)))); var replay = await db.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
         if (replay is not null) { if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (replay.Result is not null) return TypedResults.Ok(replay.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
         if (!await db.Projects.AnyAsync(item => item.Id == request.ProjectId, cancellationToken)) return Results.NotFound();
+        if (!await HasProjectWriteAccessAsync(db, context, request.ProjectId, cancellationToken)) return Results.Forbid();
         var now = DateTimeOffset.UtcNow; await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken); db.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }); var batch = new ImportBatch { Id = Guid.NewGuid(), ProjectId = request.ProjectId, SourceFileName = request.SourceFileName.Trim(), CreatedBy = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required."), Reason = request.Reason.Trim(), CreatedAt = now };
         var componentCodes = request.Rows.Where(row => !string.IsNullOrWhiteSpace(row.ComponentCode)).Select(row => Normalize(row.ComponentCode!)).Distinct().ToArray();
         var components = await db.ConfigurationComponents.Where(item => item.ProjectId == request.ProjectId && componentCodes.Contains(item.NormalizedComponentCode)).ToDictionaryAsync(item => item.NormalizedComponentCode, cancellationToken);
@@ -353,6 +357,7 @@ public static class CatalogEndpoints
         var replay = await db.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
         if (replay is not null) { if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (replay.Result is not null) return TypedResults.Ok(replay.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
         var batch = await db.ImportBatches.SingleOrDefaultAsync(item => item.Id == batchId, cancellationToken); if (batch is null) return Results.NotFound();
+        if (!await HasProjectWriteAccessAsync(db, context, batch.ProjectId, cancellationToken)) return Results.Forbid();
         var rows = await db.ImportRows.Where(item => item.ImportBatchId == batchId).OrderBy(item => item.RowNumber).ToListAsync(cancellationToken);
         if (batch.Status != ImportBatchStatus.Validated || rows.Any(item => item.ValidationError is not null)) return Results.Conflict(new { message = "只有完全通过校验的导入批次可以提交。" });
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
@@ -458,6 +463,7 @@ public static class CatalogEndpoints
         if (replay is not null) { if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (replay.Result is not null) return TypedResults.Ok(replay.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
         var source = await database.Projects.SingleOrDefaultAsync(item => item.Id == projectId, cancellationToken);
         if (source is null) return Results.NotFound();
+        if (!await HasProjectWriteAccessAsync(database, context, projectId, cancellationToken)) return Results.Forbid();
         var normalizedCode = Normalize(request.Code!);
         if (await database.Projects.AnyAsync(item => item.NormalizedCode == normalizedCode, cancellationToken)) return Results.Conflict(new { message = "项目编码已存在。" });
         var actor = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required.");
@@ -524,6 +530,7 @@ public static class CatalogEndpoints
         }
 
         if (!await database.Projects.AnyAsync(item => item.Id == projectId, cancellationToken)) return Results.NotFound();
+        if (!await HasProjectWriteAccessAsync(database, context, projectId, cancellationToken, requireSeniorMembership: true)) return Results.Forbid();
         var normalizedCode = Normalize(request.BaselineCode!);
         if (await database.ConfigurationBaselines.AnyAsync(item => item.ProjectId == projectId && item.NormalizedBaselineCode == normalizedCode, cancellationToken))
             return Results.Conflict(new { message = "该项目中的基线编码已存在。" });
@@ -619,6 +626,7 @@ public static class CatalogEndpoints
 
         var baseline = await database.ConfigurationBaselines.SingleOrDefaultAsync(item => item.Id == baselineId, cancellationToken);
         if (baseline is null) return Results.NotFound();
+        if (!await HasProjectWriteAccessAsync(database, context, baseline.ProjectId, cancellationToken, requireSeniorMembership: true)) return Results.Forbid();
         if (baseline.State != BaselineState.Draft) return Results.Conflict(new { message = "只有草稿基线可以发布。" });
         var itemCount = await database.BaselineItems.CountAsync(item => item.ConfigurationBaselineId == baselineId, cancellationToken);
         if (itemCount == 0) return Results.Conflict(new { message = "空基线不能发布。" });
@@ -675,6 +683,7 @@ public static class CatalogEndpoints
         }
         var baseline = await database.ConfigurationBaselines.SingleOrDefaultAsync(item => item.Id == request.ConfigurationBaselineId, cancellationToken);
         if (baseline is null || baseline.ProjectId != projectId) return Results.ValidationProblem(new Dictionary<string, string[]> { ["configurationBaselineId"] = ["基线不存在或不属于该项目。"] });
+        if (!await HasProjectWriteAccessAsync(database, context, projectId, cancellationToken, requireSeniorMembership: true)) return Results.Forbid();
         if (baseline.State != BaselineState.Released) return Results.Conflict(new { message = "只有已发布基线可以设为项目标准。" });
         var actor = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required.");
         await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);

@@ -1851,6 +1851,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 2D 授权补强进行中：Component Create 已要求非 Admin Engineer 具有对应 Project Membership（Engineer/SeniorEngineer），自动验收覆盖“全局 Engineer 但未加入项目”返回 API HTTP 403；其余项目写命令继续逐条接入同一授权服务。
 - 2D 授权补强进行中：Component Version Create 与 Component Move 已复用同一项目范围校验；自动验收覆盖未加入项目的 Engineer 对 Component Create/Version Create/Move 均返回 API HTTP 403。
 - 2D 授权补强进行中：Maturity/Safety/Recommendation 需要项目内 SeniorEngineer Membership；自动验收覆盖全局 SeniorEngineer 但未加入项目时 Lifecycle API HTTP 403。
+- 2D 授权补强进行中：项目克隆、机台创建、机台目标、部署事实、导入暂存/提交均要求项目成员写权限；Baseline 创建、发布和项目标准均要求项目内 SeniorEngineer Membership。
 - 待完成：用户管理界面、角色管理，以及 Component/Version 与后续写命令的原因/幂等协议。
 
 ## Step 3 — Project → Component → Version
