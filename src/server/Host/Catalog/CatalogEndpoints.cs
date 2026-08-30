@@ -29,6 +29,7 @@ public static class CatalogEndpoints
         endpoints.MapPost("/api/v1/machines/{machineId:guid}/target", AssignMachineTargetAsync).RequireAuthorization("SeniorEngineer");
         endpoints.MapPost("/api/v1/machines/{machineId:guid}/facts", RecordFactsAsync).RequireAuthorization("Engineer");
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/configuration", GetMachineConfigurationAsync);
+        endpoints.MapGet("/api/v1/machines/{machineId:guid}/facts", ListMachineFactsAsync);
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/drift", GetMachineDriftAsync);
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/drift-summary", GetMachineDriftSummaryAsync);
         endpoints.MapGet("/api/v1/baselines/{leftBaselineId:guid}/compare/{rightBaselineId:guid}", CompareBaselinesAsync);
@@ -129,6 +130,13 @@ public static class CatalogEndpoints
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         return TypedResults.Ok(await db.MachineCurrentConfigurations.AsNoTracking().Where(x => x.MachineId == machineId).OrderBy(x => x.ConfigurationComponentId).Select(x => new { componentId = x.ConfigurationComponentId, versionId = x.ComponentVersionId, state = x.State.ToString(), stateEffectiveAt = x.StateEffectiveAt, knownInstalledAt = x.KnownInstalledAt }).ToListAsync(cancellationToken));
+    }
+
+    private static async Task<IResult> ListMachineFactsAsync(Guid machineId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var facts = await db.DeploymentBatches.AsNoTracking().Where(item => item.MachineId == machineId).OrderByDescending(item => item.EffectiveAt).Select(item => new { id = item.Id, operationType = item.OperationType.ToString(), coverage = item.Coverage.ToString(), sourceType = item.SourceType, recordedAt = item.RecordedAt, effectiveAt = item.EffectiveAt, itemCount = db.DeploymentItems.Count(detail => detail.DeploymentBatchId == item.Id) }).ToListAsync(cancellationToken);
+        return TypedResults.Ok(facts);
     }
 
     private static async Task<IResult> GetMachineDriftAsync(Guid machineId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
