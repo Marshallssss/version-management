@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { assignProjectStandard, changeVersionMaturity, changeVersionSafety, cloneProject, createBaseline, createComponent, createComponentVersion, createMachine, createProject, getBaselines, getCurrentUser, getMachineConfiguration, getMachineDrift, getMachines, getProject, getProjectStandard, getProjects, login, logout, moveComponent, previewProjectClone, recommendVersion, recordMachineFacts, releaseBaseline } from './catalog-api'
+import { assignProjectStandard, changeVersionMaturity, changeVersionSafety, cloneProject, createBaseline, createComponent, createComponentVersion, createMachine, createProject, getBaselines, getCurrentUser, getMachineConfiguration, getMachineDrift, getMachines, getProject, getProjectStandard, getProjects, getVersionImpact, login, logout, moveComponent, previewProjectClone, recommendVersion, recordMachineFacts, releaseBaseline } from './catalog-api'
 import { enqueueNoopJob, getSystemStatus, getSystemVersion, type BackgroundJobStatus } from './system-api'
 
 const navigation = [
@@ -8,7 +8,7 @@ const navigation = [
   { id: 'jobs', label: '后台任务', available: true },
   { id: 'projects', label: '项目', available: true },
   { id: 'baselines', label: '基线', available: true },
-  { id: 'software', label: '软件版本', available: false },
+  { id: 'software', label: '软件版本', available: true },
   { id: 'machines', label: '机台', available: true },
   { id: 'deployments', label: '部署记录', available: false },
   { id: 'compare', label: '配置比对', available: false },
@@ -72,6 +72,7 @@ function App() {
   const [factVersionId, setFactVersionId] = useState('')
   const [factCoverage, setFactCoverage] = useState('Partial')
   const [factReason, setFactReason] = useState('')
+  const [impactVersionId, setImpactVersionId] = useState('')
   const queryClient = useQueryClient()
   const system = useQuery({ queryKey: ['system-version'], queryFn: getSystemVersion })
   const status = useQuery({ queryKey: ['system-status'], queryFn: getSystemStatus, refetchInterval: 5_000 })
@@ -83,6 +84,7 @@ function App() {
   const machines = useQuery({ queryKey: ['machines'], queryFn: getMachines })
   const machineConfiguration = useQuery({ queryKey: ['machine-configuration', selectedMachineId], queryFn: () => getMachineConfiguration(selectedMachineId), enabled: selectedMachineId !== '' })
   const machineDrift = useQuery({ queryKey: ['machine-drift', selectedMachineId], queryFn: () => getMachineDrift(selectedMachineId), enabled: selectedMachineId !== '' })
+  const versionImpact = useQuery({ queryKey: ['version-impact', impactVersionId], queryFn: () => getVersionImpact(impactVersionId), enabled: impactVersionId !== '' })
   const enqueue = useMutation({
     mutationFn: enqueueNoopJob,
     onSuccess: async () => {
@@ -274,6 +276,8 @@ function App() {
                 {assignStandard.isError && <p className="error-strip">{assignStandard.error.message}</p>}
               </section>
             </>}
+
+            {activePage === 'software' && <section className="status-panel catalog-panel"><div className="panel-heading"><div><span className="section-index">版本影响</span><h3>追溯版本使用范围</h3></div></div><label>项目版本<select value={impactVersionId} onChange={(event) => setImpactVersionId(event.target.value)}><option value="">请选择项目页面中的版本</option>{projectDetail.data?.components.flatMap((component) => component.versions.map((version) => <option key={version.id} value={version.id}>{component.code} · {version.versionNumber}</option>))}</select></label>{impactVersionId && <dl className="runtime-list"><div><dt>已使用基线</dt><dd>{versionImpact.data?.usedBaselineIds.length ?? 0}</dd></div><div><dt>当前机台</dt><dd>{versionImpact.data?.currentMachineIds.length ?? 0}</dd></div><div><dt>目标机台</dt><dd>{versionImpact.data?.targetMachineIds.length ?? 0}</dd></div><div><dt>历史机台</dt><dd>{versionImpact.data?.historicalMachineIds.length ?? 0}</dd></div></dl>}{impactVersionId && <div className="component-list">{versionImpact.data?.recentFacts.map((fact, index) => <article className="component-row" key={`${fact.machineId}-${index}`}><div><strong>{fact.operationType}</strong><span>机台 {fact.machineId}</span></div><small>{formatTime(fact.effectiveAt)}</small></article>)}</div>}</section>}
 
             {activePage === 'machines' && <>
               <section className="status-panel catalog-panel"><div className="panel-heading"><div><span className="section-index">机台登记</span><h3>创建机台</h3></div></div><form className="catalog-form" onSubmit={(event) => { event.preventDefault(); addMachine.mutate({ projectId: machineProjectId, serialNumber: machineSerial, name: machineName, machineType, reason: machineReason }) }}><label>所属项目<select value={machineProjectId} onChange={(event) => setMachineProjectId(event.target.value)} required><option value="">请选择项目</option>{projects.data?.map((project) => <option key={project.id} value={project.id}>{project.code} · {project.name}</option>)}</select></label><label>序列号<input value={machineSerial} onChange={(event) => setMachineSerial(event.target.value)} required /></label><label>机台名称<input value={machineName} onChange={(event) => setMachineName(event.target.value)} required /></label><label>机型<input value={machineType} onChange={(event) => setMachineType(event.target.value)} /></label><label className="wide-field">创建原因<input value={machineReason} onChange={(event) => setMachineReason(event.target.value)} required /></label><button className="primary-action" type="submit" disabled={addMachine.isPending}>{addMachine.isPending ? '正在创建' : '创建机台'}</button></form>{addMachine.isError && <p className="error-strip">{addMachine.error.message}</p>}</section>
