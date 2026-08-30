@@ -33,6 +33,7 @@ public static class CatalogEndpoints
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/drift-summary", GetMachineDriftSummaryAsync);
         endpoints.MapGet("/api/v1/baselines/{leftBaselineId:guid}/compare/{rightBaselineId:guid}", CompareBaselinesAsync);
         endpoints.MapGet("/api/v1/component-versions/{versionId:guid}/impact", GetVersionImpactAsync);
+        endpoints.MapGet("/api/v1/search", SearchAsync);
 
         endpoints.MapPost("/api/v1/components/{componentId:guid}/versions", CreateVersionAsync).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/component-versions/{versionId:guid}/maturity", ChangeMaturityAsync).RequireAuthorization("SeniorEngineer");
@@ -188,6 +189,18 @@ public static class CatalogEndpoints
         var historicalMachineIds = await db.DeploymentItems.Where(item => item.NewComponentVersionId == versionId).Join(db.DeploymentBatches, item => item.DeploymentBatchId, batch => batch.Id, (item, batch) => batch.MachineId).Distinct().ToArrayAsync(cancellationToken);
         var recentFacts = await db.DeploymentItems.Where(item => item.NewComponentVersionId == versionId).Join(db.DeploymentBatches, item => item.DeploymentBatchId, batch => batch.Id, (item, batch) => new { machineId = batch.MachineId, operationType = batch.OperationType.ToString(), effectiveAt = batch.EffectiveAt }).OrderByDescending(item => item.effectiveAt).Take(20).ToListAsync(cancellationToken);
         return TypedResults.Ok(new { versionId, usedBaselineIds = baselineIds, currentMachineIds, targetMachineIds, historicalMachineIds, recentFacts });
+    }
+
+    private static async Task<IResult> SearchAsync(string? query, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        var term = query?.Trim();
+        if (string.IsNullOrWhiteSpace(term) || term.Length < 2) return Results.ValidationProblem(new Dictionary<string, string[]> { ["query"] = ["搜索词至少需要两个字符。"] });
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var pattern = $"%{term}%";
+        var projects = await db.Projects.AsNoTracking().Where(item => EF.Functions.ILike(item.Code, pattern) || EF.Functions.ILike(item.Name, pattern)).Select(item => new { type = "Project", id = item.Id, label = item.Code + " · " + item.Name }).Take(20).ToListAsync(cancellationToken);
+        var components = await db.ConfigurationComponents.AsNoTracking().Where(item => EF.Functions.ILike(item.ComponentCode, pattern) || EF.Functions.ILike(item.Name, pattern)).Select(item => new { type = "Component", id = item.Id, label = item.ComponentCode + " · " + item.Name }).Take(20).ToListAsync(cancellationToken);
+        var versions = await db.ComponentVersions.AsNoTracking().Where(item => EF.Functions.ILike(item.VersionNumber, pattern)).Select(item => new { type = "Version", id = item.Id, label = item.VersionNumber }).Take(20).ToListAsync(cancellationToken);
+        return TypedResults.Ok(projects.Cast<object>().Concat(components).Concat(versions));
     }
 
     private static async Task RefreshMachineDriftSummaryAsync(ConfigHubDbContext db, Guid machineId, CancellationToken cancellationToken)

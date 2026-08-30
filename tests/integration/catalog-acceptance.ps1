@@ -103,6 +103,8 @@ $actual = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/ap
 if ($actual.Count -ne 2 -or @($actual | Where-Object { $_.componentId -eq $child.id -and $_.versionId -eq $childVersion.id -and $_.state -eq 'Present' }).Count -ne 1) { throw 'Partial observation must preserve unobserved current components.' }
 $impact = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/component-versions/$($secondVersion.id)/impact"))
 if (@($impact.usedBaselineIds | Where-Object { $_ -eq $baseline.id }).Count -ne 1 -or @($impact.targetMachineIds | Where-Object { $_ -eq $machine.id }).Count -ne 1 -or @($impact.historicalMachineIds | Where-Object { $_ -eq $machine.id }).Count -ne 1) { throw 'Version impact must trace baseline, target machine and historical deployment facts.' }
+$search = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/search?query=TEST-$suffix"))
+if (@($search | Where-Object { $_.type -eq 'Project' -and $_.id -eq $project.id }).Count -ne 1) { throw 'Catalog search must find the created project.' }
 
 if (-not [string]::IsNullOrWhiteSpace($ConnectionString)) {
     $psql = 'C:\Program Files\PostgreSQL\17\bin\psql.exe'
