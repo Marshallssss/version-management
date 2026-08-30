@@ -62,10 +62,10 @@ export const login = (input: { email: string; password: string }) => request<voi
 export const logout = () => request<void>('/api/v1/auth/logout', { method: 'POST' })
 export const createProject = (input: { code: string; name: string; description: string; reason: string }) =>
   request<{ id: string }>('/api/v1/projects', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify(input) })
-export const createComponent = (projectId: string, input: { code: string; name: string; parentComponentId: string | null }) =>
-  request<{ id: string }>(`/api/v1/projects/${projectId}/components`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
-export const createComponentVersion = (componentId: string, input: { versionNumber: string }) =>
-  request<{ id: string; sequenceNo: number }>(`/api/v1/components/${componentId}/versions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
+export const createComponent = (projectId: string, input: { code: string; name: string; parentComponentId: string | null; reason: string }) =>
+  request<{ id: string }>(`/api/v1/projects/${projectId}/components`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify(input) })
+export const createComponentVersion = (componentId: string, input: { versionNumber: string; reason: string }) =>
+  request<{ id: string; sequenceNo: number }>(`/api/v1/components/${componentId}/versions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify(input) })
 export const changeVersionMaturity = (versionId: string, state: string, reason: string) =>
   request<{ maturity: string; safety: string }>(`/api/v1/component-versions/${versionId}/maturity`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ state, reason }) })
 export const changeVersionSafety = (versionId: string, state: string, reason: string) =>

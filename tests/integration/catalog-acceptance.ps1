@@ -37,11 +37,11 @@ if ($machine.id -ne $machineReplay.id) { throw 'Expected idempotent machine crea
 try { Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, '/api/v1/machines')) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() } -ContentType 'application/json' -Body (@{ projectId = $project.id; serialNumber = "sn-$suffix"; name = 'Duplicate'; machineType = 'Test'; reason = '自动化重复校验' } | ConvertTo-Json) | Out-Null; throw 'Duplicate machine serial unexpectedly succeeded.' } catch { if ($_.Exception.Message -match 'unexpectedly succeeded') { throw }; if ($_.Exception.Response.StatusCode.value__ -ne 409) { throw } }
 
 function Invoke-JsonPost([string]$Path, [hashtable]$Body) {
-    Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, $Path)) -ContentType 'application/json' -Body ($Body | ConvertTo-Json)
+    Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, $Path)) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() } -ContentType 'application/json' -Body ($Body | ConvertTo-Json)
 }
 
-$component = Invoke-JsonPost "/api/v1/projects/$($project.id)/components" @{ code = 'CONTROL'; name = 'Control'; parentComponentId = $null }
-$child = Invoke-JsonPost "/api/v1/projects/$($project.id)/components" @{ code = 'CHILD'; name = 'Child'; parentComponentId = $component.id }
+$component = Invoke-JsonPost "/api/v1/projects/$($project.id)/components" @{ code = 'CONTROL'; name = 'Control'; parentComponentId = $null; reason = '自动化组件创建' }
+$child = Invoke-JsonPost "/api/v1/projects/$($project.id)/components" @{ code = 'CHILD'; name = 'Child'; parentComponentId = $component.id; reason = '自动化子组件创建' }
 try {
     Invoke-JsonPost "/api/v1/components/$($component.id)/move" @{ parentComponentId = $child.id; reason = '自动化环检测' } | Out-Null
     throw 'Component cycle unexpectedly succeeded.'
@@ -50,9 +50,9 @@ try {
     if ($_.Exception.Response.StatusCode.value__ -ne 409) { throw }
 }
 Invoke-JsonPost "/api/v1/components/$($child.id)/move" @{ parentComponentId = $null; reason = '自动化移动到根节点' } | Out-Null
-$firstVersion = Invoke-JsonPost "/api/v1/components/$($component.id)/versions" @{ versionNumber = 'opaque-a' }
-$secondVersion = Invoke-JsonPost "/api/v1/components/$($component.id)/versions" @{ versionNumber = 'opaque-b' }
-$childVersion = Invoke-JsonPost "/api/v1/components/$($child.id)/versions" @{ versionNumber = 'opaque-child' }
+$firstVersion = Invoke-JsonPost "/api/v1/components/$($component.id)/versions" @{ versionNumber = 'opaque-a'; reason = '自动化版本创建' }
+$secondVersion = Invoke-JsonPost "/api/v1/components/$($component.id)/versions" @{ versionNumber = 'opaque-b'; reason = '自动化版本创建' }
+$childVersion = Invoke-JsonPost "/api/v1/components/$($child.id)/versions" @{ versionNumber = 'opaque-child'; reason = '自动化版本创建' }
 if ($firstVersion.sequenceNo -ne 10 -or $secondVersion.sequenceNo -ne 20) { throw 'Expected version sequence 10/20.' }
 
 function Invoke-Lifecycle([string]$Path, [string]$State, [string]$Reason) {
@@ -77,7 +77,7 @@ $releaseHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString(); 'X-Correl
 $releasedBaseline = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/baselines/$($baseline.id)/release")) -Headers $releaseHeaders -ContentType 'application/json' -Body $releaseBody
 $releasedReplay = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/baselines/$($baseline.id)/release")) -Headers $releaseHeaders -ContentType 'application/json' -Body $releaseBody
 if ($releasedBaseline.state -ne 'Released' -or $releasedBaseline.id -ne $releasedReplay.id) { throw 'Expected idempotent baseline release.' }
-$thirdVersion = Invoke-JsonPost "/api/v1/components/$($component.id)/versions" @{ versionNumber = 'opaque-c' }
+$thirdVersion = Invoke-JsonPost "/api/v1/components/$($component.id)/versions" @{ versionNumber = 'opaque-c'; reason = '自动化版本创建' }
 $secondBaselineBody = @{ seriesCode = "SERIES2-$suffix"; baselineCode = "BL2-$suffix"; description = 'Comparison baseline'; reason = '自动化基线比较验收' } | ConvertTo-Json
 $secondBaseline = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/baselines")) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() } -ContentType 'application/json' -Body $secondBaselineBody
 Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/baselines/$($secondBaseline.id)/release")) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() } -ContentType 'application/json' -Body $releaseBody | Out-Null
