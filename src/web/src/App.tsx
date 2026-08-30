@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { assignProjectStandard, changeVersionMaturity, changeVersionSafety, cloneProject, createBaseline, createComponent, createComponentVersion, createMachine, createProject, getBaselines, getCurrentUser, getMachineConfiguration, getMachineDrift, getMachines, getProject, getProjectStandard, getProjects, getVersionImpact, login, logout, moveComponent, previewProjectClone, recommendVersion, recordMachineFacts, releaseBaseline, searchCatalog } from './catalog-api'
+import { assignProjectStandard, changeVersionMaturity, changeVersionSafety, cloneProject, createBaseline, createComponent, createComponentVersion, createMachine, createProject, getBaselines, getCurrentUser, getImportPreview, getMachineConfiguration, getMachineDrift, getMachines, getProject, getProjectStandard, getProjects, getVersionImpact, login, logout, moveComponent, previewProjectClone, recommendVersion, recordMachineFacts, releaseBaseline, searchCatalog, stageImport } from './catalog-api'
 import { enqueueNoopJob, getSystemStatus, getSystemVersion, type BackgroundJobStatus } from './system-api'
 
 const navigation = [
@@ -13,7 +13,7 @@ const navigation = [
   { id: 'deployments', label: '部署记录', available: false },
   { id: 'compare', label: '配置比对', available: false },
   { id: 'search', label: '搜索', available: true },
-  { id: 'imports', label: '导入', available: false },
+  { id: 'imports', label: '导入', available: true },
 ]
 
 const statusText: Record<BackgroundJobStatus, string> = {
@@ -75,6 +75,10 @@ function App() {
   const [factReason, setFactReason] = useState('')
   const [impactVersionId, setImpactVersionId] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
+  const [importProjectId, setImportProjectId] = useState('')
+  const [importRows, setImportRows] = useState('')
+  const [importReason, setImportReason] = useState('')
+  const [importBatchId, setImportBatchId] = useState('')
   const queryClient = useQueryClient()
   const system = useQuery({ queryKey: ['system-version'], queryFn: getSystemVersion })
   const status = useQuery({ queryKey: ['system-status'], queryFn: getSystemStatus, refetchInterval: 5_000 })
@@ -88,6 +92,7 @@ function App() {
   const machineDrift = useQuery({ queryKey: ['machine-drift', selectedMachineId], queryFn: () => getMachineDrift(selectedMachineId), enabled: selectedMachineId !== '' })
   const versionImpact = useQuery({ queryKey: ['version-impact', impactVersionId], queryFn: () => getVersionImpact(impactVersionId), enabled: impactVersionId !== '' })
   const catalogSearch = useQuery({ queryKey: ['catalog-search', searchTerm], queryFn: () => searchCatalog(searchTerm), enabled: searchTerm.trim().length >= 2 })
+  const importPreview = useQuery({ queryKey: ['import-preview', importBatchId], queryFn: () => getImportPreview(importBatchId), enabled: importBatchId !== '' })
   const enqueue = useMutation({
     mutationFn: enqueueNoopJob,
     onSuccess: async () => {
@@ -106,6 +111,7 @@ function App() {
       await queryClient.invalidateQueries({ queryKey: ['projects'] })
     },
   })
+  const stageImportMutation = useMutation({ mutationFn: () => stageImport({ projectId: importProjectId, sourceFileName: '手工预览.csv', reason: importReason, rows: importRows.split(/\r?\n/).filter(Boolean).map(line => { const [componentCode = '', versionNumber = ''] = line.split(','); return { componentCode: componentCode.trim(), versionNumber: versionNumber.trim() } }) }), onSuccess: ({ id }) => setImportBatchId(id) })
   const signIn = useMutation({ mutationFn: login, onSuccess: async () => { setPassword(''); await queryClient.invalidateQueries({ queryKey: ['current-user'] }) } })
   const signOut = useMutation({ mutationFn: logout, onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ['current-user'] }); setSelectedProjectId(null) } })
   const addComponent = useMutation({
@@ -283,6 +289,8 @@ function App() {
             {activePage === 'software' && <section className="status-panel catalog-panel"><div className="panel-heading"><div><span className="section-index">版本影响</span><h3>追溯版本使用范围</h3></div></div><label>项目版本<select value={impactVersionId} onChange={(event) => setImpactVersionId(event.target.value)}><option value="">请选择项目页面中的版本</option>{projectDetail.data?.components.flatMap((component) => component.versions.map((version) => <option key={version.id} value={version.id}>{component.code} · {version.versionNumber}</option>))}</select></label>{impactVersionId && <dl className="runtime-list"><div><dt>已使用基线</dt><dd>{versionImpact.data?.usedBaselineIds.length ?? 0}</dd></div><div><dt>当前机台</dt><dd>{versionImpact.data?.currentMachineIds.length ?? 0}</dd></div><div><dt>目标机台</dt><dd>{versionImpact.data?.targetMachineIds.length ?? 0}</dd></div><div><dt>历史机台</dt><dd>{versionImpact.data?.historicalMachineIds.length ?? 0}</dd></div></dl>}{impactVersionId && <div className="component-list">{versionImpact.data?.recentFacts.map((fact, index) => <article className="component-row" key={`${fact.machineId}-${index}`}><div><strong>{fact.operationType}</strong><span>机台 {fact.machineId}</span></div><small>{formatTime(fact.effectiveAt)}</small></article>)}</div>}</section>}
 
             {activePage === 'search' && <section className="status-panel catalog-panel"><div className="panel-heading"><div><span className="section-index">全局搜索</span><h3>项目、组件和版本</h3></div></div><label>搜索词<input value={searchTerm} minLength={2} onChange={(event) => setSearchTerm(event.target.value)} placeholder="至少输入两个字符" /></label>{searchTerm.trim().length >= 2 && <div className="catalog-list">{catalogSearch.data?.map((item) => <article className="component-row" key={`${item.type}-${item.id}`}><div><strong>{item.label}</strong><span>{item.type === 'Project' ? '项目' : item.type === 'Component' ? '组件' : '版本'}</span></div></article>)}</div>}{catalogSearch.isError && <p className="error-strip">{catalogSearch.error.message}</p>}</section>}
+
+            {activePage === 'imports' && <section className="status-panel catalog-panel"><div className="panel-heading"><div><span className="section-index">导入预览</span><h3>先校验，再提交</h3></div></div><form className="catalog-form" onSubmit={(event) => { event.preventDefault(); stageImportMutation.mutate() }}><label>所属项目<select value={importProjectId} onChange={(event) => setImportProjectId(event.target.value)} required><option value="">请选择项目</option>{projects.data?.map(project => <option key={project.id} value={project.id}>{project.code} · {project.name}</option>)}</select></label><label className="wide-field">每行：组件编码,版本号<textarea value={importRows} onChange={(event) => setImportRows(event.target.value)} required /></label><label className="wide-field">导入原因<input value={importReason} onChange={(event) => setImportReason(event.target.value)} required /></label><button type="submit" disabled={stageImportMutation.isPending}>{stageImportMutation.isPending ? '正在校验' : '生成预览'}</button></form>{stageImportMutation.isError && <p className="error-strip">{stageImportMutation.error.message}</p>}{importPreview.data && <div className="component-list">{importPreview.data.rows.map(row => <article className="component-row" key={row.rowNumber}><div><strong>第 {row.rowNumber} 行</strong><span>{row.payload.componentCode} · {row.payload.versionNumber}</span></div><small>{row.validationError ?? '校验通过，尚未提交'}</small></article>)}</div>}</section>}
 
             {activePage === 'machines' && <>
               <section className="status-panel catalog-panel"><div className="panel-heading"><div><span className="section-index">机台登记</span><h3>创建机台</h3></div></div><form className="catalog-form" onSubmit={(event) => { event.preventDefault(); addMachine.mutate({ projectId: machineProjectId, serialNumber: machineSerial, name: machineName, machineType, reason: machineReason }) }}><label>所属项目<select value={machineProjectId} onChange={(event) => setMachineProjectId(event.target.value)} required><option value="">请选择项目</option>{projects.data?.map((project) => <option key={project.id} value={project.id}>{project.code} · {project.name}</option>)}</select></label><label>序列号<input value={machineSerial} onChange={(event) => setMachineSerial(event.target.value)} required /></label><label>机台名称<input value={machineName} onChange={(event) => setMachineName(event.target.value)} required /></label><label>机型<input value={machineType} onChange={(event) => setMachineType(event.target.value)} /></label><label className="wide-field">创建原因<input value={machineReason} onChange={(event) => setMachineReason(event.target.value)} required /></label><button className="primary-action" type="submit" disabled={addMachine.isPending}>{addMachine.isPending ? '正在创建' : '创建机台'}</button></form>{addMachine.isError && <p className="error-strip">{addMachine.error.message}</p>}</section>

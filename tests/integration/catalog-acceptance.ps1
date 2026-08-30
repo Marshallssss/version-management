@@ -105,6 +105,9 @@ $impact = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/ap
 if (@($impact.usedBaselineIds | Where-Object { $_ -eq $baseline.id }).Count -ne 1 -or @($impact.targetMachineIds | Where-Object { $_ -eq $machine.id }).Count -ne 1 -or @($impact.historicalMachineIds | Where-Object { $_ -eq $machine.id }).Count -ne 1) { throw 'Version impact must trace baseline, target machine and historical deployment facts.' }
 $search = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/search?query=TEST-$suffix"))
 if (@($search | Where-Object { $_.type -eq 'Project' -and $_.id -eq $project.id }).Count -ne 1) { throw 'Catalog search must find the created project.' }
+$import = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, '/api/v1/imports')) -ContentType 'application/json' -Body (@{ projectId = $project.id; sourceFileName = 'acceptance.csv'; reason = '自动化导入预览'; rows = @(@{ componentCode = 'CONTROL'; versionNumber = 'import-preview' }, @{ componentCode = ''; versionNumber = 'invalid' }) } | ConvertTo-Json -Depth 5)
+$preview = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/imports/$($import.id)"))
+if ($import.errorCount -ne 1 -or $preview.rows.Count -ne 2 -or [string]::IsNullOrWhiteSpace($preview.rows[1].validationError)) { throw 'Import preview must stage and validate rows without committing them.' }
 
 if (-not [string]::IsNullOrWhiteSpace($ConnectionString)) {
     $psql = 'C:\Program Files\PostgreSQL\17\bin\psql.exe'

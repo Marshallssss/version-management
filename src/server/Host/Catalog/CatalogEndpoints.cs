@@ -34,6 +34,8 @@ public static class CatalogEndpoints
         endpoints.MapGet("/api/v1/baselines/{leftBaselineId:guid}/compare/{rightBaselineId:guid}", CompareBaselinesAsync);
         endpoints.MapGet("/api/v1/component-versions/{versionId:guid}/impact", GetVersionImpactAsync);
         endpoints.MapGet("/api/v1/search", SearchAsync);
+        endpoints.MapPost("/api/v1/imports", StageImportAsync).RequireAuthorization("Engineer");
+        endpoints.MapGet("/api/v1/imports/{batchId:guid}", GetImportPreviewAsync);
 
         endpoints.MapPost("/api/v1/components/{componentId:guid}/versions", CreateVersionAsync).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/component-versions/{versionId:guid}/maturity", ChangeMaturityAsync).RequireAuthorization("SeniorEngineer");
@@ -201,6 +203,36 @@ public static class CatalogEndpoints
         var components = await db.ConfigurationComponents.AsNoTracking().Where(item => EF.Functions.ILike(item.ComponentCode, pattern) || EF.Functions.ILike(item.Name, pattern)).Select(item => new { type = "Component", id = item.Id, label = item.ComponentCode + " · " + item.Name }).Take(20).ToListAsync(cancellationToken);
         var versions = await db.ComponentVersions.AsNoTracking().Where(item => EF.Functions.ILike(item.VersionNumber, pattern)).Select(item => new { type = "Version", id = item.Id, label = item.VersionNumber }).Take(20).ToListAsync(cancellationToken);
         return TypedResults.Ok(projects.Cast<object>().Concat(components).Concat(versions));
+    }
+
+    private static async Task<IResult> StageImportAsync(StageImportRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        if (request.ProjectId == Guid.Empty || string.IsNullOrWhiteSpace(request.SourceFileName) || string.IsNullOrWhiteSpace(request.Reason) || request.Rows is null || request.Rows.Count == 0) return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = ["必须提供项目、来源文件、原因和至少一行数据。"] });
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        if (!await db.Projects.AnyAsync(item => item.Id == request.ProjectId, cancellationToken)) return Results.NotFound();
+        var batch = new ImportBatch { Id = Guid.NewGuid(), ProjectId = request.ProjectId, SourceFileName = request.SourceFileName.Trim(), CreatedBy = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required."), Reason = request.Reason.Trim(), CreatedAt = DateTimeOffset.UtcNow };
+        var errors = 0;
+        foreach (var row in request.Rows.Select((value, index) => new { value, index }))
+        {
+            var invalid = string.IsNullOrWhiteSpace(row.value.ComponentCode) || string.IsNullOrWhiteSpace(row.value.VersionNumber);
+            if (invalid) errors++;
+            db.ImportRows.Add(new ImportRow { Id = Guid.NewGuid(), ImportBatchId = batch.Id, RowNumber = row.index + 1, Payload = JsonDocument.Parse(JsonSerializer.Serialize(row.value)), ValidationError = invalid ? "componentCode 和 versionNumber 为必填项。" : null });
+        }
+        batch.Status = errors == 0 ? ImportBatchStatus.Validated : ImportBatchStatus.Staged;
+        db.ImportBatches.Add(batch);
+        AddAuditEvent(db, context, "ImportStaged", "ImportBatch", batch.Id, new { batch.ProjectId, rowCount = request.Rows.Count, errors, reason = batch.Reason });
+        await db.SaveChangesAsync(cancellationToken);
+        return TypedResults.Created($"/api/v1/imports/{batch.Id}", new { id = batch.Id, status = batch.Status.ToString(), rowCount = request.Rows.Count, errorCount = errors });
+    }
+
+    private static async Task<IResult> GetImportPreviewAsync(Guid batchId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var batch = await db.ImportBatches.AsNoTracking().SingleOrDefaultAsync(item => item.Id == batchId, cancellationToken);
+        if (batch is null) return Results.NotFound();
+        var stagedRows = await db.ImportRows.AsNoTracking().Where(item => item.ImportBatchId == batchId).OrderBy(item => item.RowNumber).ToListAsync(cancellationToken);
+        var rows = stagedRows.Select(item => new { item.RowNumber, payload = item.Payload.RootElement.Clone(), item.ValidationError });
+        return TypedResults.Ok(new { id = batch.Id, status = batch.Status.ToString(), sourceFileName = batch.SourceFileName, rows });
     }
 
     private static async Task RefreshMachineDriftSummaryAsync(ConfigHubDbContext db, Guid machineId, CancellationToken cancellationToken)
@@ -861,3 +893,5 @@ public sealed record CreateMachineRequest(Guid ProjectId, string? SerialNumber, 
 public sealed record AssignMachineTargetRequest(Guid ConfigurationBaselineId, string? Reason);
 public sealed record RecordFactsRequest(string? OperationType, string? Coverage, string? SourceType, string? ExternalEventId, DateTimeOffset? EffectiveAt, string? Reason, List<RecordFactItem>? Items);
 public sealed record RecordFactItem(Guid ComponentId, Guid? VersionId, bool Absent, DateTimeOffset? KnownInstalledAt);
+public sealed record StageImportRequest(Guid ProjectId, string? SourceFileName, string? Reason, List<StageImportRow>? Rows);
+public sealed record StageImportRow(string? ComponentCode, string? VersionNumber);
