@@ -1844,6 +1844,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 已交付补充：ASP.NET Core Identity 用户/角色表、Cookie 登录/退出/当前身份接口、Bootstrap Admin 本机配置、Engineer 以上角色的 API 授权；Project Create 在同一事务中校验 `reason`、`Idempotency-Key`、权限、Audit 与结果重放。
 - 自动验收：`tests/integration/catalog-acceptance.ps1` 覆盖未认证 HTTP 401、Cookie 登录、同 Key 重放、认证 Audit/Correlation、组件版本序列与重复版本冲突。
 - 已交付补充：Project、Component、ComponentVersion 创建 API 均要求 Engineer 以上角色；所有后续写命令仍需统一接入原因与幂等协议。
+- 2A 已交付：管理员可读取 Identity 数据库中的用户目录与角色，中文“用户与角色”界面只向 Admin 展示；`catalog-acceptance.ps1` 验证 Bootstrap Admin 与 Admin 角色。用户创建与角色变更仍在下一条写入切片中实施。
 - 待完成：用户管理界面、角色管理，以及 Component/Version 与后续写命令的原因/幂等协议。
 
 ## Step 3 — Project → Component → Version

@@ -1,5 +1,6 @@
 using ConfigHub.Infrastructure.Persistence.Entities;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 
 namespace ConfigHub.Host.Auth;
 
@@ -11,6 +12,8 @@ public static class AuthEndpoints
         auth.MapPost("/login", LoginAsync);
         auth.MapPost("/logout", LogoutAsync).RequireAuthorization();
         auth.MapGet("/me", Me).RequireAuthorization();
+        var admin = endpoints.MapGroup("/api/v1/admin").RequireAuthorization(policy => policy.RequireRole("Admin"));
+        admin.MapGet("/users", ListUsersAsync);
         return endpoints;
     }
 
@@ -34,6 +37,18 @@ public static class AuthEndpoints
     private static Microsoft.AspNetCore.Http.HttpResults.Ok<CurrentUserResponse> Me(HttpContext context) => TypedResults.Ok(new CurrentUserResponse(
         context.User.Identity?.Name,
         context.User.Claims.Where(claim => claim.Type.EndsWith("role", StringComparison.OrdinalIgnoreCase)).Select(claim => claim.Value).ToArray()));
+
+    private static async Task<IResult> ListUsersAsync(UserManager<ApplicationUser> userManager, CancellationToken cancellationToken)
+    {
+        var users = await userManager.Users.OrderBy(user => user.Email).ToListAsync(cancellationToken);
+        var result = new List<object>(users.Count);
+        foreach (var user in users)
+        {
+            var roles = await userManager.GetRolesAsync(user);
+            result.Add(new { id = user.Id, email = user.Email, displayName = user.DisplayName, roles });
+        }
+        return TypedResults.Ok(result);
+    }
 }
 
 public sealed record LoginRequest(string? Email, string? Password);

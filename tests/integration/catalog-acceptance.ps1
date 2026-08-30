@@ -22,6 +22,8 @@ try {
 $loginBody = @{ email = $Email; password = $Password } | ConvertTo-Json
 $login = Invoke-WebRequest -UseBasicParsing -SessionVariable session -Method Post -Uri ([uri]::new($BaseUri, '/api/v1/auth/login')) -ContentType 'application/json' -Body $loginBody
 if ($login.StatusCode -ne 204) { throw 'Login did not succeed.' }
+$users = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, '/api/v1/admin/users'))
+if (@($users | Where-Object { $_.email -eq $Email -and $_.roles -contains 'Admin' }).Count -ne 1) { throw 'Administrator user directory must expose the authenticated admin and role.' }
 
 $idempotencyKey = [Guid]::NewGuid().ToString()
 $headers = @{ 'Idempotency-Key' = $idempotencyKey; 'X-Correlation-ID' = "catalog-$suffix" }
