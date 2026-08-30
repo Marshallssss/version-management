@@ -35,6 +35,8 @@ public static class CatalogEndpoints
         endpoints.MapGet("/api/v1/component-versions/{versionId:guid}/impact", GetVersionImpactAsync);
         endpoints.MapGet("/api/v1/search", SearchAsync);
         endpoints.MapGet("/api/v1/dashboard", GetDashboardAsync);
+        endpoints.MapPost("/api/v1/admin/drift-summaries/rebuild", RebuildMachineDriftSummariesAsync)
+            .RequireAuthorization(policy => policy.RequireRole("Admin"));
         endpoints.MapPost("/api/v1/imports", StageImportAsync).RequireAuthorization("Engineer");
         endpoints.MapGet("/api/v1/imports/{batchId:guid}", GetImportPreviewAsync);
         endpoints.MapPost("/api/v1/imports/{batchId:guid}/commit", CommitImportAsync).RequireAuthorization("Engineer");
@@ -234,6 +236,39 @@ public static class CatalogEndpoints
             unknownCount = await db.Machines.CountAsync(machine => !summaries.Any(summary => summary.MachineId == machine.Id) || summaries.Any(summary => summary.MachineId == machine.Id && summary.MatchStatus == DriftMatchStatus.Unknown), cancellationToken),
             criticalRiskCount = await summaries.CountAsync(item => item.RiskSeverity == DriftRiskSeverity.Critical, cancellationToken)
         });
+    }
+
+    private static async Task<IResult> RebuildMachineDriftSummariesAsync(RebuildDriftSummariesRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        var validation = ValidateRequired(request.Reason, "重建原因", 500);
+        if (validation is not null) return Results.ValidationProblem(validation);
+        var key = context.Request.Headers["Idempotency-Key"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["重建 Drift Summary 必须提供不超过 200 个字符的 Idempotency-Key。"] });
+
+        await using var database = await factory.CreateDbContextAsync(cancellationToken);
+        const string scope = "machine-drift-summaries.rebuild";
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request))));
+        var replay = await database.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
+        if (replay is not null)
+        {
+            if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" });
+            if (replay.Result is not null) return TypedResults.Ok(replay.Result.RootElement.Clone());
+            return Results.Conflict(new { message = "该请求仍在处理。" });
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
+        var record = new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) };
+        database.IdempotencyRecords.Add(record);
+        var machineIds = await database.Machines.Select(machine => machine.Id).ToListAsync(cancellationToken);
+        foreach (var machineId in machineIds) await RefreshMachineDriftSummaryAsync(database, machineId, cancellationToken);
+        AddAuditEvent(database, context, "MachineDriftSummariesRebuilt", "MachineDriftSummaryRebuild", record.Id, new { machineCount = machineIds.Count, reason = request.Reason!.Trim() });
+        await database.SaveChangesAsync(cancellationToken);
+        record.Status = IdempotencyRecordStatus.Completed;
+        record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = record.Id, machineCount = machineIds.Count }));
+        await database.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return TypedResults.Ok(new { id = record.Id, machineCount = machineIds.Count });
     }
 
     private static async Task<IResult> StageImportAsync(StageImportRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
@@ -959,6 +994,7 @@ public sealed record AssignProjectStandardRequest(Guid ConfigurationBaselineId, 
 public sealed record CreateMachineRequest(Guid ProjectId, string? SerialNumber, string? Name, string? MachineType, string? Reason);
 public sealed record AssignMachineTargetRequest(Guid ConfigurationBaselineId, string? Reason);
 public sealed record RecordFactsRequest(string? OperationType, string? Coverage, string? SourceType, string? ExternalEventId, DateTimeOffset? EffectiveAt, string? Reason, List<RecordFactItem>? Items);
+public sealed record RebuildDriftSummariesRequest(string? Reason);
 public sealed record RecordFactItem(Guid ComponentId, Guid? VersionId, bool Absent, DateTimeOffset? KnownInstalledAt);
 public sealed record StageImportRequest(Guid ProjectId, string? SourceFileName, string? Reason, List<StageImportRow>? Rows);
 public sealed record StageImportRow(string? ComponentCode, string? VersionNumber);

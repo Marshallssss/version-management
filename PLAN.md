@@ -1916,6 +1916,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 
 - Permission、Immutability、Temporal、Projection Rebuild、Performance、Backup Restore、Upgrade、Security Tests。
 - 10A 进行中：认证 Project Create 的 HTTP 401 自动验收继续保留；完整角色矩阵需以可控身份种子和 HTTP 客户端测试夹具实施。验收发现旧 Clone Preview API 会落入 SPA fallback，因此移除无副作用的 Preview Command，中文界面改为直接基于已加载 Project Detail 显示将复制的组件数和排除的版本数。
+- 10B 已交付：仅 Admin 可调用的 Drift Summary 重建命令只重新计算 `machine_drift_summaries`，不修改 Target、Actual 或事实历史；命令要求 reason、correlation id、Audit 与持久化 Idempotency。`catalog-acceptance.ps1` 已覆盖重建和同键重放，Release、真实 Migration 与完整集成验收均已通过。
 
 ## Step 11 — Internal Pilot
 
