@@ -32,6 +32,7 @@ public static class CatalogEndpoints
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/drift", GetMachineDriftAsync);
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/drift-summary", GetMachineDriftSummaryAsync);
         endpoints.MapGet("/api/v1/baselines/{leftBaselineId:guid}/compare/{rightBaselineId:guid}", CompareBaselinesAsync);
+        endpoints.MapGet("/api/v1/component-versions/{versionId:guid}/impact", GetVersionImpactAsync);
 
         endpoints.MapPost("/api/v1/components/{componentId:guid}/versions", CreateVersionAsync).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/component-versions/{versionId:guid}/maturity", ChangeMaturityAsync).RequireAuthorization("SeniorEngineer");
@@ -175,6 +176,18 @@ public static class CatalogEndpoints
         });
 
         return TypedResults.Ok(new { leftBaselineId, rightBaselineId, items });
+    }
+
+    private static async Task<IResult> GetVersionImpactAsync(Guid versionId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        if (!await db.ComponentVersions.AnyAsync(item => item.Id == versionId, cancellationToken)) return Results.NotFound();
+        var baselineIds = await db.BaselineItems.Where(item => item.ComponentVersionId == versionId).Select(item => item.ConfigurationBaselineId).Distinct().ToArrayAsync(cancellationToken);
+        var currentMachineIds = await db.MachineCurrentConfigurations.Where(item => item.ComponentVersionId == versionId && item.State == CurrentConfigurationState.Present).Select(item => item.MachineId).Distinct().ToArrayAsync(cancellationToken);
+        var targetMachineIds = await db.MachineTargetAssignments.Where(item => item.ValidTo == null && baselineIds.Contains(item.ConfigurationBaselineId)).Select(item => item.MachineId).Distinct().ToArrayAsync(cancellationToken);
+        var historicalMachineIds = await db.DeploymentItems.Where(item => item.NewComponentVersionId == versionId).Join(db.DeploymentBatches, item => item.DeploymentBatchId, batch => batch.Id, (item, batch) => batch.MachineId).Distinct().ToArrayAsync(cancellationToken);
+        var recentFacts = await db.DeploymentItems.Where(item => item.NewComponentVersionId == versionId).Join(db.DeploymentBatches, item => item.DeploymentBatchId, batch => batch.Id, (item, batch) => new { machineId = batch.MachineId, operationType = batch.OperationType.ToString(), effectiveAt = batch.EffectiveAt }).OrderByDescending(item => item.effectiveAt).Take(20).ToListAsync(cancellationToken);
+        return TypedResults.Ok(new { versionId, usedBaselineIds = baselineIds, currentMachineIds, targetMachineIds, historicalMachineIds, recentFacts });
     }
 
     private static async Task RefreshMachineDriftSummaryAsync(ConfigHubDbContext db, Guid machineId, CancellationToken cancellationToken)

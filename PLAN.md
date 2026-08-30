@@ -1893,6 +1893,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 ## Step 8 — Trace/Impact/Search
 
 - Bidirectional Trace、Version Impact、Global Search、Dashboard。
+- 8A 进行中：Version Impact 以 PostgreSQL 实时 JOIN 返回 Used Baselines、Current/Target/Historical Machines 与 Recent Facts；不引入图数据库或 Elasticsearch。
 
 ## Step 9 — Import
 

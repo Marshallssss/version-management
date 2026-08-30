@@ -101,6 +101,8 @@ $partialFacts = @{ operationType = 'Observation'; coverage = 'Partial'; sourceTy
 Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($machine.id)/facts")) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() } -ContentType 'application/json' -Body $partialFacts | Out-Null
 $actual = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($machine.id)/configuration"))
 if ($actual.Count -ne 2 -or @($actual | Where-Object { $_.componentId -eq $child.id -and $_.versionId -eq $childVersion.id -and $_.state -eq 'Present' }).Count -ne 1) { throw 'Partial observation must preserve unobserved current components.' }
+$impact = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/component-versions/$($secondVersion.id)/impact"))
+if (@($impact.usedBaselineIds | Where-Object { $_ -eq $baseline.id }).Count -ne 1 -or @($impact.targetMachineIds | Where-Object { $_ -eq $machine.id }).Count -ne 1 -or @($impact.historicalMachineIds | Where-Object { $_ -eq $machine.id }).Count -ne 1) { throw 'Version impact must trace baseline, target machine and historical deployment facts.' }
 
 if (-not [string]::IsNullOrWhiteSpace($ConnectionString)) {
     $psql = 'C:\Program Files\PostgreSQL\17\bin\psql.exe'
