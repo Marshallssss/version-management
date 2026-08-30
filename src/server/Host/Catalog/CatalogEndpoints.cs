@@ -33,6 +33,7 @@ public static class CatalogEndpoints
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/drift-summary", GetMachineDriftSummaryAsync);
         endpoints.MapGet("/api/v1/baselines/{leftBaselineId:guid}/compare/{rightBaselineId:guid}", CompareBaselinesAsync);
         endpoints.MapGet("/api/v1/component-versions/{versionId:guid}/impact", GetVersionImpactAsync);
+        endpoints.MapGet("/api/v1/component-versions/{versionId:guid}", GetVersionDetailAsync);
         endpoints.MapGet("/api/v1/search", SearchAsync);
         endpoints.MapGet("/api/v1/dashboard", GetDashboardAsync);
         endpoints.MapPost("/api/v1/admin/drift-summaries/rebuild", RebuildMachineDriftSummariesAsync)
@@ -208,6 +209,16 @@ public static class CatalogEndpoints
         var historicalMachineIds = await db.DeploymentItems.Where(item => item.NewComponentVersionId == versionId).Join(db.DeploymentBatches, item => item.DeploymentBatchId, batch => batch.Id, (item, batch) => batch.MachineId).Distinct().ToArrayAsync(cancellationToken);
         var recentFacts = await db.DeploymentItems.Where(item => item.NewComponentVersionId == versionId).Join(db.DeploymentBatches, item => item.DeploymentBatchId, batch => batch.Id, (item, batch) => new { machineId = batch.MachineId, operationType = batch.OperationType.ToString(), effectiveAt = batch.EffectiveAt }).OrderByDescending(item => item.effectiveAt).Take(20).ToListAsync(cancellationToken);
         return TypedResults.Ok(new { versionId, usedBaselineIds = baselineIds, currentMachineIds, targetMachineIds, historicalMachineIds, recentFacts });
+    }
+
+    private static async Task<IResult> GetVersionDetailAsync(Guid versionId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var version = await db.ComponentVersions.AsNoTracking().Where(item => item.Id == versionId).Join(db.ConfigurationComponents.AsNoTracking(), item => item.ComponentId, component => component.Id, (item, component) => new { item, component }).Select(value => new { id = value.item.Id, componentId = value.item.ComponentId, componentCode = value.component.ComponentCode, componentName = value.component.Name, versionNumber = value.item.VersionNumber, sequenceNo = value.item.SequenceNo, maturity = value.item.Maturity.ToString(), safety = value.item.Safety.ToString(), createdAt = value.item.CreatedAt }).SingleOrDefaultAsync(cancellationToken);
+        if (version is null) return Results.NotFound();
+        var transitions = await db.VersionLifecycleTransitions.AsNoTracking().Where(item => item.ComponentVersionId == versionId).OrderByDescending(item => item.OccurredAt).Select(item => new { axis = item.Axis.ToString(), fromState = item.FromState, toState = item.ToState, reason = item.Reason, actor = item.Actor, occurredAt = item.OccurredAt }).ToListAsync(cancellationToken);
+        var recommended = await db.VersionRecommendations.AsNoTracking().AnyAsync(item => item.ComponentVersionId == versionId && item.RevokedAt == null, cancellationToken);
+        return TypedResults.Ok(new { version, recommended, transitions });
     }
 
     private static async Task<IResult> SearchAsync(string? query, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)

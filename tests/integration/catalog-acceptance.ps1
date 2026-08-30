@@ -149,6 +149,8 @@ $factHistory = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri,
 if (@($factHistory | Where-Object { $_.operationType -eq 'InitialSnapshot' -and $_.coverage -eq 'Full' }).Count -ne 1 -or @($factHistory | Where-Object { $_.operationType -eq 'Observation' -and $_.coverage -eq 'Partial' }).Count -ne 1) { throw 'Machine fact history must retain operation and coverage semantics.' }
 $impact = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/component-versions/$($secondVersion.id)/impact"))
 if (@($impact.usedBaselineIds | Where-Object { $_ -eq $baseline.id }).Count -ne 1 -or @($impact.targetMachineIds | Where-Object { $_ -eq $machine.id }).Count -ne 1 -or @($impact.historicalMachineIds | Where-Object { $_ -eq $machine.id }).Count -ne 1) { throw 'Version impact must trace baseline, target machine and historical deployment facts.' }
+$versionDetail = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/component-versions/$($secondVersion.id)"))
+if ($versionDetail.version.sequenceNo -ne 20 -or $versionDetail.version.componentId -ne $component.id -or $versionDetail.transitions.Count -lt 2) { throw 'Version detail must expose the opaque version identity and lifecycle history.' }
 $search = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/search?query=TEST-$suffix"))
 if (@($search | Where-Object { $_.type -eq 'Project' -and $_.id -eq $project.id }).Count -ne 1) { throw 'Catalog search must find the created project.' }
 $machineSearch = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/search?query=SN-$suffix"))

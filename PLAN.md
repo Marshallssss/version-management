@@ -1858,6 +1858,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 组件树移动切片已交付：中文移动表单与受授权的 Move Command 会更新整个子树的 `lineage_key`；自动验收覆盖子节点移动和移动到后代时 HTTP 409。
 - 生命周期切片已交付：独立 Maturity/Safety Transition History 与 Recommendation History 已落库；API/UI/自动测试覆盖 Draft→Testing→Released、推荐、Block 自动撤销推荐以及 Unblock 不自动恢复。
 - Clone 切片已交付：中文 Preview/Commit 表单只复制 Project 与 Component Tree，不复制 ComponentVersion、Baseline、Machine 或运行历史；自动验收断言新项目组件存在且版本为空。
+- 3G 已交付：版本详情 API/中文界面显示组件归属、opaque sequence、Maturity/Safety、Recommendation 与生命周期轨迹；`catalog-acceptance.ps1` 已验证版本身份与生命周期记录，Release、真实 Migration 与完整集成验收均已通过。
 - 待完成：深层组件树编辑、版本详情/影响查询，以及基于资源范围的 Project RBAC；当前已具备角色级 API 授权。
 
 ## Step 4 — Baseline
