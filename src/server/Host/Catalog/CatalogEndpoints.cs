@@ -727,40 +727,26 @@ public static class CatalogEndpoints
             return Results.ValidationProblem(validationError);
         }
 
-        var versionNumber = request.VersionNumber!.Trim();
-
         await using var database = await contextFactory.CreateDbContextAsync(cancellationToken);
-        var component = await database.ConfigurationComponents.SingleOrDefaultAsync(candidate => candidate.Id == componentId, cancellationToken);
-        if (component is null)
-        {
-            return Results.NotFound();
-        }
-
-        var normalizedVersion = Normalize(versionNumber);
-        if (await database.ComponentVersions.AnyAsync(
-                version => version.ComponentId == componentId && version.NormalizedVersionNumber == normalizedVersion,
-                cancellationToken))
-        {
-            return Results.Conflict(new { message = "该组件版本号已存在。" });
-        }
-
-        var nextSequenceNo = (await database.ComponentVersions
-            .Where(version => version.ComponentId == componentId)
-            .Select(version => (long?)version.SequenceNo)
-            .MaxAsync(cancellationToken) ?? 0) + 10;
-        var version = new ComponentVersion
-        {
-            Id = Guid.NewGuid(),
-            ComponentId = componentId,
-            VersionNumber = versionNumber,
-            NormalizedVersionNumber = normalizedVersion,
-            SequenceNo = nextSequenceNo,
-            CreatedAt = DateTimeOffset.UtcNow
-        };
-        database.ComponentVersions.Add(version);
-        AddAuditEvent(database, httpContext, "ComponentVersionCreated", "ComponentVersion", version.Id, new { version.ComponentId, version.VersionNumber, version.SequenceNo });
+        var result = await CreateComponentVersionCommandAsync(database, componentId, request.VersionNumber!.Trim(), httpContext, cancellationToken);
+        if (result.ComponentMissing) return Results.NotFound();
+        if (result.Duplicate) return Results.Conflict(new { message = "该组件版本号已存在。" });
+        var version = result.Version!;
         await database.SaveChangesAsync(cancellationToken);
         return TypedResults.Created($"/api/v1/components/{componentId}/versions/{version.Id}", new { id = version.Id, sequenceNo = version.SequenceNo });
+    }
+
+    private static async Task<VersionCommandResult> CreateComponentVersionCommandAsync(ConfigHubDbContext database, Guid componentId, string versionNumber, HttpContext context, CancellationToken cancellationToken)
+    {
+        var component = await database.ConfigurationComponents.SingleOrDefaultAsync(candidate => candidate.Id == componentId, cancellationToken);
+        if (component is null) return new VersionCommandResult(null, true, false);
+        var normalizedVersion = Normalize(versionNumber);
+        if (await database.ComponentVersions.AnyAsync(version => version.ComponentId == componentId && version.NormalizedVersionNumber == normalizedVersion, cancellationToken)) return new VersionCommandResult(null, false, true);
+        var sequenceNo = (await database.ComponentVersions.Where(version => version.ComponentId == componentId).Select(version => (long?)version.SequenceNo).MaxAsync(cancellationToken) ?? 0) + 10;
+        var version = new ComponentVersion { Id = Guid.NewGuid(), ComponentId = componentId, VersionNumber = versionNumber, NormalizedVersionNumber = normalizedVersion, SequenceNo = sequenceNo, CreatedAt = DateTimeOffset.UtcNow };
+        database.ComponentVersions.Add(version);
+        AddAuditEvent(database, context, "ComponentVersionCreated", "ComponentVersion", version.Id, new { version.ComponentId, version.VersionNumber, version.SequenceNo });
+        return new VersionCommandResult(version, false, false);
     }
 
     private static async Task<IResult> MoveComponentAsync(Guid componentId, MoveComponentRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
@@ -903,3 +889,4 @@ public sealed record RecordFactsRequest(string? OperationType, string? Coverage,
 public sealed record RecordFactItem(Guid ComponentId, Guid? VersionId, bool Absent, DateTimeOffset? KnownInstalledAt);
 public sealed record StageImportRequest(Guid ProjectId, string? SourceFileName, string? Reason, List<StageImportRow>? Rows);
 public sealed record StageImportRow(string? ComponentCode, string? VersionNumber);
+public sealed record VersionCommandResult(ComponentVersion? Version, bool ComponentMissing, bool Duplicate);
