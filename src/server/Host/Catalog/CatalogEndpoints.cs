@@ -36,6 +36,7 @@ public static class CatalogEndpoints
         endpoints.MapGet("/api/v1/search", SearchAsync);
         endpoints.MapPost("/api/v1/imports", StageImportAsync).RequireAuthorization("Engineer");
         endpoints.MapGet("/api/v1/imports/{batchId:guid}", GetImportPreviewAsync);
+        endpoints.MapPost("/api/v1/imports/{batchId:guid}/commit", CommitImportAsync).RequireAuthorization("Engineer");
 
         endpoints.MapPost("/api/v1/components/{componentId:guid}/versions", CreateVersionAsync).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/component-versions/{versionId:guid}/maturity", ChangeMaturityAsync).RequireAuthorization("SeniorEngineer");
@@ -241,6 +242,33 @@ public static class CatalogEndpoints
         var stagedRows = await db.ImportRows.AsNoTracking().Where(item => item.ImportBatchId == batchId).OrderBy(item => item.RowNumber).ToListAsync(cancellationToken);
         var rows = stagedRows.Select(item => new { item.RowNumber, payload = item.Payload.RootElement.Clone(), item.ValidationError });
         return TypedResults.Ok(new { id = batch.Id, status = batch.Status.ToString(), sourceFileName = batch.SourceFileName, rows });
+    }
+
+    private static async Task<IResult> CommitImportAsync(Guid batchId, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        var key = context.Request.Headers["Idempotency-Key"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["提交导入必须提供不超过 200 个字符的 Idempotency-Key。"] });
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var scope = $"imports.commit:{batchId}"; var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(batchId.ToString())));
+        var replay = await db.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
+        if (replay is not null) { if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (replay.Result is not null) return TypedResults.Ok(replay.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
+        var batch = await db.ImportBatches.SingleOrDefaultAsync(item => item.Id == batchId, cancellationToken); if (batch is null) return Results.NotFound();
+        var rows = await db.ImportRows.Where(item => item.ImportBatchId == batchId).OrderBy(item => item.RowNumber).ToListAsync(cancellationToken);
+        if (batch.Status != ImportBatchStatus.Validated || rows.Any(item => item.ValidationError is not null)) return Results.Conflict(new { message = "只有完全通过校验的导入批次可以提交。" });
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        db.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = DateTimeOffset.UtcNow, ExpiresAt = DateTimeOffset.UtcNow.AddDays(7) });
+        var components = await db.ConfigurationComponents.Where(item => item.ProjectId == batch.ProjectId).ToDictionaryAsync(item => item.NormalizedComponentCode, cancellationToken);
+        foreach (var row in rows)
+        {
+            var value = JsonSerializer.Deserialize<StageImportRow>(row.Payload.RootElement.GetRawText())!;
+            var command = await CreateComponentVersionCommandAsync(db, components[Normalize(value.ComponentCode!)].Id, value.VersionNumber!, context, cancellationToken);
+            if (command.Version is null) throw new InvalidOperationException("已验证的导入行在提交时无法创建版本。");
+        }
+        batch.Status = ImportBatchStatus.Committed;
+        AddAuditEvent(db, context, "ImportCommitted", "ImportBatch", batch.Id, new { batch.ProjectId, rowCount = rows.Count });
+        await db.SaveChangesAsync(cancellationToken);
+        var record = await db.IdempotencyRecords.SingleAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken); record.Status = IdempotencyRecordStatus.Completed; record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = batch.Id, committed = rows.Count })); await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
+        return TypedResults.Ok(new { id = batch.Id, committed = rows.Count });
     }
 
     private static async Task RefreshMachineDriftSummaryAsync(ConfigHubDbContext db, Guid machineId, CancellationToken cancellationToken)

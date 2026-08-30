@@ -108,6 +108,12 @@ if (@($search | Where-Object { $_.type -eq 'Project' -and $_.id -eq $project.id 
 $import = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, '/api/v1/imports')) -ContentType 'application/json' -Body (@{ projectId = $project.id; sourceFileName = 'acceptance.csv'; reason = '自动化导入预览'; rows = @(@{ componentCode = 'CONTROL'; versionNumber = 'import-preview' }, @{ componentCode = 'CONTROL'; versionNumber = 'opaque-b' }) } | ConvertTo-Json -Depth 5)
 $preview = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/imports/$($import.id)"))
 if ($import.errorCount -ne 1 -or $preview.rows.Count -ne 2 -or [string]::IsNullOrWhiteSpace($preview.rows[1].validationError)) { throw 'Import preview must stage and validate rows without committing them.' }
+$validImport = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, '/api/v1/imports')) -ContentType 'application/json' -Body (@{ projectId = $project.id; sourceFileName = 'commit.csv'; reason = '自动化导入提交'; rows = @(@{ componentCode = 'CONTROL'; versionNumber = 'import-commit' }) } | ConvertTo-Json -Depth 5)
+$commitHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() }
+$committed = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/imports/$($validImport.id)/commit")) -Headers $commitHeaders
+$committedReplay = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/imports/$($validImport.id)/commit")) -Headers $commitHeaders
+$committedPreview = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/imports/$($validImport.id)"))
+if ($committed.committed -ne 1 -or $committed.id -ne $committedReplay.id -or $committedPreview.status -ne 'Committed') { throw 'Import commit must be idempotent and transition the staged batch to Committed.' }
 
 if (-not [string]::IsNullOrWhiteSpace($ConnectionString)) {
     $psql = 'C:\Program Files\PostgreSQL\17\bin\psql.exe'

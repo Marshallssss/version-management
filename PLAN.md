@@ -1902,7 +1902,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 9A 进行中：导入先进入独立 `import_batches`/`import_rows` staging 模型；该阶段不允许对业务表直接 Add/Update，后续 Commit 只能转换为既有 Domain Commands。
 - 9B 已交付：中文“导入预览”页把 `componentCode,versionNumber` 行数据提交到 staging，API 校验并返回逐行预览；`catalog-acceptance.ps1` 覆盖有效/无效行，未提供业务 Commit 入口。
 - 9C 已交付：预览校验同时检查组件项目归属、业务版本重复及同批次重复；只将错误写入 staging 行，仍不得写入业务表。`catalog-acceptance.ps1` 已覆盖既有 `opaque-b` 版本被拒绝预览。
-- 9D 进行中：`CreateComponentVersionCommand` 已成为 UI 与 Import 共用的版本创建命令，集中 sequence、重复检查与 Audit；导入 Commit 将只调用该命令。
+- 9D 已交付：`CreateComponentVersionCommand` 已成为 UI 与 Import 共用的版本创建命令，集中 sequence、重复检查与 Audit；导入 Commit 只调用该命令，要求 Idempotency-Key 并在事务内更新批次状态。中文 UI 仅为已验证批次显示提交操作，`catalog-acceptance.ps1` 已覆盖提交与重放。
 
 ## Step 10 — Production Hardening
 
