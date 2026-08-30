@@ -10,8 +10,11 @@ using Microsoft.AspNetCore.Identity;
 using System.Text.Json;
 
 var migrateRequested = args.Contains("--migrate", StringComparer.OrdinalIgnoreCase);
+var bootstrapOnlyRequested = args.Contains("--bootstrap-admin-only", StringComparer.OrdinalIgnoreCase);
 var hostArguments = args
-    .Where(argument => !string.Equals(argument, "--migrate", StringComparison.OrdinalIgnoreCase))
+    .Where(argument =>
+        !string.Equals(argument, "--migrate", StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(argument, "--bootstrap-admin-only", StringComparison.OrdinalIgnoreCase))
     .ToArray();
 var builder = WebApplication.CreateBuilder(hostArguments);
 var localConfigurationPath = Path.Combine(
@@ -40,9 +43,18 @@ builder.Services.AddPooledDbContextFactory<ConfigHubDbContext>(options =>
         npgsql.MigrationsAssembly(
             typeof(ConfigHubDbContext).Assembly.GetName().Name
             ?? throw new InvalidOperationException("Infrastructure assembly name is unavailable."))));
-builder.Services.AddIdentityCore<ApplicationUser>(options => options.Password.RequiredLength = 12)
+builder.Services.AddIdentityCore<ApplicationUser>(options =>
+    {
+        options.Password.RequiredLength = 6;
+        options.Password.RequireDigit = false;
+        options.Password.RequireLowercase = false;
+        options.Password.RequireUppercase = false;
+        options.Password.RequireNonAlphanumeric = false;
+        options.Password.RequiredUniqueChars = 1;
+    })
     .AddRoles<IdentityRole<Guid>>()
     .AddEntityFrameworkStores<ConfigHubDbContext>()
+    .AddDefaultTokenProviders()
     .AddSignInManager();
 builder.Services.AddAuthentication(IdentityConstants.ApplicationScheme).AddIdentityCookies();
 builder.Services.AddAuthorizationBuilder().AddPolicy("Engineer", policy => policy.RequireRole("Engineer", "SeniorEngineer", "Admin"));
@@ -74,6 +86,12 @@ if (migrateRequested)
     var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<ConfigHubDbContext>>();
     await using var database = await factory.CreateDbContextAsync();
     await database.Database.MigrateAsync();
+    return;
+}
+
+if (bootstrapOnlyRequested)
+{
+    await BootstrapIdentity.EnsureAsync(app.Services, app.Configuration, writeStatus: true);
     return;
 }
 

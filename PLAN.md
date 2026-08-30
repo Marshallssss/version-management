@@ -1842,6 +1842,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 状态：已交付；项目范围授权的完整矩阵继续在 Step 10 加固。
 - 已交付：React 中文操作壳、请求 `X-Correlation-ID` 传播、追加式 `audit_events`、项目/组件/版本写入审计与只读审计查询。
 - 已交付补充：ASP.NET Core Identity 用户/角色表、Cookie 登录/退出/当前身份接口、Bootstrap Admin 本机配置、Engineer 以上角色的 API 授权；Project Create 在同一事务中校验 `reason`、`Idempotency-Key`、权限、Audit 与结果重放。
+- 本地身份体验补强已交付：登录主标识改为 `UserName`，保留旧 `Email` 请求兼容；密码策略放宽为 6 位以上且不要求大小写、数字或特殊字符；Bootstrap Admin 支持 `UserName`、本机配置文件、环境变量、bootstrap-only 初始化和可选密码重置。
 - 自动验收：`tests/integration/catalog-acceptance.ps1` 覆盖未认证 HTTP 401、Cookie 登录、同 Key 重放、认证 Audit/Correlation、组件版本序列与重复版本冲突。
 - 已交付补充：Project、Component、ComponentVersion 创建 API 均要求 Engineer 以上角色；所有后续写命令仍需统一接入原因与幂等协议。
 - 2A 已交付：管理员可读取 Identity 数据库中的用户目录与角色，中文“用户与角色”界面只向 Admin 展示；`catalog-acceptance.ps1` 验证 Bootstrap Admin 与 Admin 角色。用户创建与角色变更仍在下一条写入切片中实施。
@@ -1929,6 +1930,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 10A 进行中：认证 Project Create 的 HTTP 401 自动验收继续保留；完整角色矩阵需以可控身份种子和 HTTP 客户端测试夹具实施。验收发现旧 Clone Preview API 会落入 SPA fallback，因此移除无副作用的 Preview Command，中文界面改为直接基于已加载 Project Detail 显示将复制的组件数和排除的版本数。
 - 10B 已交付：仅 Admin 可调用的 Drift Summary 重建命令只重新计算 `machine_drift_summaries`，不修改 Target、Actual 或事实历史；命令要求 reason、correlation id、Audit 与持久化 Idempotency。`catalog-acceptance.ps1` 已覆盖重建和同键重放，Release、真实 Migration 与完整集成验收均已通过。
 - 10C 已交付（本机 smoke）：`ops/windows/backup.ps1` 已在本机 PostgreSQL 17 上完成 Online 备份，覆盖数据库 custom dump、文件复制、manifest 与 SHA-256 校验。未执行 Restore，正式 Windows Server 的 NAS、服务账户和恢复演练仍属于 Production Integration Pending。
+- 10D 已交付（本地可用性）：新增根目录 `start-local.ps1` 与 `start-local.cmd` 一键启动脚本，支持前端构建、数据库迁移、Bootstrap Admin 初始化/重置、局域网 `0.0.0.0:5080` 监听和可用 LAN URL 输出；修复前端将登录成功的 HTTP 204 响应误判为失败的问题。
 
 ## Step 11 — Internal Pilot
 
