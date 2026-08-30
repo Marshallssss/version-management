@@ -518,7 +518,7 @@ public static class CatalogEndpoints
         await using var database = await factory.CreateDbContextAsync(cancellationToken);
         var baseline = await database.ConfigurationBaselines.AsNoTracking().Where(item => item.Id == baselineId).Select(item => new { id = item.Id, projectId = item.ProjectId, code = item.BaselineCode, seriesCode = database.BaselineSeries.Where(series => series.Id == item.BaselineSeriesId).Select(series => series.SeriesCode).Single(), revisionNo = item.RevisionNo, state = item.State.ToString(), item.Description, item.CreatedBy, item.CreatedAt, item.ReleasedBy, item.ReleasedAt }).SingleOrDefaultAsync(cancellationToken);
         if (baseline is null) return Results.NotFound();
-        var items = await database.BaselineItems.AsNoTracking().Where(item => item.ConfigurationBaselineId == baselineId).OrderBy(item => item.LineageKeySnapshot).Select(item => new { id = item.Id, parentItemId = item.ParentBaselineItemId, componentId = item.ConfigurationComponentId, versionId = item.ComponentVersionId, componentCode = item.ComponentCodeSnapshot, componentName = item.ComponentNameSnapshot, lineageKey = item.LineageKeySnapshot, item.SortOrder }).ToListAsync(cancellationToken);
+        var items = await database.BaselineItems.AsNoTracking().Where(item => item.ConfigurationBaselineId == baselineId).OrderBy(item => item.LineageKeySnapshot).Select(item => new { id = item.Id, parentItemId = item.ParentBaselineItemId, componentId = item.ConfigurationComponentId, versionId = item.ComponentVersionId, versionNumber = item.VersionNumberSnapshot, componentCode = item.ComponentCodeSnapshot, componentName = item.ComponentNameSnapshot, lineageKey = item.LineageKeySnapshot, item.SortOrder }).ToListAsync(cancellationToken);
         return TypedResults.Ok(new { baseline, items });
     }
 
@@ -603,6 +603,7 @@ public static class CatalogEndpoints
                 ConfigurationBaselineId = baseline.Id,
                 ConfigurationComponentId = component.Id,
                 ComponentVersionId = versionsByComponent[component.Id].Id,
+                VersionNumberSnapshot = versionsByComponent[component.Id].VersionNumber,
                 ParentBaselineItemId = component.ParentComponentId is null ? null : baselineItemIds[component.ParentComponentId.Value],
                 ComponentCodeSnapshot = component.ComponentCode,
                 ComponentNameSnapshot = component.Name,

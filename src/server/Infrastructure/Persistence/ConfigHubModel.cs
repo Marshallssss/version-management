@@ -237,6 +237,7 @@ internal static class ConfigHubModel
             entity.Property(item => item.ConfigurationBaselineId).HasColumnName("configuration_baseline_id");
             entity.Property(item => item.ConfigurationComponentId).HasColumnName("configuration_component_id");
             entity.Property(item => item.ComponentVersionId).HasColumnName("component_version_id");
+            entity.Property(item => item.VersionNumberSnapshot).HasColumnName("version_number_snapshot").HasMaxLength(200);
             entity.Property(item => item.ParentBaselineItemId).HasColumnName("parent_baseline_item_id");
             entity.Property(item => item.ComponentCodeSnapshot).HasColumnName("component_code_snapshot").HasMaxLength(80);
             entity.Property(item => item.ComponentNameSnapshot).HasColumnName("component_name_snapshot").HasMaxLength(200);

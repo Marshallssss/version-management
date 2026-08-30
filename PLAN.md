@@ -1876,6 +1876,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 4B 已交付：Release Command 只允许 Draft，拒绝空快照和包含 Blocked Version 的快照；发布会原子记录 Lifecycle、Audit、actor、reason、correlation id 与 `Idempotency-Key`。PostgreSQL Trigger 拒绝 Released/Deprecated/Archived Baseline 和 Baseline Item 的 Update/Delete，且发布时强制 Release Metadata；中文 UI 支持发布。自动验收覆盖发布与幂等重放；传入 Migration ConnectionString 时，脚本还会直连 PostgreSQL 断言 Released Item 更新被 Trigger 拒绝。
 - 4C 已交付：Project Standard 使用独立 Assignment History 而非 `projects.current_baseline_id`；仅接受同项目的 Released Baseline，并以 `[valid_from, valid_to)` 关闭上一条当前 Assignment。数据库以 partial unique index 与 GiST 排斥约束防止多个当前值和任何时间重叠；中文界面支持查看/显式设置。自动验收覆盖 Assignment 幂等重放和直连数据库的重叠区间拒绝。
 - 4A 复核补强进行中：新增 Baseline Detail 只读 API 和中文冻结组件树视图；自动化验收确认草稿快照返回独立的组件编码、名称、版本身份和树项数量，不依赖当前 Component Tree。
+- 4A 复核补强进行中：Baseline Item 追加 `version_number_snapshot`；真实 EF Migration 将历史 Items 从其版本身份回填版本号，后续草稿创建直接保存文本快照，详情 UI/API 与自动化验收均读取该字段。
 
 ## Step 5 — Machine → Target
 

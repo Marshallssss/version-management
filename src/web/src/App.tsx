@@ -326,7 +326,7 @@ function App() {
               <section className="status-panel catalog-panel">
                 <div className="panel-heading"><div><span className="section-index">冻结快照</span><h3>查看基线组件树</h3></div></div>
                 <label>基线<select value={selectedBaselineId} onChange={(event) => setSelectedBaselineId(event.target.value)}><option value="">请选择基线</option>{baselines.data?.map((baseline) => <option key={baseline.id} value={baseline.id}>{baseline.code} · Revision {baseline.revisionNo}</option>)}</select></label>
-                {baselineDetail.data && <><p className="empty-state">{baselineDetail.data.baseline.seriesCode} · Revision {baselineDetail.data.baseline.revisionNo} · {baselineDetail.data.baseline.state === 'Released' ? '已发布且不可修改' : '草稿快照'}</p><div className="component-list">{baselineDetail.data.items.map((item) => <article className="component-row" key={item.id}><div><strong>{item.componentCode}</strong><span>{item.componentName} · {item.lineageKey}</span></div><small>版本 {item.versionId}</small></article>)}</div></>}
+                {baselineDetail.data && <><p className="empty-state">{baselineDetail.data.baseline.seriesCode} · Revision {baselineDetail.data.baseline.revisionNo} · {baselineDetail.data.baseline.state === 'Released' ? '已发布且不可修改' : '草稿快照'}</p><div className="component-list">{baselineDetail.data.items.map((item) => <article className="component-row" key={item.id}><div><strong>{item.componentCode}</strong><span>{item.componentName} · {item.lineageKey}</span></div><small>版本 {item.versionNumber}</small></article>)}</div></>}
                 {baselineDetail.isError && <p className="error-strip">{baselineDetail.error.message}</p>}
               </section>
               <section className="status-panel catalog-panel">
