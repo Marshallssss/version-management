@@ -1884,6 +1884,8 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 ## Step 7 — Drift/Risk/Compare
 
 - Live Detail、Summary Projection、Machine Detail、Compare。
+- 7A 进行中：Machine Detail 先实时比较显式 Machine Target 与 Current Actual；Match 与 Risk 分离，实际或目标 Version 被 Blocked 时即使版本匹配也必须返回 `Matched + Critical`。
+- 7A 验收补充：`catalog-acceptance.ps1` 已覆盖 Target=Actual 且 Version 后续 Blocked 的 `Matched + Critical` 场景。
 
 ## Step 8 — Trace/Impact/Search
 

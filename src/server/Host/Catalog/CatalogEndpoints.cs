@@ -29,6 +29,7 @@ public static class CatalogEndpoints
         endpoints.MapPost("/api/v1/machines/{machineId:guid}/target", AssignMachineTargetAsync).RequireAuthorization("SeniorEngineer");
         endpoints.MapPost("/api/v1/machines/{machineId:guid}/facts", RecordFactsAsync).RequireAuthorization("Engineer");
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/configuration", GetMachineConfigurationAsync);
+        endpoints.MapGet("/api/v1/machines/{machineId:guid}/drift", GetMachineDriftAsync);
 
         endpoints.MapPost("/api/v1/components/{componentId:guid}/versions", CreateVersionAsync).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/component-versions/{versionId:guid}/maturity", ChangeMaturityAsync).RequireAuthorization("SeniorEngineer");
@@ -115,6 +116,18 @@ public static class CatalogEndpoints
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         return TypedResults.Ok(await db.MachineCurrentConfigurations.AsNoTracking().Where(x => x.MachineId == machineId).OrderBy(x => x.ConfigurationComponentId).Select(x => new { componentId = x.ConfigurationComponentId, versionId = x.ComponentVersionId, state = x.State.ToString(), stateEffectiveAt = x.StateEffectiveAt, knownInstalledAt = x.KnownInstalledAt }).ToListAsync(cancellationToken));
+    }
+
+    private static async Task<IResult> GetMachineDriftAsync(Guid machineId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var target = await db.MachineTargetAssignments.AsNoTracking().Where(x => x.MachineId == machineId && x.ValidTo == null).Select(x => x.ConfigurationBaselineId).SingleOrDefaultAsync(cancellationToken);
+        if (target == Guid.Empty) return TypedResults.Ok(new { matchStatus = "Unknown", riskSeverity = "High", items = Array.Empty<object>() });
+        var expected = await db.BaselineItems.AsNoTracking().Where(x => x.ConfigurationBaselineId == target).ToDictionaryAsync(x => x.ConfigurationComponentId, cancellationToken);
+        var actual = await db.MachineCurrentConfigurations.AsNoTracking().Where(x => x.MachineId == machineId).ToDictionaryAsync(x => x.ConfigurationComponentId, cancellationToken);
+        var ids = expected.Keys.Union(actual.Keys).ToArray(); var items = new List<object>(); var mismatch = false; var critical = false;
+        foreach (var componentId in ids) { expected.TryGetValue(componentId, out var wanted); actual.TryGetValue(componentId, out var found); var status = wanted is null ? "Extra" : found is null || found.State == CurrentConfigurationState.Absent ? "Missing" : wanted.ComponentVersionId == found.ComponentVersionId ? "Matched" : "Mismatch"; if (status != "Matched") mismatch = true; var versionId = found?.ComponentVersionId ?? wanted?.ComponentVersionId; if (versionId is not null && await db.ComponentVersions.AnyAsync(x => x.Id == versionId && x.Safety == VersionSafety.Blocked, cancellationToken)) critical = true; items.Add(new { componentId, status, expectedVersionId = wanted?.ComponentVersionId, actualVersionId = found?.ComponentVersionId }); }
+        return TypedResults.Ok(new { matchStatus = mismatch ? "Mismatch" : "Matched", riskSeverity = critical ? "Critical" : "None", items });
     }
 
     private static async Task UpsertCurrentAsync(ConfigHubDbContext db, Guid machineId, Guid componentId, Guid? versionId, bool absent, DateTimeOffset effectiveAt, DateTimeOffset? knownInstalledAt, Guid sourceItemId, CancellationToken cancellationToken)
