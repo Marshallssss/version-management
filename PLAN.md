@@ -1896,6 +1896,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - Bidirectional Trace、Version Impact、Global Search、Dashboard。
 - 8A 已交付：Version Impact 以 PostgreSQL 实时 JOIN 返回 Used Baselines、Current/Target/Historical Machines 与 Recent Facts；不引入图数据库或 Elasticsearch。中文“软件版本”页面可选择已加载项目版本查看汇总与近期事实，`catalog-acceptance.ps1` 已覆盖追溯结果。
 - 8B 已交付：限制范围的 PostgreSQL `ILIKE` 搜索覆盖 Project、Component、Version、Baseline 与 Machine；最少两字符，不提前扩展为万能搜索。中文“搜索”页面已接入，`catalog-acceptance.ps1` 已验证项目、基线和机台搜索命中。
+- 8C 已交付：Dashboard 只聚合既有 `machine_drift_summaries` 与 Machine Registry，分别展示总数、Matched、Mismatch、Unknown 和 Critical Risk；不为界面新增领域指针或缓存。中文“运行总览”已接入，`catalog-acceptance.ps1` 覆盖持久化摘要的仪表盘聚合结果。
 
 ## Step 9 — Import
 

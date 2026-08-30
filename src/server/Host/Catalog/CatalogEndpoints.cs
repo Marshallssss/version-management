@@ -35,6 +35,7 @@ public static class CatalogEndpoints
         endpoints.MapGet("/api/v1/baselines/{leftBaselineId:guid}/compare/{rightBaselineId:guid}", CompareBaselinesAsync);
         endpoints.MapGet("/api/v1/component-versions/{versionId:guid}/impact", GetVersionImpactAsync);
         endpoints.MapGet("/api/v1/search", SearchAsync);
+        endpoints.MapGet("/api/v1/dashboard", GetDashboardAsync);
         endpoints.MapPost("/api/v1/imports", StageImportAsync).RequireAuthorization("Engineer");
         endpoints.MapGet("/api/v1/imports/{batchId:guid}", GetImportPreviewAsync);
         endpoints.MapPost("/api/v1/imports/{batchId:guid}/commit", CommitImportAsync).RequireAuthorization("Engineer");
@@ -220,6 +221,20 @@ public static class CatalogEndpoints
         var baselines = await db.ConfigurationBaselines.AsNoTracking().Where(item => EF.Functions.ILike(item.BaselineCode, pattern)).Select(item => new { type = "Baseline", id = item.Id, label = item.BaselineCode }).Take(20).ToListAsync(cancellationToken);
         var machines = await db.Machines.AsNoTracking().Where(item => EF.Functions.ILike(item.SerialNumber, pattern) || EF.Functions.ILike(item.Name, pattern)).Select(item => new { type = "Machine", id = item.Id, label = item.SerialNumber + " · " + item.Name }).Take(20).ToListAsync(cancellationToken);
         return TypedResults.Ok(projects.Cast<object>().Concat(components).Concat(versions).Concat(baselines).Concat(machines));
+    }
+
+    private static async Task<IResult> GetDashboardAsync(IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var summaries = db.MachineDriftSummaries.AsNoTracking();
+        return TypedResults.Ok(new
+        {
+            machineCount = await db.Machines.CountAsync(cancellationToken),
+            matchedCount = await summaries.CountAsync(item => item.MatchStatus == DriftMatchStatus.Matched, cancellationToken),
+            mismatchCount = await summaries.CountAsync(item => item.MatchStatus == DriftMatchStatus.Mismatch, cancellationToken),
+            unknownCount = await db.Machines.CountAsync(machine => !summaries.Any(summary => summary.MachineId == machine.Id) || summaries.Any(summary => summary.MachineId == machine.Id && summary.MatchStatus == DriftMatchStatus.Unknown), cancellationToken),
+            criticalRiskCount = await summaries.CountAsync(item => item.RiskSeverity == DriftRiskSeverity.Critical, cancellationToken)
+        });
     }
 
     private static async Task<IResult> StageImportAsync(StageImportRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { assignMachineTarget, assignProjectStandard, changeVersionMaturity, changeVersionSafety, cloneProject, commitImport, compareBaselines, createBaseline, createComponent, createComponentVersion, createMachine, createProject, getBaselines, getCurrentUser, getImportPreview, getMachineConfiguration, getMachineDrift, getMachineFacts, getMachines, getProject, getProjectStandard, getProjects, getVersionImpact, login, logout, moveComponent, previewProjectClone, recommendVersion, recordMachineFacts, releaseBaseline, searchCatalog, stageImport } from './catalog-api'
+import { assignMachineTarget, assignProjectStandard, changeVersionMaturity, changeVersionSafety, cloneProject, commitImport, compareBaselines, createBaseline, createComponent, createComponentVersion, createMachine, createProject, getBaselines, getCurrentUser, getDashboard, getImportPreview, getMachineConfiguration, getMachineDrift, getMachineFacts, getMachines, getProject, getProjectStandard, getProjects, getVersionImpact, login, logout, moveComponent, previewProjectClone, recommendVersion, recordMachineFacts, releaseBaseline, searchCatalog, stageImport } from './catalog-api'
 import { enqueueNoopJob, getSystemStatus, getSystemVersion, type BackgroundJobStatus } from './system-api'
 
 const navigation = [
@@ -89,6 +89,7 @@ function App() {
   const queryClient = useQueryClient()
   const system = useQuery({ queryKey: ['system-version'], queryFn: getSystemVersion })
   const status = useQuery({ queryKey: ['system-status'], queryFn: getSystemStatus, refetchInterval: 5_000 })
+  const dashboard = useQuery({ queryKey: ['dashboard'], queryFn: getDashboard, refetchInterval: 5_000 })
   const projects = useQuery({ queryKey: ['projects'], queryFn: getProjects })
   const currentUser = useQuery({ queryKey: ['current-user'], queryFn: getCurrentUser, retry: false })
   const projectDetail = useQuery({ queryKey: ['project', selectedProjectId], queryFn: () => getProject(selectedProjectId!), enabled: selectedProjectId !== null })
@@ -215,6 +216,10 @@ function App() {
               <section className="status-panel">
                 <div className="panel-heading"><div><span className="section-index">实时运行信息</span><h3>服务身份</h3></div><button type="button" onClick={() => void system.refetch()} disabled={system.isFetching}>{system.isFetching ? '正在刷新' : '刷新'}</button></div>
                 <dl className="runtime-list"><div><dt>产品</dt><dd>{system.data?.product ?? '—'}</dd></div><div><dt>版本</dt><dd>{system.data?.version ?? '—'}</dd></div><div><dt>接口版本</dt><dd>{system.data?.apiVersion ?? '—'}</dd></div><div><dt>服务时间</dt><dd>{formatTime(status.data?.serverTime)}</dd></div></dl>
+              </section>
+              <section className="status-panel">
+                <div className="panel-heading"><div><span className="section-index">配置总览</span><h3>机台配置状态</h3></div><span className="count">{dashboard.data?.machineCount ?? 0}</span></div>
+                <dl className="runtime-list"><div><dt>机台总数</dt><dd>{dashboard.data?.machineCount ?? '—'}</dd></div><div><dt>配置匹配</dt><dd>{dashboard.data?.matchedCount ?? '—'}</dd></div><div><dt>配置不匹配</dt><dd>{dashboard.data?.mismatchCount ?? '—'}</dd></div><div><dt>状态未知</dt><dd>{dashboard.data?.unknownCount ?? '—'}</dd></div><div><dt>严重风险</dt><dd>{dashboard.data?.criticalRiskCount ?? '—'}</dd></div></dl>
               </section>
               <section className="telemetry-panel queue-panel">
                 <div className="panel-heading"><div><span className="section-index">队列概览</span><h3>后台任务</h3></div><span className="count">{status.data?.jobs.length ?? 0}</span></div>
