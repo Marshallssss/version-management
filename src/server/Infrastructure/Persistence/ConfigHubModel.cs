@@ -77,6 +77,23 @@ internal static class ConfigHubModel
             entity.HasIndex(project => project.Status).HasDatabaseName("ix_projects_status");
         });
 
+        modelBuilder.Entity<ProjectMembership>(entity =>
+        {
+            entity.ToTable("project_memberships");
+            entity.HasKey(membership => membership.Id);
+            entity.Property(membership => membership.Id).HasColumnName("id");
+            entity.Property(membership => membership.ProjectId).HasColumnName("project_id");
+            entity.Property(membership => membership.UserId).HasColumnName("user_id");
+            entity.Property(membership => membership.Role).HasColumnName("role").HasMaxLength(32).HasConversion<string>();
+            entity.Property(membership => membership.AssignedBy).HasColumnName("assigned_by").HasMaxLength(160);
+            entity.Property(membership => membership.Reason).HasColumnName("reason").HasMaxLength(500);
+            entity.Property(membership => membership.AssignedAt).HasColumnName("assigned_at");
+            entity.HasIndex(membership => new { membership.ProjectId, membership.UserId }).IsUnique().HasDatabaseName("ux_project_memberships_project_user");
+            entity.HasIndex(membership => membership.UserId).HasDatabaseName("ix_project_memberships_user");
+            entity.HasOne<Project>().WithMany().HasForeignKey(membership => membership.ProjectId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ApplicationUser>().WithMany().HasForeignKey(membership => membership.UserId).OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<ConfigurationComponent>(entity =>
         {
             entity.ToTable("configuration_components");

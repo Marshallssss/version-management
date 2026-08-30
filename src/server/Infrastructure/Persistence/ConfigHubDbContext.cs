@@ -13,6 +13,7 @@ public sealed class ConfigHubDbContext(DbContextOptions<ConfigHubDbContext> opti
     public DbSet<BackgroundJob> BackgroundJobs => Set<BackgroundJob>();
 
     public DbSet<Project> Projects => Set<Project>();
+    public DbSet<ProjectMembership> ProjectMemberships => Set<ProjectMembership>();
 
     public DbSet<ConfigurationComponent> ConfigurationComponents => Set<ConfigurationComponent>();
 
