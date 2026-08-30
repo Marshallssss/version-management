@@ -1935,6 +1935,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 10C 已交付（本机 smoke）：`ops/windows/backup.ps1` 已在本机 PostgreSQL 17 上完成 Online 备份，覆盖数据库 custom dump、文件复制、manifest 与 SHA-256 校验。未执行 Restore，正式 Windows Server 的 NAS、服务账户和恢复演练仍属于 Production Integration Pending。
 - 10C 复核补强：2026-08-31 再次以用户态 PostgreSQL 17 的 `pg_dump.exe` 执行 Online backup smoke，验证 custom dump、文件复制、manifest 与 SHA-256 校验。发现 `C:\Program Files\PostgreSQL\17\bin\postgres.exe` 在本机异常退出，而同版本用户态运行时可正常启动数据目录；运维脚本继续允许显式 `PgDumpCommand`，正式服务必须在目标 Windows Server 以其受管理的 PostgreSQL Windows Service 验收，不能把本机用户态路径当作生产结论。
 - 10C 恢复前置复核：2026-08-31 对 `restore.ps1 -WhatIf` 使用临时数据库/文件目录执行预检；脚本在 `Assert-Administrator` 正确停止，当前非提升权限会话未执行 Restore、Drop Database、IIS 或 Worker 操作。完整恢复演练仍需在提升权限且具备 IIS/正式安装目录的目标 Windows Server 完成。
+- 10D 发布包复核：2026-08-31 以 `ops/windows/publish.ps1 -Version 0.1.0-rehearsal` 生成 Windows `win-x64` 发布包；`release-manifest.json` 记录 77 个文件，包含 Host、Worker 与 SPA `wwwroot`。发布目录中的 Host 已对本机 PostgreSQL 17 成功执行 `--migrate`；IIS 安装和 Windows Service 注册仍待目标服务器验收。
 - 10D 已交付（本地可用性）：新增根目录 `start-local.ps1` 与 `start-local.cmd` 一键启动脚本，支持前端构建、数据库迁移、Bootstrap Admin 初始化/重置、局域网 `0.0.0.0:5080` 监听和可用 LAN URL 输出；修复前端将登录成功的 HTTP 204 响应误判为失败的问题。
 
 ## Step 11 — Internal Pilot
