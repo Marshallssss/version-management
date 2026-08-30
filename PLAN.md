@@ -1868,7 +1868,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 
 - Registry、Target History、Machine Header/List。
 - 5A 进行中：Machine Registry 以全局规范化序列号作为身份，项目归属、名称、机型和归档状态独立保存；创建/重复序列号 API 验收已补入自动脚本。Target Assignment 仍保持后续独立切片，禁止从 Project Standard 自动补值。
-- 5B 进行中：Machine Target Assignment 将保存独立有效区间、actor 和 reason；不在 Machine 保存 Target 指针，也不由 Project Standard 自动创建 Assignment。API 已限制同项目 Released Baseline，并在事务内持久化 Idempotency 与 Audit；自动验收覆盖显式指派和同键重放，中文指派界面待补。
+- 5B 已交付：Machine Target Assignment 保存独立有效区间、actor 和 reason；不在 Machine 保存 Target 指针，也不由 Project Standard 自动创建 Assignment。API 已限制同项目 Released Baseline，并在事务内持久化 Idempotency 与 Audit；自动验收覆盖显式指派和同键重放，中文机台页提供显式指派界面。
 
 ## Step 6 — Facts → Current Actual
 
