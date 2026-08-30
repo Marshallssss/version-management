@@ -30,6 +30,7 @@ public static class CatalogEndpoints
         endpoints.MapPost("/api/v1/machines/{machineId:guid}/facts", RecordFactsAsync).RequireAuthorization("Engineer");
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/configuration", GetMachineConfigurationAsync);
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/drift", GetMachineDriftAsync);
+        endpoints.MapGet("/api/v1/machines/{machineId:guid}/drift-summary", GetMachineDriftSummaryAsync);
         endpoints.MapGet("/api/v1/baselines/{leftBaselineId:guid}/compare/{rightBaselineId:guid}", CompareBaselinesAsync);
 
         endpoints.MapPost("/api/v1/components/{componentId:guid}/versions", CreateVersionAsync).RequireAuthorization("Engineer");
@@ -64,7 +65,7 @@ public static class CatalogEndpoints
     private static async Task<IResult> ListMachinesAsync(IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
     {
         await using var database = await factory.CreateDbContextAsync(cancellationToken);
-        return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => item.SerialNumber).Select(item => new { id = item.Id, projectId = item.ProjectId, serialNumber = item.SerialNumber, name = item.Name, machineType = item.MachineType, status = item.Status.ToString() }).ToListAsync(cancellationToken));
+        return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => item.SerialNumber).Select(item => new { id = item.Id, projectId = item.ProjectId, serialNumber = item.SerialNumber, name = item.Name, machineType = item.MachineType, status = item.Status.ToString(), matchStatus = database.MachineDriftSummaries.Where(summary => summary.MachineId == item.Id).Select(summary => (string?)summary.MatchStatus.ToString()).SingleOrDefault(), riskSeverity = database.MachineDriftSummaries.Where(summary => summary.MachineId == item.Id).Select(summary => (string?)summary.RiskSeverity.ToString()).SingleOrDefault() }).ToListAsync(cancellationToken));
     }
 
     private static async Task<IResult> CreateMachineAsync(CreateMachineRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
@@ -88,7 +89,7 @@ public static class CatalogEndpoints
         if (machine is null || baseline is null || baseline.ProjectId != machine.ProjectId) return Results.ValidationProblem(new Dictionary<string, string[]> { ["configurationBaselineId"] = ["基线不存在或不属于机台项目。"] });
         if (baseline.State != BaselineState.Released) return Results.Conflict(new { message = "仅可分配已发布基线。" });
         var now = DateTimeOffset.UtcNow; var old = await database.MachineTargetAssignments.SingleOrDefaultAsync(item => item.MachineId == machineId && item.ValidTo == null, cancellationToken); if (old is not null) old.ValidTo = now;
-        var assignment = new MachineTargetAssignment { Id = Guid.NewGuid(), MachineId = machineId, ConfigurationBaselineId = baseline.Id, ValidFrom = now, AssignedBy = context.User.Identity?.Name ?? "", Reason = request.Reason.Trim() }; database.MachineTargetAssignments.Add(assignment); AddAuditEvent(database, context, "MachineTargetAssigned", "Machine", machineId, new { baselineId = baseline.Id, reason = assignment.Reason }); await database.SaveChangesAsync(cancellationToken); return TypedResults.Ok(new { id = assignment.Id, baselineId = baseline.Id });
+        var assignment = new MachineTargetAssignment { Id = Guid.NewGuid(), MachineId = machineId, ConfigurationBaselineId = baseline.Id, ValidFrom = now, AssignedBy = context.User.Identity?.Name ?? "", Reason = request.Reason.Trim() }; database.MachineTargetAssignments.Add(assignment); AddAuditEvent(database, context, "MachineTargetAssigned", "Machine", machineId, new { baselineId = baseline.Id, reason = assignment.Reason }); await database.SaveChangesAsync(cancellationToken); await RefreshMachineDriftSummaryAsync(database, machineId, cancellationToken); await database.SaveChangesAsync(cancellationToken); return TypedResults.Ok(new { id = assignment.Id, baselineId = baseline.Id });
     }
 
     private static async Task<IResult> RecordFactsAsync(Guid machineId, RecordFactsRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
@@ -110,7 +111,7 @@ public static class CatalogEndpoints
             var allComponentIds = await db.ConfigurationComponents.Where(x => x.ProjectId == machine.ProjectId).Select(x => x.Id).ToListAsync(cancellationToken);
             foreach (var componentId in allComponentIds.Except(componentIds)) { var item = new DeploymentItem { Id = Guid.NewGuid(), DeploymentBatchId = batch.Id, ConfigurationComponentId = componentId, Result = DeploymentItemResult.Absent }; db.DeploymentItems.Add(item); await UpsertCurrentAsync(db, machineId, componentId, null, true, batch.EffectiveAt, null, item.Id, cancellationToken); }
         }
-        AddAuditEvent(db, context, "DeploymentFactsRecorded", "DeploymentBatch", batch.Id, new { machineId, batch.OperationType, batch.Coverage, reason = request.Reason.Trim() }); await db.SaveChangesAsync(cancellationToken); var record = await db.IdempotencyRecords.SingleAsync(x => x.Scope == scope && x.IdempotencyKey == key, cancellationToken); record.Status = IdempotencyRecordStatus.Completed; record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = batch.Id })); await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken); return TypedResults.Created($"/api/v1/deployment-batches/{batch.Id}", new { id = batch.Id });
+        AddAuditEvent(db, context, "DeploymentFactsRecorded", "DeploymentBatch", batch.Id, new { machineId, batch.OperationType, batch.Coverage, reason = request.Reason.Trim() }); await db.SaveChangesAsync(cancellationToken); await RefreshMachineDriftSummaryAsync(db, machineId, cancellationToken); var record = await db.IdempotencyRecords.SingleAsync(x => x.Scope == scope && x.IdempotencyKey == key, cancellationToken); record.Status = IdempotencyRecordStatus.Completed; record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = batch.Id })); await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken); return TypedResults.Created($"/api/v1/deployment-batches/{batch.Id}", new { id = batch.Id });
     }
 
     private static async Task<IResult> GetMachineConfigurationAsync(Guid machineId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
@@ -129,6 +130,13 @@ public static class CatalogEndpoints
         var ids = expected.Keys.Union(actual.Keys).ToArray(); var items = new List<object>(); var mismatch = false; var critical = false;
         foreach (var componentId in ids) { expected.TryGetValue(componentId, out var wanted); actual.TryGetValue(componentId, out var found); var status = wanted is null ? "Extra" : found is null || found.State == CurrentConfigurationState.Absent ? "Missing" : wanted.ComponentVersionId == found.ComponentVersionId ? "Matched" : "Mismatch"; if (status != "Matched") mismatch = true; var versionId = found?.ComponentVersionId ?? wanted?.ComponentVersionId; if (versionId is not null && await db.ComponentVersions.AnyAsync(x => x.Id == versionId && x.Safety == VersionSafety.Blocked, cancellationToken)) critical = true; items.Add(new { componentId, status, expectedVersionId = wanted?.ComponentVersionId, actualVersionId = found?.ComponentVersionId }); }
         return TypedResults.Ok(new { matchStatus = mismatch ? "Mismatch" : "Matched", riskSeverity = critical ? "Critical" : "None", items });
+    }
+
+    private static async Task<IResult> GetMachineDriftSummaryAsync(Guid machineId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var summary = await db.MachineDriftSummaries.AsNoTracking().SingleOrDefaultAsync(item => item.MachineId == machineId, cancellationToken);
+        return summary is null ? Results.NotFound() : TypedResults.Ok(new { matchStatus = summary.MatchStatus.ToString(), riskSeverity = summary.RiskSeverity.ToString(), calculatedAt = summary.CalculatedAt });
     }
 
     private static async Task<IResult> CompareBaselinesAsync(Guid leftBaselineId, Guid rightBaselineId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
@@ -167,6 +175,23 @@ public static class CatalogEndpoints
         });
 
         return TypedResults.Ok(new { leftBaselineId, rightBaselineId, items });
+    }
+
+    private static async Task RefreshMachineDriftSummaryAsync(ConfigHubDbContext db, Guid machineId, CancellationToken cancellationToken)
+    {
+        var target = await db.MachineTargetAssignments.Where(item => item.MachineId == machineId && item.ValidTo == null).Select(item => item.ConfigurationBaselineId).SingleOrDefaultAsync(cancellationToken);
+        var summary = await db.MachineDriftSummaries.FindAsync([machineId], cancellationToken) ?? new MachineDriftSummary { MachineId = machineId };
+        if (target == Guid.Empty) { summary.MatchStatus = DriftMatchStatus.Unknown; summary.RiskSeverity = DriftRiskSeverity.High; }
+        else
+        {
+            var expected = await db.BaselineItems.Where(item => item.ConfigurationBaselineId == target).ToDictionaryAsync(item => item.ConfigurationComponentId, cancellationToken);
+            var actual = await db.MachineCurrentConfigurations.Where(item => item.MachineId == machineId).ToDictionaryAsync(item => item.ConfigurationComponentId, cancellationToken);
+            var versionIds = expected.Values.Select(item => item.ComponentVersionId).Concat(actual.Values.Where(item => item.State != CurrentConfigurationState.Absent && item.ComponentVersionId is not null).Select(item => item.ComponentVersionId!.Value)).ToArray();
+            summary.MatchStatus = expected.Keys.Union(actual.Keys).All(componentId => expected.TryGetValue(componentId, out var wanted) && actual.TryGetValue(componentId, out var found) && found.State != CurrentConfigurationState.Absent && wanted.ComponentVersionId == found.ComponentVersionId) ? DriftMatchStatus.Matched : DriftMatchStatus.Mismatch;
+            summary.RiskSeverity = await db.ComponentVersions.AnyAsync(item => versionIds.Contains(item.Id) && item.Safety == VersionSafety.Blocked, cancellationToken) ? DriftRiskSeverity.Critical : DriftRiskSeverity.None;
+        }
+        summary.CalculatedAt = DateTimeOffset.UtcNow;
+        if (db.Entry(summary).State == EntityState.Detached) db.MachineDriftSummaries.Add(summary);
     }
 
     private static async Task UpsertCurrentAsync(ConfigHubDbContext db, Guid machineId, Guid componentId, Guid? versionId, bool absent, DateTimeOffset effectiveAt, DateTimeOffset? knownInstalledAt, Guid sourceItemId, CancellationToken cancellationToken)
@@ -724,6 +749,9 @@ public static class CatalogEndpoints
             if (active is not null) { active.RevokedAt = DateTimeOffset.UtcNow; active.RevokedBy = actor; active.RevokeReason = "版本已被阻断。"; }
         }
         AddAuditEvent(database, context, "VersionSafetyChanged", "ComponentVersion", version.Id, new { from = previous.ToString(), to = next.ToString(), reason = request.Reason.Trim() });
+        await database.SaveChangesAsync(cancellationToken);
+        var machineIds = await database.MachineCurrentConfigurations.Where(item => item.ComponentVersionId == version.Id).Select(item => item.MachineId).Union(database.BaselineItems.Where(item => item.ComponentVersionId == version.Id).Join(database.MachineTargetAssignments.Where(item => item.ValidTo == null), item => item.ConfigurationBaselineId, assignment => assignment.ConfigurationBaselineId, (_, assignment) => assignment.MachineId)).Distinct().ToListAsync(cancellationToken);
+        foreach (var machineId in machineIds) await RefreshMachineDriftSummaryAsync(database, machineId, cancellationToken);
         await database.SaveChangesAsync(cancellationToken);
         return TypedResults.Ok(new { maturity = version.Maturity.ToString(), safety = version.Safety.ToString() });
     }

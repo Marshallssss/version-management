@@ -94,6 +94,8 @@ Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "
 $blockedForRisk = Invoke-Lifecycle "/api/v1/component-versions/$($secondVersion.id)/safety" 'Blocked' '自动化风险验收'
 $drift = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($machine.id)/drift"))
 if ($drift.matchStatus -ne 'Matched' -or $drift.riskSeverity -ne 'Critical') { throw "Expected Matched + Critical but received $($drift | ConvertTo-Json -Compress)." }
+$machineSummary = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($machine.id)/drift-summary"))
+if ($machineSummary.matchStatus -ne 'Matched' -or $machineSummary.riskSeverity -ne 'Critical') { throw 'Expected persisted machine drift summary to preserve Match and Risk independently.' }
 Invoke-Lifecycle "/api/v1/component-versions/$($secondVersion.id)/safety" 'Clear' '自动化恢复风险状态' | Out-Null
 $partialFacts = @{ operationType = 'Observation'; coverage = 'Partial'; sourceType = 'automation'; reason = '自动化局部观察'; items = @(@{ componentId = $component.id; versionId = $firstVersion.id; absent = $false; knownInstalledAt = $null }) } | ConvertTo-Json -Depth 5
 Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($machine.id)/facts")) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() } -ContentType 'application/json' -Body $partialFacts | Out-Null
