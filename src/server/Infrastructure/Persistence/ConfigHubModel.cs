@@ -316,5 +316,15 @@ internal static class ConfigHubModel
             entity.Property(item => item.CalculatedAt).HasColumnName("calculated_at");
             entity.HasOne<Machine>().WithMany().HasForeignKey(item => item.MachineId).OnDelete(DeleteBehavior.Restrict);
         });
+        modelBuilder.Entity<ImportBatch>(entity =>
+        {
+            entity.ToTable("import_batches"); entity.HasKey(item => item.Id);
+            entity.Property(item => item.Id).HasColumnName("id"); entity.Property(item => item.ProjectId).HasColumnName("project_id"); entity.Property(item => item.SourceFileName).HasColumnName("source_file_name").HasMaxLength(260); entity.Property(item => item.Status).HasColumnName("status").HasMaxLength(32).HasConversion<string>(); entity.Property(item => item.CreatedBy).HasColumnName("created_by").HasMaxLength(160); entity.Property(item => item.Reason).HasColumnName("reason").HasMaxLength(500); entity.Property(item => item.CreatedAt).HasColumnName("created_at"); entity.HasIndex(item => new { item.ProjectId, item.CreatedAt }).HasDatabaseName("ix_import_batches_project_created_at"); entity.HasOne<Project>().WithMany().HasForeignKey(item => item.ProjectId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ImportRow>(entity =>
+        {
+            entity.ToTable("import_rows"); entity.HasKey(item => item.Id);
+            entity.Property(item => item.Id).HasColumnName("id"); entity.Property(item => item.ImportBatchId).HasColumnName("import_batch_id"); entity.Property(item => item.RowNumber).HasColumnName("row_number"); entity.Property(item => item.Payload).HasColumnName("payload").HasColumnType("jsonb"); entity.Property(item => item.ValidationError).HasColumnName("validation_error").HasMaxLength(2000); entity.HasIndex(item => new { item.ImportBatchId, item.RowNumber }).IsUnique().HasDatabaseName("ux_import_rows_batch_row"); entity.HasOne<ImportBatch>().WithMany().HasForeignKey(item => item.ImportBatchId).OnDelete(DeleteBehavior.Restrict);
+        });
     }
 }

@@ -1899,6 +1899,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 ## Step 9 — Import
 
 - Excel/CSV Preview、Validation、Conflict、Dry Run、Commit。
+- 9A 进行中：导入先进入独立 `import_batches`/`import_rows` staging 模型；该阶段不允许对业务表直接 Add/Update，后续 Commit 只能转换为既有 Domain Commands。
 
 ## Step 10 — Production Hardening
 

@@ -39,6 +39,8 @@ public sealed class ConfigHubDbContext(DbContextOptions<ConfigHubDbContext> opti
     public DbSet<DeploymentItem> DeploymentItems => Set<DeploymentItem>();
     public DbSet<MachineCurrentConfiguration> MachineCurrentConfigurations => Set<MachineCurrentConfiguration>();
     public DbSet<MachineDriftSummary> MachineDriftSummaries => Set<MachineDriftSummary>();
+    public DbSet<ImportBatch> ImportBatches => Set<ImportBatch>();
+    public DbSet<ImportRow> ImportRows => Set<ImportRow>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
