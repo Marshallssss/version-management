@@ -91,17 +91,20 @@ public static class CatalogEndpoints
 
     private static async Task<IResult> RecordFactsAsync(Guid machineId, RecordFactsRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
     {
-        if (!Enum.TryParse<DeploymentOperationType>(request.OperationType, true, out var operation) || !Enum.TryParse<ObservationCoverage>(request.Coverage, true, out var coverage) || string.IsNullOrWhiteSpace(request.SourceType) || request.Items is null || request.Items.Count == 0) return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = ["必须提供操作类型、覆盖范围、来源和事实项。"] });
+        if (!Enum.TryParse<DeploymentOperationType>(request.OperationType, true, out var operation) || !Enum.TryParse<ObservationCoverage>(request.Coverage, true, out var coverage) || string.IsNullOrWhiteSpace(request.SourceType) || string.IsNullOrWhiteSpace(request.Reason) || request.Items is null || request.Items.Count == 0) return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = ["必须提供操作类型、覆盖范围、来源、原因和事实项。"] });
         await using var db = await factory.CreateDbContextAsync(cancellationToken); var machine = await db.Machines.SingleOrDefaultAsync(x => x.Id == machineId, cancellationToken); if (machine is null) return Results.NotFound();
         var now = DateTimeOffset.UtcNow; var batch = new DeploymentBatch { Id = Guid.NewGuid(), MachineId = machineId, OperationType = operation, Coverage = coverage, SourceType = request.SourceType.Trim(), ExternalEventId = NormalizeOptional(request.ExternalEventId, 200), RecordedAt = now, EffectiveAt = request.EffectiveAt ?? now }; db.DeploymentBatches.Add(batch);
         var componentIds = request.Items.Select(x => x.ComponentId).Distinct().ToArray(); var components = await db.ConfigurationComponents.Where(x => x.ProjectId == machine.ProjectId && componentIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, cancellationToken); if (components.Count != componentIds.Length) return Results.ValidationProblem(new Dictionary<string, string[]> { ["items"] = ["存在不属于机台项目的组件。"] });
+        var versionIds = request.Items.Where(x => !x.Absent && x.VersionId is not null).Select(x => x.VersionId!.Value).Distinct().ToArray();
+        var versions = await db.ComponentVersions.Where(x => versionIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, cancellationToken);
+        if (versions.Count != versionIds.Length || request.Items.Any(x => !x.Absent && (x.VersionId is null || versions[x.VersionId.Value].ComponentId != x.ComponentId))) return Results.ValidationProblem(new Dictionary<string, string[]> { ["items"] = ["事实版本必须属于对应组件。"] });
         foreach (var input in request.Items) { var item = new DeploymentItem { Id = Guid.NewGuid(), DeploymentBatchId = batch.Id, ConfigurationComponentId = input.ComponentId, NewComponentVersionId = input.VersionId, Result = input.Absent ? DeploymentItemResult.Absent : DeploymentItemResult.Succeeded, KnownInstalledAt = input.KnownInstalledAt }; db.DeploymentItems.Add(item); await UpsertCurrentAsync(db, machineId, input.ComponentId, input.Absent ? null : input.VersionId, input.Absent, batch.EffectiveAt, input.KnownInstalledAt, item.Id, cancellationToken); }
         if (coverage == ObservationCoverage.Full)
         {
             var allComponentIds = await db.ConfigurationComponents.Where(x => x.ProjectId == machine.ProjectId).Select(x => x.Id).ToListAsync(cancellationToken);
             foreach (var componentId in allComponentIds.Except(componentIds)) { var item = new DeploymentItem { Id = Guid.NewGuid(), DeploymentBatchId = batch.Id, ConfigurationComponentId = componentId, Result = DeploymentItemResult.Absent }; db.DeploymentItems.Add(item); await UpsertCurrentAsync(db, machineId, componentId, null, true, batch.EffectiveAt, null, item.Id, cancellationToken); }
         }
-        await db.SaveChangesAsync(cancellationToken); return TypedResults.Created($"/api/v1/deployment-batches/{batch.Id}", new { id = batch.Id });
+        AddAuditEvent(db, context, "DeploymentFactsRecorded", "DeploymentBatch", batch.Id, new { machineId, batch.OperationType, batch.Coverage, reason = request.Reason.Trim() }); await db.SaveChangesAsync(cancellationToken); return TypedResults.Created($"/api/v1/deployment-batches/{batch.Id}", new { id = batch.Id });
     }
 
     private static async Task<IResult> GetMachineConfigurationAsync(Guid machineId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
@@ -746,5 +749,5 @@ public sealed record CreateBaselineRequest(string? SeriesCode, string? BaselineC
 public sealed record AssignProjectStandardRequest(Guid ConfigurationBaselineId, string? Reason);
 public sealed record CreateMachineRequest(Guid ProjectId, string? SerialNumber, string? Name, string? MachineType, string? Reason);
 public sealed record AssignMachineTargetRequest(Guid ConfigurationBaselineId, string? Reason);
-public sealed record RecordFactsRequest(string? OperationType, string? Coverage, string? SourceType, string? ExternalEventId, DateTimeOffset? EffectiveAt, List<RecordFactItem>? Items);
+public sealed record RecordFactsRequest(string? OperationType, string? Coverage, string? SourceType, string? ExternalEventId, DateTimeOffset? EffectiveAt, string? Reason, List<RecordFactItem>? Items);
 public sealed record RecordFactItem(Guid ComponentId, Guid? VersionId, bool Absent, DateTimeOffset? KnownInstalledAt);

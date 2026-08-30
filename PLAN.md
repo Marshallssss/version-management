@@ -1876,7 +1876,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 6A 进行中：事实批次显式区分 INSTALL、UPGRADE、INITIAL_SNAPSHOT、OBSERVATION 与 FULL/PARTIAL 覆盖范围；`EffectiveAt` 表示事实生效/观察时间，绝不替代后续 Item 中的真实 `KnownInstalledAt`。
 - 6A 补充：Deployment Item 逐组件保存结果与可空 `KnownInstalledAt`；只有明确获得的安装时间才写入该字段，Observation 的 `EffectiveAt` 不得回填为安装时间。
 - 6B 进行中：`machine_current_configurations` 是可重建投影，保存 Present/Absent、`StateEffectiveAt`、可空 `KnownInstalledAt` 与来源 Item；FULL 批次才可将未出现组件投影为 Absent，PARTIAL 永不删除或标记未观察组件。
-- 6B 实现中：事实录入命令会在同一事务写入 Batch、Item 和 Current Projection；提交前必须补齐 FULL 缺失组件的 Absent 来源项，以及 Item Version 与 Component 的归属校验。
+- 6B 实现中：事实录入命令会在同一事务写入 Batch、Item 和 Current Projection；FULL 缺失组件的 Absent 来源项与 Item Version/Component 归属校验已实现，且命令现强制 reason 并写 Audit。待补持久化幂等和中文事实录入表单后验收提交。
 - 6B 验收补充：`catalog-acceptance.ps1` 覆盖 FULL 初始快照后 PARTIAL Observation 仅更新一个组件，断言未观察组件仍保留其原版本与 Present 状态。
 - 6C 进行中：中文“机台”界面已接入真实机台创建、列表与 Current Actual 读取；事实录入表单将在 Batch Finalize 命令的幂等与版本归属校验完成后开放。
 
