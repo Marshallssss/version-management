@@ -73,8 +73,14 @@ $releaseHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString(); 'X-Correl
 $releasedBaseline = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/baselines/$($baseline.id)/release")) -Headers $releaseHeaders -ContentType 'application/json' -Body $releaseBody
 $releasedReplay = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/baselines/$($baseline.id)/release")) -Headers $releaseHeaders -ContentType 'application/json' -Body $releaseBody
 if ($releasedBaseline.state -ne 'Released' -or $releasedBaseline.id -ne $releasedReplay.id) { throw 'Expected idempotent baseline release.' }
+$thirdVersion = Invoke-JsonPost "/api/v1/components/$($component.id)/versions" @{ versionNumber = 'opaque-c' }
+$secondBaselineBody = @{ seriesCode = "SERIES2-$suffix"; baselineCode = "BL2-$suffix"; description = 'Comparison baseline'; reason = '自动化基线比较验收' } | ConvertTo-Json
+$secondBaseline = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/baselines")) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() } -ContentType 'application/json' -Body $secondBaselineBody
+Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/baselines/$($secondBaseline.id)/release")) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() } -ContentType 'application/json' -Body $releaseBody | Out-Null
+$compare = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/baselines/$($baseline.id)/compare/$($secondBaseline.id)"))
+if (@($compare.items | Where-Object { $_.componentId -eq $component.id -and $_.status -eq 'Changed' }).Count -ne 1) { throw 'Expected changed component in baseline comparison.' }
 $baselineList = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/baselines"))
-if ($baselineList.Count -ne 1 -or $baselineList[0].itemCount -ne 2 -or $baselineList[0].state -ne 'Released') { throw 'Expected listed released baseline snapshot.' }
+if ($baselineList.Count -ne 2 -or @($baselineList | Where-Object { $_.state -eq 'Released' }).Count -ne 2) { throw 'Expected listed released baseline snapshots.' }
 $standardBody = @{ configurationBaselineId = $baseline.id; reason = '自动化项目标准验收' } | ConvertTo-Json
 $standardHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString(); 'X-Correlation-ID' = "standard-$suffix" }
 $standard = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/standard")) -Headers $standardHeaders -ContentType 'application/json' -Body $standardBody

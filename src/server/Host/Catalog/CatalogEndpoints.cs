@@ -30,6 +30,7 @@ public static class CatalogEndpoints
         endpoints.MapPost("/api/v1/machines/{machineId:guid}/facts", RecordFactsAsync).RequireAuthorization("Engineer");
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/configuration", GetMachineConfigurationAsync);
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/drift", GetMachineDriftAsync);
+        endpoints.MapGet("/api/v1/baselines/{leftBaselineId:guid}/compare/{rightBaselineId:guid}", CompareBaselinesAsync);
 
         endpoints.MapPost("/api/v1/components/{componentId:guid}/versions", CreateVersionAsync).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/component-versions/{versionId:guid}/maturity", ChangeMaturityAsync).RequireAuthorization("SeniorEngineer");
@@ -128,6 +129,44 @@ public static class CatalogEndpoints
         var ids = expected.Keys.Union(actual.Keys).ToArray(); var items = new List<object>(); var mismatch = false; var critical = false;
         foreach (var componentId in ids) { expected.TryGetValue(componentId, out var wanted); actual.TryGetValue(componentId, out var found); var status = wanted is null ? "Extra" : found is null || found.State == CurrentConfigurationState.Absent ? "Missing" : wanted.ComponentVersionId == found.ComponentVersionId ? "Matched" : "Mismatch"; if (status != "Matched") mismatch = true; var versionId = found?.ComponentVersionId ?? wanted?.ComponentVersionId; if (versionId is not null && await db.ComponentVersions.AnyAsync(x => x.Id == versionId && x.Safety == VersionSafety.Blocked, cancellationToken)) critical = true; items.Add(new { componentId, status, expectedVersionId = wanted?.ComponentVersionId, actualVersionId = found?.ComponentVersionId }); }
         return TypedResults.Ok(new { matchStatus = mismatch ? "Mismatch" : "Matched", riskSeverity = critical ? "Critical" : "None", items });
+    }
+
+    private static async Task<IResult> CompareBaselinesAsync(Guid leftBaselineId, Guid rightBaselineId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var left = await db.BaselineItems.AsNoTracking()
+            .Where(item => item.ConfigurationBaselineId == leftBaselineId)
+            .ToDictionaryAsync(item => item.ConfigurationComponentId, cancellationToken);
+        var right = await db.BaselineItems.AsNoTracking()
+            .Where(item => item.ConfigurationBaselineId == rightBaselineId)
+            .ToDictionaryAsync(item => item.ConfigurationComponentId, cancellationToken);
+
+        if (left.Count == 0 || right.Count == 0)
+        {
+            return Results.NotFound();
+        }
+
+        var items = left.Keys.Union(right.Keys).Select(componentId =>
+        {
+            left.TryGetValue(componentId, out var before);
+            right.TryGetValue(componentId, out var after);
+            var status = before is null
+                ? "Added"
+                : after is null
+                    ? "Removed"
+                    : before.ComponentVersionId == after.ComponentVersionId
+                        ? "Same"
+                        : "Changed";
+            return new
+            {
+                componentId,
+                status,
+                leftVersionId = before?.ComponentVersionId,
+                rightVersionId = after?.ComponentVersionId
+            };
+        });
+
+        return TypedResults.Ok(new { leftBaselineId, rightBaselineId, items });
     }
 
     private static async Task UpsertCurrentAsync(ConfigHubDbContext db, Guid machineId, Guid componentId, Guid? versionId, bool absent, DateTimeOffset effectiveAt, DateTimeOffset? knownInstalledAt, Guid sourceItemId, CancellationToken cancellationToken)
