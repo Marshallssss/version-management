@@ -371,13 +371,16 @@ public static class CatalogEndpoints
     {
         var validation = ValidateIdentifier(request.Code, "项目编码", 50) ?? ValidateRequired(request.Name, "项目名称", 200) ?? ValidateRequired(request.Reason, "克隆原因", 500);
         if (validation is not null) return Results.ValidationProblem(validation);
+        var key = context.Request.Headers["Idempotency-Key"].FirstOrDefault(); if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["克隆项目必须提供不超过 200 个字符的 Idempotency-Key。"] });
         await using var database = await factory.CreateDbContextAsync(cancellationToken);
+        var scope = $"projects.clone:{projectId}"; var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request)))); var replay = await database.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
+        if (replay is not null) { if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (replay.Result is not null) return TypedResults.Ok(replay.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
         var source = await database.Projects.SingleOrDefaultAsync(item => item.Id == projectId, cancellationToken);
         if (source is null) return Results.NotFound();
         var normalizedCode = Normalize(request.Code!);
         if (await database.Projects.AnyAsync(item => item.NormalizedCode == normalizedCode, cancellationToken)) return Results.Conflict(new { message = "项目编码已存在。" });
         var actor = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required.");
-        var now = DateTimeOffset.UtcNow;
+        var now = DateTimeOffset.UtcNow; await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken); database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) });
         var target = new Project { Id = Guid.NewGuid(), Code = request.Code!.Trim(), NormalizedCode = normalizedCode, Name = request.Name!.Trim(), Description = source.Description, CreatedAt = now, UpdatedAt = now };
         var sourceComponents = await database.ConfigurationComponents.AsNoTracking().Where(item => item.ProjectId == projectId).OrderBy(item => item.LineageKey).ToListAsync(cancellationToken);
         var ids = sourceComponents.ToDictionary(item => item.Id, _ => Guid.NewGuid());
@@ -387,7 +390,7 @@ public static class CatalogEndpoints
         }
         database.Projects.Add(target);
         AddAuditEvent(database, context, "ProjectCloned", "Project", target.Id, new { sourceProjectId = source.Id, reason = request.Reason!.Trim(), actor });
-        await database.SaveChangesAsync(cancellationToken);
+        await database.SaveChangesAsync(cancellationToken); var record = await database.IdempotencyRecords.SingleAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken); record.Status = IdempotencyRecordStatus.Completed; record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = target.Id })); await database.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
         return TypedResults.Created($"/api/v1/projects/{target.Id}", new { id = target.Id });
     }
 

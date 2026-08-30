@@ -153,7 +153,11 @@ if (-not [string]::IsNullOrWhiteSpace($ConnectionString)) {
 $audit = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/audit?entityId=$($project.id)"))
 if ($audit.Count -lt 1 -or $audit[0].actor -ne $Email -or [string]::IsNullOrWhiteSpace($audit[0].correlationId)) { throw 'Expected authenticated audit event.' }
 
-$clone = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/clone")) -ContentType 'application/json' -Body (@{ code = "CLONE-$suffix"; name = 'Cloned project'; reason = '自动化克隆验收' } | ConvertTo-Json)
+$cloneHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() }
+$cloneBody = @{ code = "CLONE-$suffix"; name = 'Cloned project'; reason = '自动化克隆验收' } | ConvertTo-Json
+$clone = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/clone")) -Headers $cloneHeaders -ContentType 'application/json' -Body $cloneBody
+$cloneReplay = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/clone")) -Headers $cloneHeaders -ContentType 'application/json' -Body $cloneBody
+if ($clone.id -ne $cloneReplay.id) { throw 'Expected idempotent project clone.' }
 $cloneDetail = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($clone.id)"))
 if ($cloneDetail.components.Count -ne 2 -or @($cloneDetail.components | Where-Object { $_.versions.Count -ne 0 }).Count -ne 0) { throw 'Clone must copy the complete component tree but not versions.' }
 Write-Host "Catalog acceptance passed for project $($project.id)."
