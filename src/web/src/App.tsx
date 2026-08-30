@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { assignMachineTarget, assignProjectMember, assignProjectStandard, changeUserRole, changeVersionMaturity, changeVersionSafety, cloneProject, commitImport, compareBaselines, createBaseline, createComponent, createComponentVersion, createMachine, createProject, createUser, getBaselines, getCurrentUser, getDashboard, getImportPreview, getMachineConfiguration, getMachineDrift, getMachineFacts, getMachineTarget, getMachines, getProject, getProjectMembers, getProjectStandard, getProjects, getUsers, getVersionDetail, getVersionImpact, login, logout, moveComponent, recommendVersion, recordMachineFacts, releaseBaseline, searchCatalog, stageImport } from './catalog-api'
+import { assignMachineTarget, assignProjectMember, assignProjectStandard, changeUserRole, changeVersionMaturity, changeVersionSafety, cloneProject, commitImport, compareBaselines, createBaseline, createComponent, createComponentVersion, createMachine, createProject, createUser, getBaselineDetail, getBaselines, getCurrentUser, getDashboard, getImportPreview, getMachineConfiguration, getMachineDrift, getMachineFacts, getMachineTarget, getMachines, getProject, getProjectMembers, getProjectStandard, getProjects, getUsers, getVersionDetail, getVersionImpact, login, logout, moveComponent, recommendVersion, recordMachineFacts, releaseBaseline, searchCatalog, stageImport } from './catalog-api'
 import { enqueueNoopJob, getSystemStatus, getSystemVersion, type BackgroundJobStatus } from './system-api'
 
 const navigation = [
@@ -69,6 +69,7 @@ function App() {
   const [baselineDescription, setBaselineDescription] = useState('')
   const [baselineReason, setBaselineReason] = useState('')
   const [releaseReason, setReleaseReason] = useState('')
+  const [selectedBaselineId, setSelectedBaselineId] = useState('')
   const [standardBaselineId, setStandardBaselineId] = useState('')
   const [standardReason, setStandardReason] = useState('')
   const [machineProjectId, setMachineProjectId] = useState('')
@@ -112,6 +113,7 @@ function App() {
   const projectDetail = useQuery({ queryKey: ['project', selectedProjectId], queryFn: () => getProject(selectedProjectId!), enabled: selectedProjectId !== null })
   const projectMembers = useQuery({ queryKey: ['project-members', selectedProjectId], queryFn: () => getProjectMembers(selectedProjectId!), enabled: selectedProjectId !== null && currentUser.data?.roles.includes('Admin') === true })
   const baselines = useQuery({ queryKey: ['baselines', baselineProjectId], queryFn: () => getBaselines(baselineProjectId), enabled: baselineProjectId !== '' })
+  const baselineDetail = useQuery({ queryKey: ['baseline-detail', selectedBaselineId], queryFn: () => getBaselineDetail(selectedBaselineId), enabled: selectedBaselineId !== '' })
   const standard = useQuery({ queryKey: ['project-standard', baselineProjectId], queryFn: () => getProjectStandard(baselineProjectId), enabled: baselineProjectId !== '' })
   const machines = useQuery({ queryKey: ['machines'], queryFn: getMachines })
   const selectedMachine = machines.data?.find(machine => machine.id === selectedMachineId)
@@ -320,6 +322,12 @@ function App() {
                 <div className="panel-heading"><div><span className="section-index">独立 Revision</span><h3>项目基线</h3></div><span className="count">{baselines.data?.length ?? 0}</span></div>
                 {baselineProjectId === '' ? <p className="empty-state">选择项目后显示其基线草稿与发布版本。</p> : baselines.data?.length ? <div className="catalog-list">{baselines.data.map((baseline) => <article className="project-row" key={baseline.id}><span><strong>{baseline.code}</strong><small>{baseline.seriesCode} · Revision {baseline.revisionNo} · {baseline.itemCount} 个快照项</small></span>{baseline.state === 'Draft' ? <form className="inline-form" onSubmit={(event) => { event.preventDefault(); release.mutate({ baselineId: baseline.id, reason: releaseReason }) }}><label>发布原因<input value={releaseReason} maxLength={500} onChange={(event) => setReleaseReason(event.target.value)} required /></label><button type="submit" disabled={release.isPending}>{release.isPending ? '正在发布' : '发布基线'}</button></form> : <em>{baseline.state === 'Released' ? '已发布' : baseline.state}</em>}</article>)}</div> : <p className="empty-state">该项目尚未创建基线。</p>}
                 {release.isError && <p className="error-strip">{release.error.message}</p>}
+              </section>
+              <section className="status-panel catalog-panel">
+                <div className="panel-heading"><div><span className="section-index">冻结快照</span><h3>查看基线组件树</h3></div></div>
+                <label>基线<select value={selectedBaselineId} onChange={(event) => setSelectedBaselineId(event.target.value)}><option value="">请选择基线</option>{baselines.data?.map((baseline) => <option key={baseline.id} value={baseline.id}>{baseline.code} · Revision {baseline.revisionNo}</option>)}</select></label>
+                {baselineDetail.data && <><p className="empty-state">{baselineDetail.data.baseline.seriesCode} · Revision {baselineDetail.data.baseline.revisionNo} · {baselineDetail.data.baseline.state === 'Released' ? '已发布且不可修改' : '草稿快照'}</p><div className="component-list">{baselineDetail.data.items.map((item) => <article className="component-row" key={item.id}><div><strong>{item.componentCode}</strong><span>{item.componentName} · {item.lineageKey}</span></div><small>版本 {item.versionId}</small></article>)}</div></>}
+                {baselineDetail.isError && <p className="error-strip">{baselineDetail.error.message}</p>}
               </section>
               <section className="status-panel catalog-panel">
                 <div className="panel-heading"><div><span className="section-index">项目标准</span><h3>当前推荐基线</h3></div></div>

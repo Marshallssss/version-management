@@ -25,6 +25,7 @@ public static class CatalogEndpoints
         projects.MapGet("/{projectId:guid}/standard", GetProjectStandardAsync);
         projects.MapPost("/{projectId:guid}/standard", AssignProjectStandardAsync).RequireAuthorization("SeniorEngineer");
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/release", ReleaseBaselineAsync).RequireAuthorization("SeniorEngineer");
+        endpoints.MapGet("/api/v1/baselines/{baselineId:guid}", GetBaselineDetailAsync);
         endpoints.MapGet("/api/v1/machines", ListMachinesAsync);
         endpoints.MapPost("/api/v1/machines", CreateMachineAsync).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/machines/{machineId:guid}/target", AssignMachineTargetAsync).RequireAuthorization("SeniorEngineer");
@@ -510,6 +511,15 @@ public static class CatalogEndpoints
             })
             .ToListAsync(cancellationToken);
         return TypedResults.Ok(baselines);
+    }
+
+    private static async Task<IResult> GetBaselineDetailAsync(Guid baselineId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        await using var database = await factory.CreateDbContextAsync(cancellationToken);
+        var baseline = await database.ConfigurationBaselines.AsNoTracking().Where(item => item.Id == baselineId).Select(item => new { id = item.Id, projectId = item.ProjectId, code = item.BaselineCode, seriesCode = database.BaselineSeries.Where(series => series.Id == item.BaselineSeriesId).Select(series => series.SeriesCode).Single(), revisionNo = item.RevisionNo, state = item.State.ToString(), item.Description, item.CreatedBy, item.CreatedAt, item.ReleasedBy, item.ReleasedAt }).SingleOrDefaultAsync(cancellationToken);
+        if (baseline is null) return Results.NotFound();
+        var items = await database.BaselineItems.AsNoTracking().Where(item => item.ConfigurationBaselineId == baselineId).OrderBy(item => item.LineageKeySnapshot).Select(item => new { id = item.Id, parentItemId = item.ParentBaselineItemId, componentId = item.ConfigurationComponentId, versionId = item.ComponentVersionId, componentCode = item.ComponentCodeSnapshot, componentName = item.ComponentNameSnapshot, lineageKey = item.LineageKeySnapshot, item.SortOrder }).ToListAsync(cancellationToken);
+        return TypedResults.Ok(new { baseline, items });
     }
 
     private static async Task<IResult> CreateBaselineAsync(
