@@ -84,9 +84,9 @@ if ($standard.baselineId -ne $baseline.id -or $standard.id -ne $standardReplay.i
 $target = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($machine.id)/target")) -ContentType 'application/json' -Body (@{ configurationBaselineId = $baseline.id; reason = '自动化机台目标验收' } | ConvertTo-Json)
 if ($target.baselineId -ne $baseline.id) { throw 'Expected explicit machine target assignment.' }
 $fullFacts = @{ operationType = 'InitialSnapshot'; coverage = 'Full'; sourceType = 'automation'; reason = '自动化完整快照'; items = @(@{ componentId = $component.id; versionId = $firstVersion.id; absent = $false; knownInstalledAt = $null }, @{ componentId = $child.id; versionId = $childVersion.id; absent = $false; knownInstalledAt = $null }) } | ConvertTo-Json -Depth 5
-Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($machine.id)/facts")) -ContentType 'application/json' -Body $fullFacts | Out-Null
+Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($machine.id)/facts")) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() } -ContentType 'application/json' -Body $fullFacts | Out-Null
 $partialFacts = @{ operationType = 'Observation'; coverage = 'Partial'; sourceType = 'automation'; reason = '自动化局部观察'; items = @(@{ componentId = $component.id; versionId = $secondVersion.id; absent = $false; knownInstalledAt = $null }) } | ConvertTo-Json -Depth 5
-Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($machine.id)/facts")) -ContentType 'application/json' -Body $partialFacts | Out-Null
+Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($machine.id)/facts")) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() } -ContentType 'application/json' -Body $partialFacts | Out-Null
 $actual = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($machine.id)/configuration"))
 if ($actual.Count -ne 2 -or @($actual | Where-Object { $_.componentId -eq $child.id -and $_.versionId -eq $childVersion.id -and $_.state -eq 'Present' }).Count -ne 1) { throw 'Partial observation must preserve unobserved current components.' }
 
