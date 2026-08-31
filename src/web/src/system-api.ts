@@ -1,3 +1,5 @@
+import { createIdempotencyKey } from './idempotency-key'
+
 export interface SystemVersion {
   product: string
   version: string
@@ -51,7 +53,7 @@ export async function getSystemStatus(): Promise<SystemStatus> {
 export async function enqueueNoopJob(reason: string): Promise<{ id: string }> {
   const response = await fetch('/api/v1/system/jobs/noop', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'Idempotency-Key': crypto.randomUUID() },
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'Idempotency-Key': createIdempotencyKey() },
     body: JSON.stringify({ reason }),
   })
 
