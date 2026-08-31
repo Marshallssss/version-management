@@ -48,11 +48,11 @@ export async function getSystemStatus(): Promise<SystemStatus> {
   return response.json() as Promise<SystemStatus>
 }
 
-export async function enqueueNoopJob(note: string): Promise<{ id: string }> {
+export async function enqueueNoopJob(reason: string): Promise<{ id: string }> {
   const response = await fetch('/api/v1/system/jobs/noop', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ note }),
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'Idempotency-Key': crypto.randomUUID() },
+    body: JSON.stringify({ reason }),
   })
 
   if (!response.ok) {

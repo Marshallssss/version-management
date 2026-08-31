@@ -19,6 +19,13 @@ try {
     if ($_.Exception.Response.StatusCode.value__ -ne 401) { throw }
 }
 try {
+    Invoke-WebRequest -UseBasicParsing -Method Post -Uri ([uri]::new($BaseUri, '/api/v1/system/jobs/noop')) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() } -ContentType 'application/json' -Body (@{ reason = '匿名任务拒绝验收' } | ConvertTo-Json) -ErrorAction Stop | Out-Null
+    throw 'Unauthenticated system job unexpectedly succeeded.'
+} catch {
+    if ($_.Exception.Message -match 'unexpectedly succeeded') { throw }
+    if ($_.Exception.Response.StatusCode.value__ -ne 401) { throw }
+}
+try {
     Invoke-WebRequest -UseBasicParsing -Uri ([uri]::new($BaseUri, '/api/v1/projects')) -ErrorAction Stop | Out-Null
     throw 'Unauthenticated catalog read unexpectedly succeeded.'
 } catch {
@@ -31,6 +38,13 @@ $login = Invoke-WebRequest -UseBasicParsing -SessionVariable session -Method Pos
 if ($login.StatusCode -ne 204) { throw 'Login did not succeed.' }
 $users = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, '/api/v1/admin/users'))
 if (@($users | Where-Object { $_.email -eq $Email -and $_.roles -contains 'Admin' }).Count -ne 1) { throw 'Administrator user directory must expose the authenticated admin and role.' }
+$jobHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString(); 'X-Correlation-ID' = "job-$suffix" }
+$jobBody = @{ reason = '自动化后台任务验收' } | ConvertTo-Json
+$job = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, '/api/v1/system/jobs/noop')) -Headers $jobHeaders -ContentType 'application/json' -Body $jobBody
+$jobReplay = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, '/api/v1/system/jobs/noop')) -Headers $jobHeaders -ContentType 'application/json' -Body $jobBody
+if ($job.id -ne $jobReplay.id) { throw 'System job enqueue must be idempotent.' }
+$jobAudit = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/audit?entityId=$($job.id)"))
+if (@($jobAudit | Where-Object { $_.action -eq 'SystemNoopJobEnqueued' -and $_.actor -eq $Email -and $_.correlationId -eq "job-$suffix" }).Count -ne 1) { throw 'System job enqueue must write an authenticated audit event.' }
 $viewerEmail = "viewer-$suffix@example.test"
 $viewerPassword = "Viewer-$suffix!"
 $viewerHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() }
