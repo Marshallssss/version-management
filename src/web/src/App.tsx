@@ -106,34 +106,35 @@ function App() {
   const [roleReason, setRoleReason] = useState('')
   const queryClient = useQueryClient()
   const system = useQuery({ queryKey: ['system-version'], queryFn: getSystemVersion })
-  const status = useQuery({ queryKey: ['system-status'], queryFn: getSystemStatus, refetchInterval: 5_000 })
-  const dashboard = useQuery({ queryKey: ['dashboard'], queryFn: getDashboard, refetchInterval: 5_000 })
-  const projects = useQuery({ queryKey: ['projects'], queryFn: getProjects })
   const currentUser = useQuery({ queryKey: ['current-user'], queryFn: getCurrentUser, retry: false })
+  const isAuthenticated = currentUser.data !== undefined
+  const status = useQuery({ queryKey: ['system-status'], queryFn: getSystemStatus, refetchInterval: 5_000, enabled: isAuthenticated })
+  const dashboard = useQuery({ queryKey: ['dashboard'], queryFn: getDashboard, refetchInterval: 5_000, enabled: isAuthenticated })
+  const projects = useQuery({ queryKey: ['projects'], queryFn: getProjects, enabled: isAuthenticated })
   const users = useQuery({ queryKey: ['users'], queryFn: getUsers, enabled: currentUser.data?.roles.includes('Admin') === true })
   const addUser = useMutation({ mutationFn: createUser, onSuccess: async () => { setNewUserEmail(''); setNewUserName(''); setNewUserPassword(''); setNewUserReason(''); await queryClient.invalidateQueries({ queryKey: ['users'] }) } })
   const updateUserRole = useMutation({ mutationFn: () => changeUserRole(roleUserId, { role: roleValue, reason: roleReason }), onSuccess: async () => { setRoleReason(''); await queryClient.invalidateQueries({ queryKey: ['users'] }) } })
-  const projectDetail = useQuery({ queryKey: ['project', selectedProjectId], queryFn: () => getProject(selectedProjectId!), enabled: selectedProjectId !== null })
-  const projectMembers = useQuery({ queryKey: ['project-members', selectedProjectId], queryFn: () => getProjectMembers(selectedProjectId!), enabled: selectedProjectId !== null && currentUser.data?.roles.includes('Admin') === true })
-  const baselines = useQuery({ queryKey: ['baselines', baselineProjectId], queryFn: () => getBaselines(baselineProjectId), enabled: baselineProjectId !== '' })
-  const baselineDetail = useQuery({ queryKey: ['baseline-detail', selectedBaselineId], queryFn: () => getBaselineDetail(selectedBaselineId), enabled: selectedBaselineId !== '' })
-  const standard = useQuery({ queryKey: ['project-standard', baselineProjectId], queryFn: () => getProjectStandard(baselineProjectId), enabled: baselineProjectId !== '' })
-  const machines = useQuery({ queryKey: ['machines'], queryFn: getMachines })
+  const projectDetail = useQuery({ queryKey: ['project', selectedProjectId], queryFn: () => getProject(selectedProjectId!), enabled: isAuthenticated && selectedProjectId !== null })
+  const projectMembers = useQuery({ queryKey: ['project-members', selectedProjectId], queryFn: () => getProjectMembers(selectedProjectId!), enabled: isAuthenticated && selectedProjectId !== null && currentUser.data?.roles.includes('Admin') === true })
+  const baselines = useQuery({ queryKey: ['baselines', baselineProjectId], queryFn: () => getBaselines(baselineProjectId), enabled: isAuthenticated && baselineProjectId !== '' })
+  const baselineDetail = useQuery({ queryKey: ['baseline-detail', selectedBaselineId], queryFn: () => getBaselineDetail(selectedBaselineId), enabled: isAuthenticated && selectedBaselineId !== '' })
+  const standard = useQuery({ queryKey: ['project-standard', baselineProjectId], queryFn: () => getProjectStandard(baselineProjectId), enabled: isAuthenticated && baselineProjectId !== '' })
+  const machines = useQuery({ queryKey: ['machines'], queryFn: getMachines, enabled: isAuthenticated })
   const selectedMachine = machines.data?.find(machine => machine.id === selectedMachineId)
-  const machineProjectDetail = useQuery({ queryKey: ['machine-project', selectedMachine?.projectId], queryFn: () => getProject(selectedMachine!.projectId), enabled: selectedMachine !== undefined })
+  const machineProjectDetail = useQuery({ queryKey: ['machine-project', selectedMachine?.projectId], queryFn: () => getProject(selectedMachine!.projectId), enabled: isAuthenticated && selectedMachine !== undefined })
   const selectedFactComponent = machineProjectDetail.data?.components.find(component => component.id === factComponentId)
-  const targetBaselines = useQuery({ queryKey: ['machine-target-baselines', selectedMachine?.projectId], queryFn: () => getBaselines(selectedMachine!.projectId), enabled: selectedMachine !== undefined })
-  const machineTarget = useQuery({ queryKey: ['machine-target', selectedMachineId], queryFn: () => getMachineTarget(selectedMachineId), enabled: selectedMachineId !== '' })
-  const machineTargetHistory = useQuery({ queryKey: ['machine-target-history', selectedMachineId], queryFn: () => getMachineTargetHistory(selectedMachineId), enabled: selectedMachineId !== '' })
-  const machineConfiguration = useQuery({ queryKey: ['machine-configuration', selectedMachineId], queryFn: () => getMachineConfiguration(selectedMachineId), enabled: selectedMachineId !== '' })
-  const machineFacts = useQuery({ queryKey: ['machine-facts', selectedMachineId], queryFn: () => getMachineFacts(selectedMachineId), enabled: selectedMachineId !== '' })
-  const machineDrift = useQuery({ queryKey: ['machine-drift', selectedMachineId], queryFn: () => getMachineDrift(selectedMachineId), enabled: selectedMachineId !== '' })
-  const versionImpact = useQuery({ queryKey: ['version-impact', impactVersionId], queryFn: () => getVersionImpact(impactVersionId), enabled: impactVersionId !== '' })
-  const versionDetail = useQuery({ queryKey: ['version-detail', impactVersionId], queryFn: () => getVersionDetail(impactVersionId), enabled: impactVersionId !== '' })
-  const catalogSearch = useQuery({ queryKey: ['catalog-search', searchTerm], queryFn: () => searchCatalog(searchTerm), enabled: searchTerm.trim().length >= 2 })
-  const compareProjectBaselines = useQuery({ queryKey: ['compare-baselines', compareProjectId], queryFn: () => getBaselines(compareProjectId), enabled: compareProjectId !== '' })
-  const baselineComparison = useQuery({ queryKey: ['baseline-comparison', leftBaselineId, rightBaselineId], queryFn: () => compareBaselines(leftBaselineId, rightBaselineId), enabled: leftBaselineId !== '' && rightBaselineId !== '' && leftBaselineId !== rightBaselineId })
-  const importPreview = useQuery({ queryKey: ['import-preview', importBatchId], queryFn: () => getImportPreview(importBatchId), enabled: importBatchId !== '' })
+  const targetBaselines = useQuery({ queryKey: ['machine-target-baselines', selectedMachine?.projectId], queryFn: () => getBaselines(selectedMachine!.projectId), enabled: isAuthenticated && selectedMachine !== undefined })
+  const machineTarget = useQuery({ queryKey: ['machine-target', selectedMachineId], queryFn: () => getMachineTarget(selectedMachineId), enabled: isAuthenticated && selectedMachineId !== '' })
+  const machineTargetHistory = useQuery({ queryKey: ['machine-target-history', selectedMachineId], queryFn: () => getMachineTargetHistory(selectedMachineId), enabled: isAuthenticated && selectedMachineId !== '' })
+  const machineConfiguration = useQuery({ queryKey: ['machine-configuration', selectedMachineId], queryFn: () => getMachineConfiguration(selectedMachineId), enabled: isAuthenticated && selectedMachineId !== '' })
+  const machineFacts = useQuery({ queryKey: ['machine-facts', selectedMachineId], queryFn: () => getMachineFacts(selectedMachineId), enabled: isAuthenticated && selectedMachineId !== '' })
+  const machineDrift = useQuery({ queryKey: ['machine-drift', selectedMachineId], queryFn: () => getMachineDrift(selectedMachineId), enabled: isAuthenticated && selectedMachineId !== '' })
+  const versionImpact = useQuery({ queryKey: ['version-impact', impactVersionId], queryFn: () => getVersionImpact(impactVersionId), enabled: isAuthenticated && impactVersionId !== '' })
+  const versionDetail = useQuery({ queryKey: ['version-detail', impactVersionId], queryFn: () => getVersionDetail(impactVersionId), enabled: isAuthenticated && impactVersionId !== '' })
+  const catalogSearch = useQuery({ queryKey: ['catalog-search', searchTerm], queryFn: () => searchCatalog(searchTerm), enabled: isAuthenticated && searchTerm.trim().length >= 2 })
+  const compareProjectBaselines = useQuery({ queryKey: ['compare-baselines', compareProjectId], queryFn: () => getBaselines(compareProjectId), enabled: isAuthenticated && compareProjectId !== '' })
+  const baselineComparison = useQuery({ queryKey: ['baseline-comparison', leftBaselineId, rightBaselineId], queryFn: () => compareBaselines(leftBaselineId, rightBaselineId), enabled: isAuthenticated && leftBaselineId !== '' && rightBaselineId !== '' && leftBaselineId !== rightBaselineId })
+  const importPreview = useQuery({ queryKey: ['import-preview', importBatchId], queryFn: () => getImportPreview(importBatchId), enabled: isAuthenticated && importBatchId !== '' })
   const enqueue = useMutation({
     mutationFn: enqueueNoopJob,
     onSuccess: async () => {
@@ -156,7 +157,7 @@ function App() {
   const assignTarget = useMutation({ mutationFn: () => assignMachineTarget(selectedMachineId, targetBaselineId, targetReason), onSuccess: async () => { setTargetBaselineId(''); setTargetReason(''); await queryClient.invalidateQueries({ queryKey: ['machines'] }); await queryClient.invalidateQueries({ queryKey: ['machine-target', selectedMachineId] }); await queryClient.invalidateQueries({ queryKey: ['machine-drift', selectedMachineId] }) } })
   const commitImportMutation = useMutation({ mutationFn: () => commitImport(importBatchId), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ['import-preview', importBatchId] }); await queryClient.invalidateQueries({ queryKey: ['project', selectedProjectId] }) } })
   const signIn = useMutation({ mutationFn: login, onSuccess: async () => { setPassword(''); await queryClient.invalidateQueries({ queryKey: ['current-user'] }) } })
-  const signOut = useMutation({ mutationFn: logout, onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ['current-user'] }); setSelectedProjectId(null) } })
+  const signOut = useMutation({ mutationFn: logout, onSuccess: () => { queryClient.clear(); setSelectedProjectId(null) } })
   const addComponent = useMutation({
     mutationFn: ({ projectId, code, name, reason, parentComponentId }: { projectId: string; code: string; name: string; reason: string; parentComponentId: string | null }) => createComponent(projectId, { code, name, parentComponentId, reason }),
     onSuccess: async () => {
@@ -213,7 +214,7 @@ function App() {
         </div>
         <nav aria-label="主导航">
           {navigation.map((item, index) => (
-            <button className={item.id === activePage ? 'nav-item active' : 'nav-item'} key={item.id} type="button" onClick={() => setActivePage(item.id)}>
+            <button className={item.id === activePage ? 'nav-item active' : 'nav-item'} key={item.id} type="button" onClick={() => setActivePage(!isAuthenticated && item.id !== 'projects' ? 'projects' : item.id)}>
               <span>{String(index + 1).padStart(2, '0')}</span>{item.label}{!item.available && <em>待实现</em>}
             </button>
           ))}
@@ -248,7 +249,7 @@ function App() {
                 <dl className="runtime-list"><div><dt>产品</dt><dd>{system.data?.product ?? '—'}</dd></div><div><dt>版本</dt><dd>{system.data?.version ?? '—'}</dd></div><div><dt>接口版本</dt><dd>{system.data?.apiVersion ?? '—'}</dd></div><div><dt>服务时间</dt><dd>{formatTime(status.data?.serverTime)}</dd></div></dl>
               </section>
               <section className="status-panel">
-                <div className="panel-heading"><div><span className="section-index">配置总览</span><h3>机台配置状态</h3></div><span className="count">{dashboard.data?.machineCount ?? 0}</span></div>
+                <div className="panel-heading"><div><span className="section-index">配置总览</span><h3>机台配置状态</h3></div><span className="count">{dashboard.data?.machineCount ?? '—'}</span></div>
                 <dl className="runtime-list"><div><dt>机台总数</dt><dd>{dashboard.data?.machineCount ?? '—'}</dd></div><div><dt>配置匹配</dt><dd>{dashboard.data?.matchedCount ?? '—'}</dd></div><div><dt>配置不匹配</dt><dd>{dashboard.data?.mismatchCount ?? '—'}</dd></div><div><dt>状态未知</dt><dd>{dashboard.data?.unknownCount ?? '—'}</dd></div><div><dt>严重风险</dt><dd>{dashboard.data?.criticalRiskCount ?? '—'}</dd></div></dl>
               </section>
               <section className="telemetry-panel queue-panel">
