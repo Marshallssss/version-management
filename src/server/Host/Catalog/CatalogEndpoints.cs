@@ -44,6 +44,7 @@ public static class CatalogEndpoints
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/drift", GetMachineDriftAsync).RequireAuthorization();
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/drift-summary", GetMachineDriftSummaryAsync).RequireAuthorization();
         endpoints.MapGet("/api/v1/machines/{leftMachineId:guid}/compare/{rightMachineId:guid}", CompareMachinesAsync).RequireAuthorization();
+        endpoints.MapGet("/api/v1/machines/{machineId:guid}/compare-history", CompareMachineCurrentToHistoryAsync).RequireAuthorization();
         endpoints.MapGet("/api/v1/baselines/{leftBaselineId:guid}/compare/{rightBaselineId:guid}", CompareBaselinesAsync).RequireAuthorization();
         endpoints.MapGet("/api/v1/component-versions/{versionId:guid}/impact", GetVersionImpactAsync).RequireAuthorization();
         endpoints.MapGet("/api/v1/component-versions/{versionId:guid}", GetVersionDetailAsync).RequireAuthorization();
@@ -413,6 +414,29 @@ public static class CatalogEndpoints
         var matchStatus = items.All(item => item.status == "Matched") ? "Matched" : "Mismatch";
         var riskSeverity = items.Any(item => (item.leftVersionId is not null && blocked.Contains(item.leftVersionId.Value)) || (item.rightVersionId is not null && blocked.Contains(item.rightVersionId.Value))) ? "Critical" : "None";
         return TypedResults.Ok(new { leftMachineId, rightMachineId, matchStatus, riskSeverity, items });
+    }
+
+    private static async Task<IResult> CompareMachineCurrentToHistoryAsync(Guid machineId, DateTimeOffset? at, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        if (at is null) return Results.ValidationProblem(new Dictionary<string, string[]> { ["at"] = ["必须提供 ISO 8601 时间点。"] });
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        if (!await db.Machines.AnyAsync(machine => machine.Id == machineId, cancellationToken)) return Results.NotFound();
+        var current = await db.MachineCurrentConfigurations.AsNoTracking().Where(state => state.MachineId == machineId).ToDictionaryAsync(state => state.ConfigurationComponentId, cancellationToken);
+        var historicalEvents = await db.DeploymentItems.AsNoTracking().Join(db.DeploymentBatches.AsNoTracking(), item => item.DeploymentBatchId, batch => batch.Id, (item, batch) => new { item, batch }).Where(entry => entry.batch.MachineId == machineId && entry.batch.EffectiveAt <= at.Value).OrderBy(entry => entry.batch.EffectiveAt).ThenBy(entry => entry.batch.RecordedAt).ThenBy(entry => entry.item.Id).Select(entry => new { componentId = entry.item.ConfigurationComponentId, versionId = entry.item.NewComponentVersionId, absent = entry.item.Result == DeploymentItemResult.Absent }).ToListAsync(cancellationToken);
+        var historical = historicalEvents.GroupBy(entry => entry.componentId).ToDictionary(group => group.Key, group => group.Last());
+        var versionIds = current.Values.Where(state => state.State == CurrentConfigurationState.Present && state.ComponentVersionId is not null).Select(state => state.ComponentVersionId!.Value).Concat(historical.Values.Where(state => !state.absent && state.versionId is not null).Select(state => state.versionId!.Value)).Distinct().ToArray();
+        var blocked = await db.ComponentVersions.AsNoTracking().Where(version => versionIds.Contains(version.Id) && version.Safety == VersionSafety.Blocked).Select(version => version.Id).ToArrayAsync(cancellationToken);
+        var items = current.Keys.Union(historical.Keys).OrderBy(componentId => componentId).Select(componentId =>
+        {
+            current.TryGetValue(componentId, out var currentState); historical.TryGetValue(componentId, out var historicalState);
+            var currentVersion = currentState?.State == CurrentConfigurationState.Present ? currentState.ComponentVersionId : null;
+            var historicalVersion = historicalState is not null && !historicalState.absent ? historicalState.versionId : null;
+            var status = currentVersion == historicalVersion ? "Matched" : currentVersion is null ? "HistoricalOnly" : historicalVersion is null ? "CurrentOnly" : "Mismatch";
+            return new { componentId, status, currentVersionId = currentVersion, historicalVersionId = historicalVersion };
+        }).ToArray();
+        var matchStatus = items.All(item => item.status == "Matched") ? "Matched" : "Mismatch";
+        var riskSeverity = items.Any(item => (item.currentVersionId is not null && blocked.Contains(item.currentVersionId.Value)) || (item.historicalVersionId is not null && blocked.Contains(item.historicalVersionId.Value))) ? "Critical" : "None";
+        return TypedResults.Ok(new { machineId, asOf = at.Value, matchStatus, riskSeverity, items });
     }
 
     private static async Task<IResult> CompareBaselinesAsync(Guid leftBaselineId, Guid rightBaselineId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)

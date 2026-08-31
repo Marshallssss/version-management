@@ -246,6 +246,11 @@ if (@($afterStaleObservation | Where-Object { $_.componentId -eq $component.id -
 $historicalAt = [DateTimeOffset]::UtcNow.AddDays(-6).ToString('O')
 $historicalConfiguration = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($machine.id)/configuration-at?at=$([Uri]::EscapeDataString($historicalAt))"))
 if (@($historicalConfiguration.items | Where-Object { $_.componentId -eq $component.id -and $_.versionId -eq $secondVersion.id -and $_.state -eq 'Present' -and $_.knownInstalledAt -eq $null }).Count -ne 1) { throw 'Historical configuration must rebuild the effective fact state without substituting the current projection or observation time for installed time.' }
+$currentHistoricalComparison = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($machine.id)/compare-history?at=$([Uri]::EscapeDataString($historicalAt))"))
+Invoke-Lifecycle "/api/v1/component-versions/$($firstVersion.id)/safety" 'Blocked' '自动化当前历史比对风险验收' | Out-Null
+$criticalCurrentHistoricalComparison = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($machine.id)/compare-history?at=$([Uri]::EscapeDataString($historicalAt))"))
+Invoke-Lifecycle "/api/v1/component-versions/$($firstVersion.id)/safety" 'Clear' '自动化当前历史比对恢复安全状态' | Out-Null
+if ($currentHistoricalComparison.matchStatus -ne 'Mismatch' -or $currentHistoricalComparison.riskSeverity -ne 'None' -or $criticalCurrentHistoricalComparison.matchStatus -ne 'Mismatch' -or $criticalCurrentHistoricalComparison.riskSeverity -ne 'Critical') { throw 'Current-versus-historical comparison must keep version difference separate from blocked-version risk.' }
 $rollbackHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString(); 'X-Correlation-ID' = "rollback-$suffix" }
 $rollbackBody = @{ operationType = 'Rollback'; coverage = 'Partial'; sourceType = 'automation'; reason = '自动化组件回退验收'; items = @(@{ componentId = $component.id; versionId = $secondVersion.id; absent = $false; knownInstalledAt = $null }) } | ConvertTo-Json -Depth 5
 $rollback = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($machine.id)/facts")) -Headers $rollbackHeaders -ContentType 'application/json' -Body $rollbackBody
