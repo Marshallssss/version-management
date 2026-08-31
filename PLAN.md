@@ -1877,6 +1877,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 4C 已交付：Project Standard 使用独立 Assignment History 而非 `projects.current_baseline_id`；仅接受同项目的 Released Baseline，并以 `[valid_from, valid_to)` 关闭上一条当前 Assignment。数据库以 partial unique index 与 GiST 排斥约束防止多个当前值和任何时间重叠；中文界面支持查看/显式设置。自动验收覆盖 Assignment 幂等重放和直连数据库的重叠区间拒绝。
 - 4A 复核补强进行中：新增 Baseline Detail 只读 API 和中文冻结组件树视图；自动化验收确认草稿快照返回独立的组件编码、名称、版本身份和树项数量，不依赖当前 Component Tree。
 - 4A 复核补强进行中：Baseline Item 追加 `version_number_snapshot`；真实 EF Migration 将历史 Items 从其版本身份回填版本号，后续草稿创建直接保存文本快照，详情 UI/API 与自动化验收均读取该字段。
+- 4A 复核补强进行中：草稿 Baseline Item 的 Required/Optional 通过受 Project SeniorEngineer 授权的命令修改，命令要求原因、`Idempotency-Key` 并写 Audit；发布后仍由 Application 与 PostgreSQL 不可变 Trigger 双重拒绝，详情中文界面显示并仅在草稿阶段提供编辑。
 
 ## Step 5 — Machine → Target
 
