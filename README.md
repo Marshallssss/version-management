@@ -78,6 +78,8 @@ Expand-Archive .\artifacts\ConfigHub-offline-nuget-win-x64-*.zip -DestinationPat
 
 仓库根目录的 `NuGet.Config` 默认指向 `.confighub\offline-nuget`，因此解压完成后直接执行 `dotnet restore`、`dotnet build`、`dotnet run`、`start-local.cmd` 或 `.\start-local.ps1` 都会使用离线源，无需增加参数；显式 `-NuGetConfigFile` 仍可用于指定公司镜像或其他位置的配置。
 
+本地启动优先读取 `%LOCALAPPDATA%\ConfigHub\appsettings.local.json` 中的连接串；若环境变量被误写为字面量 `$env:ConnectionStrings__ConfigHub`，脚本会忽略该无效值并提示输入真实 PostgreSQL 连接串，不会再将其传给 Npgsql。
+
 公司镜像也可以直接作为 `-NuGetConfigFile` 传入；前端若同样受限，附加 `-NpmRegistry https://npm.company.example/`，或带上已构建的 `src\server\Host\wwwroot` 并使用 `-SkipFrontendBuild`。
 
 手工验证命令：

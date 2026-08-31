@@ -73,13 +73,26 @@ function Ensure-ConnectionString {
         [string]$Name
     )
 
-    $current = [Environment]::GetEnvironmentVariable("ConnectionStrings__$Name", 'Process')
-    if ([string]::IsNullOrWhiteSpace($current)) {
-        $current = [Environment]::GetEnvironmentVariable("ConnectionStrings__$Name", 'User')
+    $localValue = $null
+    if (Test-Path $localConfigurationPath -PathType Leaf) {
+        $localConfiguration = Get-Content $localConfigurationPath -Raw | ConvertFrom-Json
+        $localValue = $localConfiguration.ConnectionStrings.$Name
     }
 
-    if (-not [string]::IsNullOrWhiteSpace($current)) {
-        [Environment]::SetEnvironmentVariable("ConnectionStrings__$Name", $current, 'Process')
+    $candidates = @(
+        [pscustomobject]@{ Source = $localConfigurationPath; Value = $localValue },
+        [pscustomobject]@{ Source = 'process environment variable'; Value = [Environment]::GetEnvironmentVariable("ConnectionStrings__$Name", 'Process') },
+        [pscustomobject]@{ Source = 'user environment variable'; Value = [Environment]::GetEnvironmentVariable("ConnectionStrings__$Name", 'User') }
+    )
+    foreach ($candidate in $candidates) {
+        $value = $candidate.Value
+        if ([string]::IsNullOrWhiteSpace($value)) { continue }
+        if ($value.TrimStart().StartsWith('$env:', [StringComparison]::OrdinalIgnoreCase) -or $value -notmatch '=') {
+            Write-Warning "Ignoring invalid $($candidate.Source) value for ConnectionStrings__$Name. Enter a real PostgreSQL connection string, not a literal `$env:... expression."
+            continue
+        }
+
+        [Environment]::SetEnvironmentVariable("ConnectionStrings__$Name", $value, 'Process')
         return
     }
 
