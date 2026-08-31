@@ -1854,6 +1854,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 2D 授权补强进行中：Maturity/Safety/Recommendation 需要项目内 SeniorEngineer Membership；自动验收覆盖全局 SeniorEngineer 但未加入项目时 Lifecycle API HTTP 403。
 - 2D 授权补强进行中：项目克隆、机台创建、机台目标、部署事实、导入暂存/提交均要求项目成员写权限；Baseline 创建、发布和项目标准均要求项目内 SeniorEngineer Membership。
 - 2D 验收补强进行中：自动化拒绝场景覆盖无项目成员的 Baseline Create、Project Clone、Machine Create、Import Stage，以及普通项目 Engineer 的 Baseline Release 和 Project Standard Assignment。
+- 2D 授权补强进行中：Cookie 认证对 `/api/*` 的未登录/拒绝访问固定返回 HTTP 401/403，不再重定向到 SPA fallback 而误报 HTTP 404；导入预览的项目范围拒绝已纳入验收。
 - 已交付：中文用户管理、角色管理，以及 Component/Version 与后续写命令的原因/幂等协议；完整授权矩阵留在 Step 10 的安全加固验收。
 
 ## Step 3 — Project → Component → Version
@@ -1928,6 +1929,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 9B 已交付：中文“导入预览”页把 `componentCode,versionNumber` 行数据提交到 staging，API 校验并返回逐行预览；创建预览与提交都要求持久化 Idempotency-Key。`catalog-acceptance.ps1` 覆盖有效/无效行及预览重放。
 - 9C 已交付：预览校验同时检查组件项目归属、业务版本重复及同批次重复；只将错误写入 staging 行，仍不得写入业务表。`catalog-acceptance.ps1` 已覆盖既有 `opaque-b` 版本被拒绝预览。
 - 9D 已交付：`CreateComponentVersionCommand` 已成为 UI 与 Import 共用的版本创建命令，集中 sequence、重复检查与 Audit；导入 Commit 只调用该命令，要求 Idempotency-Key 并在事务内更新批次状态。中文 UI 仅为已验证批次显示提交操作，`catalog-acceptance.ps1` 已覆盖提交与重放。
+- 9D 复核补强进行中：Import Preview 读取端点同样要求 Engineer 角色与项目范围写权限，避免已知 Batch ID 绕过导入工作流的授权边界；自动化验收覆盖未加入项目的 Engineer 返回 HTTP 403。
 - 3A/3C 补强已交付：Component 与 Version 创建统一要求 reason 和 Idempotency-Key，Audit 保存创建原因；Import Commit 复用同一版本命令并传入批次原因。`catalog-acceptance.ps1` 已覆盖组件与版本同键重放。
 - 3D 补强已交付：版本 Safety 变更要求 Idempotency-Key，并在同一事务中写入生命周期、Audit、推荐撤销与受影响机台的 Drift Summary；真实验收覆盖 Blocked 后仍保持 `Matched + Critical`。
 - 3D 补强已交付：版本 Maturity 与 Safety 变更均接入持久化 Idempotency；Safety 在同一事务中写生命周期、Audit、推荐撤销和 Drift Summary。`catalog-acceptance.ps1` 已覆盖 Maturity 同键重放及 Blocked 后 `Matched + Critical`。

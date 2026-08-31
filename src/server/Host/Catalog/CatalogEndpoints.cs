@@ -44,7 +44,7 @@ public static class CatalogEndpoints
         endpoints.MapPost("/api/v1/admin/drift-summaries/rebuild", RebuildMachineDriftSummariesAsync)
             .RequireAuthorization(policy => policy.RequireRole("Admin"));
         endpoints.MapPost("/api/v1/imports", StageImportAsync).RequireAuthorization("Engineer");
-        endpoints.MapGet("/api/v1/imports/{batchId:guid}", GetImportPreviewAsync);
+        endpoints.MapGet("/api/v1/imports/{batchId:guid}", GetImportPreviewAsync).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/imports/{batchId:guid}/commit", CommitImportAsync).RequireAuthorization("Engineer");
 
         endpoints.MapPost("/api/v1/components/{componentId:guid}/versions", CreateVersionAsync).RequireAuthorization("Engineer");
@@ -361,11 +361,12 @@ public static class CatalogEndpoints
         return TypedResults.Created($"/api/v1/imports/{batch.Id}", new { id = batch.Id, status = batch.Status.ToString(), rowCount = request.Rows.Count, errorCount = errors });
     }
 
-    private static async Task<IResult> GetImportPreviewAsync(Guid batchId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    private static async Task<IResult> GetImportPreviewAsync(Guid batchId, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         var batch = await db.ImportBatches.AsNoTracking().SingleOrDefaultAsync(item => item.Id == batchId, cancellationToken);
         if (batch is null) return Results.NotFound();
+        if (!await HasProjectWriteAccessAsync(db, context, batch.ProjectId, cancellationToken)) return Results.Forbid();
         var stagedRows = await db.ImportRows.AsNoTracking().Where(item => item.ImportBatchId == batchId).OrderBy(item => item.RowNumber).ToListAsync(cancellationToken);
         var rows = stagedRows.Select(item => new { item.RowNumber, payload = item.Payload.RootElement.Clone(), item.ValidationError });
         return TypedResults.Ok(new { id = batch.Id, status = batch.Status.ToString(), sourceFileName = batch.SourceFileName, rows });
