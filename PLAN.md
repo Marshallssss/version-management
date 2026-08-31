@@ -1870,6 +1870,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 生命周期切片已交付：独立 Maturity/Safety Transition History 与 Recommendation History 已落库；API/UI/自动测试覆盖 Draft→Testing→Released、推荐、Block 自动撤销推荐以及 Unblock 不自动恢复。
 - Clone 切片已交付：中文 Preview/Commit 表单只复制 Project 与 Component Tree，不复制 ComponentVersion、Baseline、Machine 或运行历史；自动验收断言新项目组件存在且版本为空。
 - 3G 已交付：版本详情 API/中文界面显示组件归属、opaque sequence、Maturity/Safety、Recommendation 与生命周期轨迹；`catalog-acceptance.ps1` 已验证版本身份与生命周期记录，Release、真实 Migration 与完整集成验收均已通过。
+- 3C 中文界面补强已交付：软件版本页直接提供“项目 → 组件 → 版本号 → 创建原因”登记流程，并在同页保留版本影响追溯；不改变 Version 必须属于 Component 的领域模型，避免用户必须先发现项目详情中的隐藏表单。
 - 已交付：组件树移动、版本详情/影响查询，以及基于资源范围的 Project RBAC；完整授权矩阵继续在 Step 10 加固。
 
 ## Step 4 — Baseline
