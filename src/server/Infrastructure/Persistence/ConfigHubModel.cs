@@ -268,6 +268,24 @@ internal static class ConfigHubModel
             entity.HasOne<ConfigurationBaseline>().WithMany().HasForeignKey(transition => transition.ConfigurationBaselineId).OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<BaselineReview>(entity =>
+        {
+            entity.ToTable("baseline_reviews");
+            entity.HasKey(review => review.Id);
+            entity.Property(review => review.Id).HasColumnName("id");
+            entity.Property(review => review.ConfigurationBaselineId).HasColumnName("configuration_baseline_id");
+            entity.Property(review => review.Status).HasColumnName("status").HasMaxLength(32).HasConversion<string>();
+            entity.Property(review => review.RequestedBy).HasColumnName("requested_by").HasMaxLength(160);
+            entity.Property(review => review.RequestedAt).HasColumnName("requested_at");
+            entity.Property(review => review.RequestReason).HasColumnName("request_reason").HasMaxLength(500);
+            entity.Property(review => review.DecidedBy).HasColumnName("decided_by").HasMaxLength(160);
+            entity.Property(review => review.DecidedAt).HasColumnName("decided_at");
+            entity.Property(review => review.DecisionReason).HasColumnName("decision_reason").HasMaxLength(500);
+            entity.HasIndex(review => new { review.ConfigurationBaselineId, review.RequestedAt }).HasDatabaseName("ix_baseline_reviews_baseline_requested_at");
+            entity.HasIndex(review => review.ConfigurationBaselineId).IsUnique().HasFilter("status = 'Pending'").HasDatabaseName("ux_baseline_reviews_pending_baseline");
+            entity.HasOne<ConfigurationBaseline>().WithMany().HasForeignKey(review => review.ConfigurationBaselineId).OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<ProjectStandardAssignment>(entity =>
         {
             entity.ToTable("project_standard_assignments");

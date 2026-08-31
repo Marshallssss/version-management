@@ -25,6 +25,9 @@ public static class CatalogEndpoints
         projects.MapGet("/{projectId:guid}/standard", GetProjectStandardAsync);
         projects.MapPost("/{projectId:guid}/standard", AssignProjectStandardAsync).RequireAuthorization("SeniorEngineer");
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/release", ReleaseBaselineAsync).RequireAuthorization("SeniorEngineer");
+        endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/review", RequestBaselineReviewAsync).RequireAuthorization("SeniorEngineer");
+        endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/review/approve", ApproveBaselineReviewAsync).RequireAuthorization(policy => policy.RequireRole("Admin"));
+        endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/review/reject", RejectBaselineReviewAsync).RequireAuthorization(policy => policy.RequireRole("Admin"));
         endpoints.MapGet("/api/v1/baselines/{baselineId:guid}", GetBaselineDetailAsync).RequireAuthorization();
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/items/{itemId:guid}/requirement", SetBaselineItemRequirementAsync).RequireAuthorization("SeniorEngineer");
         endpoints.MapGet("/api/v1/machines", ListMachinesAsync).RequireAuthorization();
@@ -550,10 +553,11 @@ public static class CatalogEndpoints
     private static async Task<IResult> GetBaselineDetailAsync(Guid baselineId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
     {
         await using var database = await factory.CreateDbContextAsync(cancellationToken);
-        var baseline = await database.ConfigurationBaselines.AsNoTracking().Where(item => item.Id == baselineId).Select(item => new { id = item.Id, projectId = item.ProjectId, code = item.BaselineCode, seriesCode = database.BaselineSeries.Where(series => series.Id == item.BaselineSeriesId).Select(series => series.SeriesCode).Single(), revisionNo = item.RevisionNo, state = item.State.ToString(), item.Description, item.CreatedBy, item.CreatedAt, item.ReleasedBy, item.ReleasedAt }).SingleOrDefaultAsync(cancellationToken);
+        var baseline = await database.ConfigurationBaselines.AsNoTracking().Where(item => item.Id == baselineId).Select(item => new { id = item.Id, projectId = item.ProjectId, code = item.BaselineCode, seriesCode = database.BaselineSeries.Where(series => series.Id == item.BaselineSeriesId).Select(series => series.SeriesCode).Single(), revisionNo = item.RevisionNo, state = item.State.ToString(), item.Description, item.CreatedBy, item.CreatedAt, item.ReleasedBy, item.ReleasedAt, item.ApprovedBy }).SingleOrDefaultAsync(cancellationToken);
         if (baseline is null) return Results.NotFound();
         var items = await database.BaselineItems.AsNoTracking().Where(item => item.ConfigurationBaselineId == baselineId).OrderBy(item => item.LineageKeySnapshot).Select(item => new { id = item.Id, parentItemId = item.ParentBaselineItemId, componentId = item.ConfigurationComponentId, versionId = item.ComponentVersionId, versionNumber = item.VersionNumberSnapshot, componentCode = item.ComponentCodeSnapshot, componentName = item.ComponentNameSnapshot, lineageKey = item.LineageKeySnapshot, requirement = item.Requirement.ToString(), item.SortOrder }).ToListAsync(cancellationToken);
-        return TypedResults.Ok(new { baseline, items });
+        var review = await database.BaselineReviews.AsNoTracking().Where(item => item.ConfigurationBaselineId == baselineId).OrderByDescending(item => item.RequestedAt).Select(item => new { id = item.Id, status = item.Status.ToString(), item.RequestedBy, item.RequestedAt, item.RequestReason, item.DecidedBy, item.DecidedAt, item.DecisionReason }).FirstOrDefaultAsync(cancellationToken);
+        return TypedResults.Ok(new { baseline, review, items });
     }
 
     private static async Task<IResult> SetBaselineItemRequirementAsync(Guid baselineId, Guid itemId, SetBaselineItemRequirementRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
@@ -575,6 +579,8 @@ public static class CatalogEndpoints
         if (baseline is null) return Results.NotFound();
         if (!await HasProjectWriteAccessAsync(database, context, baseline.ProjectId, cancellationToken, requireSeniorMembership: true)) return Results.Forbid();
         if (baseline.State != BaselineState.Draft) return Results.Conflict(new { message = "仅可修改草稿基线的必需性。发布后请创建新的 Revision。" });
+        if (await database.BaselineReviews.AnyAsync(candidate => candidate.ConfigurationBaselineId == baselineId && (candidate.Status == BaselineReviewStatus.Pending || candidate.Status == BaselineReviewStatus.Approved), cancellationToken))
+            return Results.Conflict(new { message = "送审或已通过的基线不可修改；如需修改，请先驳回后重新送审。" });
         var item = await database.BaselineItems.SingleOrDefaultAsync(candidate => candidate.Id == itemId && candidate.ConfigurationBaselineId == baselineId, cancellationToken);
         if (item is null) return Results.NotFound();
 
@@ -721,6 +727,8 @@ public static class CatalogEndpoints
         if (baseline is null) return Results.NotFound();
         if (!await HasProjectWriteAccessAsync(database, context, baseline.ProjectId, cancellationToken, requireSeniorMembership: true)) return Results.Forbid();
         if (baseline.State != BaselineState.Draft) return Results.Conflict(new { message = "只有草稿基线可以发布。" });
+        var latestReview = await database.BaselineReviews.Where(item => item.ConfigurationBaselineId == baselineId).OrderByDescending(item => item.RequestedAt).FirstOrDefaultAsync(cancellationToken);
+        if (latestReview?.Status != BaselineReviewStatus.Approved) return Results.Conflict(new { message = "基线须经评审通过后才能发布。" });
         var itemCount = await database.BaselineItems.CountAsync(item => item.ConfigurationBaselineId == baselineId, cancellationToken);
         if (itemCount == 0) return Results.Conflict(new { message = "空基线不能发布。" });
         var blocked = await database.BaselineItems
@@ -745,6 +753,58 @@ public static class CatalogEndpoints
         await database.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return TypedResults.Ok(new { id = baseline.Id, state = baseline.State.ToString(), releasedAt = baseline.ReleasedAt });
+    }
+
+    private static async Task<IResult> RequestBaselineReviewAsync(Guid baselineId, BaselineReviewRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        var validation = ValidateRequired(request.Reason, "送审原因", 500);
+        if (validation is not null) return Results.ValidationProblem(validation);
+        var key = context.Request.Headers["Idempotency-Key"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["提交基线评审必须提供不超过 200 个字符的 Idempotency-Key。"] });
+        var scope = $"baselines.review.request:{baselineId}"; var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request)))); var now = DateTimeOffset.UtcNow;
+        await using var database = await factory.CreateDbContextAsync(cancellationToken);
+        var replay = await database.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
+        if (replay is not null) { if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (replay.Result is not null) return TypedResults.Ok(replay.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
+        var baseline = await database.ConfigurationBaselines.SingleOrDefaultAsync(item => item.Id == baselineId, cancellationToken);
+        if (baseline is null) return Results.NotFound();
+        if (!await HasProjectWriteAccessAsync(database, context, baseline.ProjectId, cancellationToken, requireSeniorMembership: true)) return Results.Forbid();
+        if (baseline.State != BaselineState.Draft) return Results.Conflict(new { message = "只有草稿基线可以送审。" });
+        if (await database.BaselineReviews.AnyAsync(item => item.ConfigurationBaselineId == baselineId && item.Status == BaselineReviewStatus.Pending, cancellationToken)) return Results.Conflict(new { message = "该基线已有待处理的评审。" });
+        var actor = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required.");
+        await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
+        database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) });
+        var review = new BaselineReview { Id = Guid.NewGuid(), ConfigurationBaselineId = baselineId, RequestedBy = actor, RequestedAt = now, RequestReason = request.Reason!.Trim() };
+        database.BaselineReviews.Add(review); AddAuditEvent(database, context, "BaselineReviewRequested", "ConfigurationBaseline", baselineId, new { reviewId = review.Id, reason = review.RequestReason });
+        await database.SaveChangesAsync(cancellationToken); var record = await database.IdempotencyRecords.SingleAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken); record.Status = IdempotencyRecordStatus.Completed; record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = review.Id, status = review.Status.ToString(), requestedAt = review.RequestedAt })); await database.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
+        return TypedResults.Created($"/api/v1/baselines/{baselineId}", new { id = review.Id, status = review.Status.ToString(), requestedAt = review.RequestedAt });
+    }
+
+    private static Task<IResult> ApproveBaselineReviewAsync(Guid baselineId, BaselineReviewRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken) => DecideBaselineReviewAsync(baselineId, request, BaselineReviewStatus.Approved, context, factory, cancellationToken);
+
+    private static Task<IResult> RejectBaselineReviewAsync(Guid baselineId, BaselineReviewRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken) => DecideBaselineReviewAsync(baselineId, request, BaselineReviewStatus.Rejected, context, factory, cancellationToken);
+
+    private static async Task<IResult> DecideBaselineReviewAsync(Guid baselineId, BaselineReviewRequest request, BaselineReviewStatus decision, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        var validation = ValidateRequired(request.Reason, decision == BaselineReviewStatus.Approved ? "通过原因" : "驳回原因", 500);
+        if (validation is not null) return Results.ValidationProblem(validation);
+        var key = context.Request.Headers["Idempotency-Key"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["处理基线评审必须提供不超过 200 个字符的 Idempotency-Key。"] });
+        var scope = $"baselines.review.{decision.ToString().ToLowerInvariant()}:{baselineId}"; var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request)))); var now = DateTimeOffset.UtcNow;
+        await using var database = await factory.CreateDbContextAsync(cancellationToken);
+        var replay = await database.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
+        if (replay is not null) { if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (replay.Result is not null) return TypedResults.Ok(replay.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
+        var baseline = await database.ConfigurationBaselines.SingleOrDefaultAsync(item => item.Id == baselineId, cancellationToken);
+        if (baseline is null) return Results.NotFound();
+        if (baseline.State != BaselineState.Draft) return Results.Conflict(new { message = "只有草稿基线的评审可以处理。" });
+        var review = await database.BaselineReviews.Where(item => item.ConfigurationBaselineId == baselineId && item.Status == BaselineReviewStatus.Pending).SingleOrDefaultAsync(cancellationToken);
+        if (review is null) return Results.Conflict(new { message = "没有待处理的基线评审。" });
+        var actor = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required.");
+        await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
+        database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) });
+        review.Status = decision; review.DecidedBy = actor; review.DecidedAt = now; review.DecisionReason = request.Reason!.Trim(); if (decision == BaselineReviewStatus.Approved) baseline.ApprovedBy = actor;
+        AddAuditEvent(database, context, decision == BaselineReviewStatus.Approved ? "BaselineReviewApproved" : "BaselineReviewRejected", "ConfigurationBaseline", baselineId, new { reviewId = review.Id, reason = review.DecisionReason });
+        await database.SaveChangesAsync(cancellationToken); var record = await database.IdempotencyRecords.SingleAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken); record.Status = IdempotencyRecordStatus.Completed; record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = review.Id, status = review.Status.ToString(), decidedAt = review.DecidedAt })); await database.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
+        return TypedResults.Ok(new { id = review.Id, status = review.Status.ToString(), decidedAt = review.DecidedAt });
     }
 
     private static async Task<IResult> GetProjectStandardAsync(Guid projectId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
@@ -1143,6 +1203,7 @@ public sealed record CloneProjectRequest(string? Code, string? Name, string? Rea
 public sealed record MoveComponentRequest(Guid? ParentComponentId, string? Reason);
 public sealed record CreateBaselineRequest(string? SeriesCode, string? BaselineCode, string? Description, string? Reason);
 public sealed record SetBaselineItemRequirementRequest(string? Requirement, string? Reason);
+public sealed record BaselineReviewRequest(string? Reason);
 public sealed record AssignProjectStandardRequest(Guid ConfigurationBaselineId, string? Reason);
 public sealed record AssignProjectMemberRequest(Guid UserId, string? Role, string? Reason);
 public sealed record CreateMachineRequest(Guid ProjectId, string? SerialNumber, string? Name, string? MachineType, string? Reason);

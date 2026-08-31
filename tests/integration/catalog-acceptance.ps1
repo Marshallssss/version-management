@@ -166,6 +166,19 @@ try { Invoke-RestMethod -WebSession $viewerSession -Method Post -Uri ([uri]::new
 try { Invoke-RestMethod -WebSession $viewerSession -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/standard")) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() } -ContentType 'application/json' -Body (@{ configurationBaselineId = $baseline.id; reason = '自动化项目标准范围拒绝' } | ConvertTo-Json) | Out-Null; throw 'Project Engineer standard assignment unexpectedly succeeded.' } catch { if ($_.Exception.Message -match 'unexpectedly succeeded') { throw }; if ($_.Exception.Response.StatusCode.value__ -ne 403) { throw } }
 $releaseBody = @{ reason = '自动化基线发布验收' } | ConvertTo-Json
 $releaseHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString(); 'X-Correlation-ID' = "release-$suffix" }
+try { Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/baselines/$($baseline.id)/release")) -Headers $releaseHeaders -ContentType 'application/json' -Body $releaseBody | Out-Null; throw 'Unreviewed baseline release unexpectedly succeeded.' } catch { if ($_.Exception.Message -match 'unexpectedly succeeded') { throw }; if ($_.Exception.Response.StatusCode.value__ -ne 409) { throw } }
+$reviewHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString(); 'X-Correlation-ID' = "review-$suffix" }
+$reviewBody = @{ reason = '自动化基线评审送审' } | ConvertTo-Json
+$review = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/baselines/$($baseline.id)/review")) -Headers $reviewHeaders -ContentType 'application/json' -Body $reviewBody
+$reviewReplay = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/baselines/$($baseline.id)/review")) -Headers $reviewHeaders -ContentType 'application/json' -Body $reviewBody
+if ($review.status -ne 'Pending' -or $review.id -ne $reviewReplay.id) { throw 'Baseline review request must be idempotent and pending.' }
+try { Invoke-RestMethod -WebSession $viewerSession -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/baselines/$($baseline.id)/review/approve")) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() } -ContentType 'application/json' -Body (@{ reason = '非管理员不得批准' } | ConvertTo-Json) | Out-Null; throw 'Non-admin baseline review approval unexpectedly succeeded.' } catch { if ($_.Exception.Message -match 'unexpectedly succeeded') { throw }; if ($_.Exception.Response.StatusCode.value__ -ne 403) { throw } }
+$approvalHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString(); 'X-Correlation-ID' = "review-approve-$suffix" }
+$approvalBody = @{ reason = '自动化基线评审通过' } | ConvertTo-Json
+$approval = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/baselines/$($baseline.id)/review/approve")) -Headers $approvalHeaders -ContentType 'application/json' -Body $approvalBody
+$approvalReplay = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/baselines/$($baseline.id)/review/approve")) -Headers $approvalHeaders -ContentType 'application/json' -Body $approvalBody
+$baselineDetail = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/baselines/$($baseline.id)"))
+if ($approval.status -ne 'Approved' -or $approval.id -ne $approvalReplay.id -or $baselineDetail.review.status -ne 'Approved' -or [string]::IsNullOrWhiteSpace($baselineDetail.baseline.approvedBy)) { throw 'Approved review must be visible on the baseline and retain the approver.' }
 $releasedBaseline = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/baselines/$($baseline.id)/release")) -Headers $releaseHeaders -ContentType 'application/json' -Body $releaseBody
 $releasedReplay = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/baselines/$($baseline.id)/release")) -Headers $releaseHeaders -ContentType 'application/json' -Body $releaseBody
 if ($releasedBaseline.state -ne 'Released' -or $releasedBaseline.id -ne $releasedReplay.id) { throw 'Expected idempotent baseline release.' }
@@ -173,6 +186,9 @@ try { Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($Base
 $thirdVersion = Invoke-JsonPost "/api/v1/components/$($component.id)/versions" @{ versionNumber = 'opaque-c'; reason = '自动化版本创建' }
 $secondBaselineBody = @{ seriesCode = "SERIES2-$suffix"; baselineCode = "BL2-$suffix"; description = 'Comparison baseline'; reason = '自动化基线比较验收' } | ConvertTo-Json
 $secondBaseline = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/baselines")) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() } -ContentType 'application/json' -Body $secondBaselineBody
+$secondReviewHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() }
+Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/baselines/$($secondBaseline.id)/review")) -Headers $secondReviewHeaders -ContentType 'application/json' -Body $reviewBody | Out-Null
+Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/baselines/$($secondBaseline.id)/review/approve")) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() } -ContentType 'application/json' -Body $approvalBody | Out-Null
 Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/baselines/$($secondBaseline.id)/release")) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() } -ContentType 'application/json' -Body $releaseBody | Out-Null
 $compare = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/baselines/$($baseline.id)/compare/$($secondBaseline.id)"))
 if (@($compare.items | Where-Object { $_.componentId -eq $component.id -and $_.status -eq 'Changed' -and $_.componentCode -eq 'CONTROL' -and $_.leftVersionNumber -eq 'opaque-b' -and $_.rightVersionNumber -eq 'opaque-c' }).Count -ne 1) { throw 'Baseline comparison must return frozen readable snapshots and changed versions.' }
@@ -260,7 +276,7 @@ if (-not [string]::IsNullOrWhiteSpace($ConnectionString)) {
     $psql = 'C:\Program Files\PostgreSQL\17\bin\psql.exe'
     if (-not (Test-Path $psql)) { throw 'psql.exe is required to verify the baseline immutability trigger.' }
     $psqlConnection = ($ConnectionString -replace ';', ' ') -replace '(?i)\bHost=', 'host=' -replace '(?i)\bPort=', 'port=' -replace '(?i)\bDatabase=', 'dbname=' -replace '(?i)\bUsername=', 'user=' -replace '(?i)\bPassword=', 'password='
-    $result = & $psql $psqlConnection -v ON_ERROR_STOP=1 -c "UPDATE baseline_items SET sort_order = sort_order WHERE configuration_baseline_id = '$($baseline.id)'" 2>&1
+    $result = & $psql $psqlConnection -v ON_ERROR_STOP=1 -c "UPDATE baseline_items SET sort_order = sort_order + 1000 WHERE configuration_baseline_id = '$($baseline.id)'" 2>&1
     if ($LASTEXITCODE -eq 0 -or ($result -join [Environment]::NewLine) -notmatch 'Items of released baseline cannot be modified') {
         throw 'Released baseline item update was not rejected by the PostgreSQL trigger.'
     }

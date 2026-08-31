@@ -1684,6 +1684,15 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - Import Mapping Template。
 - Lightweight Saved Views。
 
+### V1.1 Slice 1A - Baseline Review Workflow
+
+- 状态：开发中。
+- 评审独立于 `ConfigurationBaseline.State`：基线仍只使用 Draft/Released/Deprecated/Archived；评审记录使用 Pending/Approved/Rejected，避免把流程状态混入生命周期。
+- Draft 基线由项目 SeniorEngineer 送审；只有 Admin 可以通过或驳回。每个关键写操作均要求 `reason`、`Idempotency-Key`、actor 与 correlation id，并追加 Audit。
+- 发布命令必须校验最新评审为 Approved；发布后的不可修改约束保持不变。送审或已通过的草稿也禁止修改快照必需性，驳回后才可修改并重新送审。
+- 自动验收：创建 Draft、送审、未批准发布 HTTP 409、管理员批准、批准后发布、幂等重放、审计记录和非管理员拒绝处理评审。
+- 这不是 Phase 2 的双人审批或通用工作流框架；V1.1 只提供基线发布前的最小可审计评审门禁。
+
 ## Phase 2
 
 - Recommendation Scope：Customer/Machine Type/Hardware Revision/Machine。

@@ -33,6 +33,8 @@ public sealed class ConfigHubDbContext(DbContextOptions<ConfigHubDbContext> opti
 
     public DbSet<BaselineLifecycleTransition> BaselineLifecycleTransitions => Set<BaselineLifecycleTransition>();
 
+    public DbSet<BaselineReview> BaselineReviews => Set<BaselineReview>();
+
     public DbSet<ProjectStandardAssignment> ProjectStandardAssignments => Set<ProjectStandardAssignment>();
     public DbSet<Machine> Machines => Set<Machine>();
     public DbSet<MachineTargetAssignment> MachineTargetAssignments => Set<MachineTargetAssignment>();
