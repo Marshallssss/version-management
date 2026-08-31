@@ -5,7 +5,7 @@ import { enqueueNoopJob, getSystemStatus, getSystemVersion, type BackgroundJobSt
 
 const navigation = [
   { id: 'overview', label: '运行总览', available: true },
-  { id: 'jobs', label: '后台任务', available: true },
+  { id: 'operations', label: '系统运维', available: true, adminOnly: true },
   { id: 'projects', label: '项目', available: true },
   { id: 'baselines', label: '基线', available: true },
   { id: 'software', label: '软件版本', available: true },
@@ -108,7 +108,8 @@ function App() {
   const system = useQuery({ queryKey: ['system-version'], queryFn: getSystemVersion })
   const currentUser = useQuery({ queryKey: ['current-user'], queryFn: getCurrentUser, retry: false })
   const isAuthenticated = currentUser.data !== undefined
-  const status = useQuery({ queryKey: ['system-status'], queryFn: getSystemStatus, refetchInterval: 5_000, enabled: isAuthenticated })
+  const isAdmin = currentUser.data?.roles.includes('Admin') === true
+  const status = useQuery({ queryKey: ['system-status'], queryFn: getSystemStatus, refetchInterval: 5_000, enabled: isAdmin })
   const dashboard = useQuery({ queryKey: ['dashboard'], queryFn: getDashboard, refetchInterval: 5_000, enabled: isAuthenticated })
   const projects = useQuery({ queryKey: ['projects'], queryFn: getProjects, enabled: isAuthenticated })
   const users = useQuery({ queryKey: ['users'], queryFn: getUsers, enabled: currentUser.data?.roles.includes('Admin') === true })
@@ -157,7 +158,7 @@ function App() {
   const assignTarget = useMutation({ mutationFn: () => assignMachineTarget(selectedMachineId, targetBaselineId, targetReason), onSuccess: async () => { setTargetBaselineId(''); setTargetReason(''); await queryClient.invalidateQueries({ queryKey: ['machines'] }); await queryClient.invalidateQueries({ queryKey: ['machine-target', selectedMachineId] }); await queryClient.invalidateQueries({ queryKey: ['machine-drift', selectedMachineId] }) } })
   const commitImportMutation = useMutation({ mutationFn: () => commitImport(importBatchId), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ['import-preview', importBatchId] }); await queryClient.invalidateQueries({ queryKey: ['project', selectedProjectId] }) } })
   const signIn = useMutation({ mutationFn: login, onSuccess: async () => { setPassword(''); await queryClient.invalidateQueries({ queryKey: ['current-user'] }) } })
-  const signOut = useMutation({ mutationFn: logout, onSuccess: () => { queryClient.clear(); setSelectedProjectId(null) } })
+  const signOut = useMutation({ mutationFn: logout, onSuccess: () => { queryClient.clear(); setSelectedProjectId(null); setActivePage('overview') } })
   const addComponent = useMutation({
     mutationFn: ({ projectId, code, name, reason, parentComponentId }: { projectId: string; code: string; name: string; reason: string; parentComponentId: string | null }) => createComponent(projectId, { code, name, parentComponentId, reason }),
     onSuccess: async () => {
@@ -202,7 +203,8 @@ function App() {
   const recordFacts = useMutation({ mutationFn: ({ machineId, componentId, versionId, coverage, reason }: { machineId: string; componentId: string; versionId: string; coverage: string; reason: string }) => recordMachineFacts(machineId, { operationType: 'Observation', coverage, sourceType: 'manual-ui', reason, items: [{ componentId, versionId, absent: false, knownInstalledAt: null }] }), onSuccess: async () => { setFactReason(''); await queryClient.invalidateQueries({ queryKey: ['machine-configuration', selectedMachineId] }) } })
 
   const connectivity = system.isSuccess ? 'online' : system.isError ? 'offline' : 'checking'
-  const selectedNavigation = navigation.find((item) => item.id === activePage) ?? navigation[0]
+  const visibleNavigation = navigation.filter((item) => !item.adminOnly || isAdmin)
+  const selectedNavigation = visibleNavigation.find((item) => item.id === activePage) ?? navigation[0]
   const queueCount = (jobStatus: BackgroundJobStatus) => status.data?.queue.find((item) => item.status === jobStatus)?.count ?? 0
 
   return (
@@ -213,7 +215,7 @@ function App() {
           <div><strong>ConfigHub</strong><small>工程配置管理</small></div>
         </div>
         <nav aria-label="主导航">
-          {navigation.map((item, index) => (
+          {visibleNavigation.map((item, index) => (
             <button className={item.id === activePage ? 'nav-item active' : 'nav-item'} key={item.id} type="button" onClick={() => setActivePage(!isAuthenticated && item.id !== 'projects' ? 'projects' : item.id)}>
               <span>{String(index + 1).padStart(2, '0')}</span>{item.label}{!item.available && <em>待实现</em>}
             </button>
@@ -235,8 +237,8 @@ function App() {
                 <div className="hero-copy">
                   <span className="section-index">本机基础设施</span>
                   <h2>系统已经就绪</h2>
-                  <p>Host、PostgreSQL 和后台 Worker 正在运行。你可以提交连通性任务，确认任务会进入真实队列并由 Worker 完成处理。</p>
-                  <button className="primary-action" type="button" onClick={() => setActivePage('jobs')}>打开后台任务</button>
+                  <p>此处用于查看服务身份、配置状态与运行拓扑。后台队列仅在系统运维中供管理员诊断和验收。</p>
+                  {isAdmin && <button className="primary-action" type="button" onClick={() => setActivePage('operations')}>打开系统运维</button>}
                 </div>
                 <div className="topology" aria-label="当前运行拓扑">
                   <div className="topology-node primary">ConfigHub 服务端</div><div className="topology-line" />
@@ -246,25 +248,25 @@ function App() {
               </section>
               <section className="status-panel">
                 <div className="panel-heading"><div><span className="section-index">实时运行信息</span><h3>服务身份</h3></div><button type="button" onClick={() => void system.refetch()} disabled={system.isFetching}>{system.isFetching ? '正在刷新' : '刷新'}</button></div>
-                <dl className="runtime-list"><div><dt>产品</dt><dd>{system.data?.product ?? '—'}</dd></div><div><dt>版本</dt><dd>{system.data?.version ?? '—'}</dd></div><div><dt>接口版本</dt><dd>{system.data?.apiVersion ?? '—'}</dd></div><div><dt>服务时间</dt><dd>{formatTime(status.data?.serverTime)}</dd></div></dl>
+                <dl className="runtime-list"><div><dt>产品</dt><dd>{system.data?.product ?? '—'}</dd></div><div><dt>版本</dt><dd>{system.data?.version ?? '—'}</dd></div><div><dt>接口版本</dt><dd>{system.data?.apiVersion ?? '—'}</dd></div><div><dt>服务时间</dt><dd>{formatTime(system.data?.serverTime)}</dd></div></dl>
               </section>
               <section className="status-panel">
                 <div className="panel-heading"><div><span className="section-index">配置总览</span><h3>机台配置状态</h3></div><span className="count">{dashboard.data?.machineCount ?? '—'}</span></div>
                 <dl className="runtime-list"><div><dt>机台总数</dt><dd>{dashboard.data?.machineCount ?? '—'}</dd></div><div><dt>配置匹配</dt><dd>{dashboard.data?.matchedCount ?? '—'}</dd></div><div><dt>配置不匹配</dt><dd>{dashboard.data?.mismatchCount ?? '—'}</dd></div><div><dt>状态未知</dt><dd>{dashboard.data?.unknownCount ?? '—'}</dd></div><div><dt>严重风险</dt><dd>{dashboard.data?.criticalRiskCount ?? '—'}</dd></div></dl>
               </section>
-              <section className="telemetry-panel queue-panel">
+              {isAdmin && <section className="telemetry-panel queue-panel">
                 <div className="panel-heading"><div><span className="section-index">队列概览</span><h3>后台任务</h3></div><span className="count">{status.data?.jobs.length ?? 0}</span></div>
                 <div className="queue-summary"><div><span>等待执行</span><b>{queueCount('Pending')}</b></div><div><span>执行中</span><b>{queueCount('Processing')}</b></div><div><span>已完成</span><b>{queueCount('Completed')}</b></div><div><span>失败</span><b>{queueCount('Failed')}</b></div></div>
-              </section>
+              </section>}
             </>}
 
-            {activePage === 'jobs' && <>
+            {activePage === 'operations' && isAdmin && <>
               <section className="hero-panel job-submit-panel">
-                <div className="hero-copy"><span className="section-index">真实队列操作</span><h2>提交连通性任务</h2><p>任务会写入 PostgreSQL，由正在运行的 Worker 领取并完成。可用于验证后台处理链路。</p></div>
+                <div className="hero-copy"><span className="section-index">管理员诊断</span><h2>后台队列运维</h2><p>连通性任务会写入 PostgreSQL 并由 Worker 领取完成，用于部署验收、故障定位和队列重试观察。</p></div>
                 <div className="job-form">
                   <label htmlFor="job-note">任务说明</label>
-                  <textarea id="job-note" value={note} maxLength={500} placeholder="例如：验证本机 Worker 连通性" onChange={(event) => setNote(event.target.value)} />
-                  <button className="primary-action" type="button" onClick={() => enqueue.mutate(note)} disabled={enqueue.isPending}>{enqueue.isPending ? '正在提交' : '提交任务'}</button>
+                  <textarea id="job-note" value={note} maxLength={500} placeholder="例如：部署后 Worker 连通性验收" onChange={(event) => setNote(event.target.value)} />
+                  <button className="primary-action" type="button" onClick={() => enqueue.mutate(note)} disabled={enqueue.isPending}>{enqueue.isPending ? '正在提交' : '提交连通性任务'}</button>
                   {enqueue.isSuccess && <p className="success-strip">任务已提交，Worker 通常会在几秒内完成。</p>}
                   {enqueue.isError && <p className="error-strip">{enqueue.error.message}</p>}
                 </div>

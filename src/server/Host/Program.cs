@@ -84,6 +84,7 @@ builder.Services.ConfigureApplicationCookie(options =>
 });
 builder.Services.AddAuthorizationBuilder().AddPolicy("Engineer", policy => policy.RequireRole("Engineer", "SeniorEngineer", "Admin"));
 builder.Services.AddAuthorizationBuilder().AddPolicy("SeniorEngineer", policy => policy.RequireRole("SeniorEngineer", "Admin"));
+builder.Services.AddAuthorizationBuilder().AddPolicy("Admin", policy => policy.RequireRole("Admin"));
 
 builder.Services
     .AddHealthChecks()
@@ -185,7 +186,7 @@ app.MapGet("/api/v1/system/status", async (
         .ToListAsync(cancellationToken);
 
     return TypedResults.Ok(new { queue, jobs, serverTime = DateTimeOffset.UtcNow });
-}).RequireAuthorization();
+}).RequireAuthorization("Admin");
 
 app.MapPost("/api/v1/system/jobs/noop", async (
     EnqueueNoopJobRequest request,
@@ -259,7 +260,7 @@ app.MapPost("/api/v1/system/jobs/noop", async (
     await transaction.CommitAsync(cancellationToken);
 
     return TypedResults.Accepted($"/api/v1/system/jobs/{job.Id}", new { id = job.Id });
-}).RequireAuthorization("Engineer");
+}).RequireAuthorization("Admin");
 
 app.MapCatalogEndpoints();
 app.MapAuthEndpoints();
