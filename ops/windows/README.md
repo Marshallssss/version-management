@@ -37,6 +37,29 @@ Run from the repository root on a build machine:
 pwsh .\ops\windows\publish.ps1 -Version 0.1.0
 ```
 
+### Restricted-proxy or offline build machines
+
+The target server must only receive a completed release package. It must not run `dotnet restore`, `dotnet publish`, `npm ci`, or download the .NET Hosting Bundle from the public internet.
+
+For a company package proxy, copy `ops\windows\nuget.config.example` outside the repository, replace the placeholder URL with the internal NuGet mirror, and pass it explicitly. Supply the internal npm registry in the same command:
+
+```powershell
+pwsh .\ops\windows\publish.ps1 `
+  -Version 0.1.0 `
+  -NuGetConfigFile C:\Build\confighub.nuget.config `
+  -NpmRegistry https://npm.company.example/
+```
+
+For an isolated build machine whose NuGet cache was pre-warmed for the release Runtime (normally `win-x64`) and whose `src\web\node_modules` came from approved internal sources, build the SPA once, then package without any restore or frontend download:
+
+```powershell
+dotnet restore .\src\server\ConfigHub.slnx --runtime win-x64
+npm --prefix .\src\web run build
+pwsh .\ops\windows\publish.ps1 -Version 0.1.0 -SkipRestore -SkipFrontendBuild
+```
+
+Obtain the .NET 10 Hosting Bundle for the target server through the approved internal software distribution channel. Keep proxy credentials in the CI/build-agent credential store or the approved NuGet/npm configuration location, never in this repository or release package.
+
 Copy `artifacts\release\0.1.0` to the server, then run elevated:
 
 ```powershell
