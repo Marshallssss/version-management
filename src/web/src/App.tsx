@@ -4,6 +4,7 @@ import { assignMachineTarget, assignProjectMember, assignProjectStandard, change
 import { enqueueNoopJob, getSystemStatus, getSystemVersion, type BackgroundJobStatus } from './system-api'
 import { RollbackFactPanel } from './RollbackFactPanel'
 import { BulkTargetPanel } from './BulkTargetPanel'
+import { BulkFactPanel } from './BulkFactPanel'
 
 const navigation = [
   { id: 'overview', label: '运行总览', available: true },
@@ -380,6 +381,7 @@ function App() {
         )}
         {activePage === 'machines' && selectedMachine && <RollbackFactPanel machineId={selectedMachine.id} components={machineProjectDetail.data?.components ?? []} />}
         {activePage === 'machines' && projects.data && <BulkTargetPanel projects={projects.data} />}
+        {activePage === 'deployments' && projects.data && <BulkFactPanel projects={projects.data} />}
       </main>
     </div>
   )

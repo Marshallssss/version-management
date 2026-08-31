@@ -25,6 +25,7 @@ public static class CatalogEndpoints
         projects.MapGet("/{projectId:guid}/standard", GetProjectStandardAsync);
         projects.MapPost("/{projectId:guid}/standard", AssignProjectStandardAsync).RequireAuthorization("SeniorEngineer");
         projects.MapPost("/{projectId:guid}/bulk-machine-targets", AssignBulkMachineTargetsAsync).RequireAuthorization("SeniorEngineer");
+        projects.MapPost("/{projectId:guid}/bulk-facts", RecordBulkFactsAsync).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/release", ReleaseBaselineAsync).RequireAuthorization("SeniorEngineer");
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/review", RequestBaselineReviewAsync).RequireAuthorization("SeniorEngineer");
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/review/approve", ApproveBaselineReviewAsync).RequireAuthorization(policy => policy.RequireRole("Admin"));
@@ -182,6 +183,69 @@ public static class CatalogEndpoints
         return TypedResults.Ok(new { id = operation.Id, succeeded, skipped });
     }
 
+    private static async Task<IResult> RecordBulkFactsAsync(Guid projectId, BulkRecordFactsRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        if (request.MachineIds is null || request.MachineIds.Count == 0 || request.MachineIds.Distinct().Count() != request.MachineIds.Count || string.IsNullOrWhiteSpace(request.Reason) || request.Items is null || request.Items.Count == 0 || !Enum.TryParse<DeploymentOperationType>(request.OperationType, true, out var operation) || !Enum.TryParse<ObservationCoverage>(request.Coverage, true, out var coverage) || coverage != ObservationCoverage.Partial || operation is DeploymentOperationType.Rollback or DeploymentOperationType.Correction)
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = ["批量事实必须选择不重复机台、局部覆盖、可批量操作类型、至少一项事实并填写原因。"] });
+
+        var key = context.Request.Headers["Idempotency-Key"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["批量记录事实必须提供不超过 200 个字符的 Idempotency-Key。"] });
+
+        var scope = $"bulk-machine-facts:{projectId}";
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request))));
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var replay = await db.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
+        if (replay is not null)
+        {
+            if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" });
+            if (replay.Result is not null) return TypedResults.Ok(replay.Result.RootElement.Clone());
+            return Results.Conflict(new { message = "该请求仍在处理。" });
+        }
+
+        if (!await HasProjectWriteAccessAsync(db, context, projectId, cancellationToken)) return Results.Forbid();
+        var machines = await db.Machines.Where(item => request.MachineIds.Contains(item.Id) && item.ProjectId == projectId).Select(item => item.Id).ToArrayAsync(cancellationToken);
+        if (machines.Length != request.MachineIds.Count) return Results.ValidationProblem(new Dictionary<string, string[]> { ["machineIds"] = ["所有机台必须存在且属于该项目。"] });
+
+        var now = DateTimeOffset.UtcNow;
+        var actor = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required.");
+        var bulkOperation = new BulkOperation { Id = Guid.NewGuid(), ProjectId = projectId, OperationType = BulkOperationType.MachineFactRecording, Status = BulkOperationStatus.Running, RequestedBy = actor, Reason = request.Reason.Trim(), RequestedAt = now };
+        await using (var transaction = await db.Database.BeginTransactionAsync(cancellationToken))
+        {
+            db.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) });
+            db.BulkOperations.Add(bulkOperation);
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+
+        var singleRequest = new RecordFactsRequest(request.OperationType, request.Coverage, "bulk-ui", null, request.EffectiveAt, bulkOperation.Reason, request.Items);
+        var succeeded = 0;
+        var failed = 0;
+        foreach (var machineId in machines)
+        {
+            var machineKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{key}:{machineId}")));
+            var result = await RecordFactsCoreAsync(machineId, singleRequest, context, factory, machineKey, cancellationToken);
+            var statusCode = (result as IStatusCodeHttpResult)?.StatusCode ?? StatusCodes.Status500InternalServerError;
+            var itemStatus = statusCode is >= 200 and < 300 ? BulkOperationItemStatus.Succeeded : BulkOperationItemStatus.Failed;
+            succeeded += itemStatus == BulkOperationItemStatus.Succeeded ? 1 : 0;
+            failed += itemStatus == BulkOperationItemStatus.Failed ? 1 : 0;
+
+            await using var itemDb = await factory.CreateDbContextAsync(cancellationToken);
+            itemDb.BulkOperationItems.Add(new BulkOperationItem { Id = Guid.NewGuid(), BulkOperationId = bulkOperation.Id, MachineId = machineId, Status = itemStatus, Detail = itemStatus == BulkOperationItemStatus.Succeeded ? "已通过单机事实命令记录。" : $"单机事实命令返回 HTTP {statusCode}。" });
+            await itemDb.SaveChangesAsync(cancellationToken);
+        }
+
+        await using var completionDb = await factory.CreateDbContextAsync(cancellationToken);
+        var completedOperation = await completionDb.BulkOperations.SingleAsync(item => item.Id == bulkOperation.Id, cancellationToken);
+        completedOperation.Status = failed == 0 ? BulkOperationStatus.Succeeded : BulkOperationStatus.Failed;
+        completedOperation.CompletedAt = DateTimeOffset.UtcNow;
+        AddAuditEvent(completionDb, context, "BulkMachineFactsRecorded", "BulkOperation", completedOperation.Id, new { projectId, operation = request.OperationType, coverage = request.Coverage, machineCount = machines.Length, succeeded, failed, reason = completedOperation.Reason });
+        var record = await completionDb.IdempotencyRecords.SingleAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
+        record.Status = IdempotencyRecordStatus.Completed;
+        record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = completedOperation.Id, succeeded, failed }));
+        await completionDb.SaveChangesAsync(cancellationToken);
+        return TypedResults.Ok(new { id = completedOperation.Id, succeeded, failed });
+    }
+
     private static async Task<IResult> GetMachineTargetHistoryAsync(Guid machineId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
     {
         await using var database = await factory.CreateDbContextAsync(cancellationToken);
@@ -203,10 +267,13 @@ public static class CatalogEndpoints
         return TypedResults.Ok(history);
     }
 
-    private static async Task<IResult> RecordFactsAsync(Guid machineId, RecordFactsRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    private static Task<IResult> RecordFactsAsync(Guid machineId, RecordFactsRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+        => RecordFactsCoreAsync(machineId, request, context, factory, context.Request.Headers["Idempotency-Key"].FirstOrDefault(), cancellationToken);
+
+    private static async Task<IResult> RecordFactsCoreAsync(Guid machineId, RecordFactsRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, string? idempotencyKey, CancellationToken cancellationToken)
     {
         if (!Enum.TryParse<DeploymentOperationType>(request.OperationType, true, out var operation) || !Enum.TryParse<ObservationCoverage>(request.Coverage, true, out var coverage) || string.IsNullOrWhiteSpace(request.SourceType) || string.IsNullOrWhiteSpace(request.Reason) || request.Items is null || request.Items.Count == 0) return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = ["必须提供操作类型、覆盖范围、来源、原因和事实项。"] });
-        var key = context.Request.Headers["Idempotency-Key"].FirstOrDefault(); if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["记录事实必须提供不超过 200 个字符的 Idempotency-Key。"] });
+        var key = idempotencyKey; if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["记录事实必须提供不超过 200 个字符的 Idempotency-Key。"] });
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request)))); var scope = $"deployment-facts:{machineId}";
         await using var db = await factory.CreateDbContextAsync(cancellationToken); var existing = await db.IdempotencyRecords.SingleOrDefaultAsync(x => x.Scope == scope && x.IdempotencyKey == key, cancellationToken);
         if (existing is not null) { if (existing.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (existing.Result is not null) return TypedResults.Ok(existing.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
@@ -1259,6 +1326,7 @@ public sealed record CreateMachineRequest(Guid ProjectId, string? SerialNumber, 
 public sealed record AssignMachineTargetRequest(Guid ConfigurationBaselineId, string? Reason);
 public sealed record AssignBulkMachineTargetsRequest(Guid ConfigurationBaselineId, List<Guid>? MachineIds, string? Reason);
 public sealed record RecordFactsRequest(string? OperationType, string? Coverage, string? SourceType, string? ExternalEventId, DateTimeOffset? EffectiveAt, string? Reason, List<RecordFactItem>? Items, Guid? CorrectsDeploymentBatchId = null);
+public sealed record BulkRecordFactsRequest(List<Guid>? MachineIds, string? OperationType, string? Coverage, DateTimeOffset? EffectiveAt, string? Reason, List<RecordFactItem>? Items);
 public sealed record RebuildDriftSummariesRequest(string? Reason);
 public sealed record RecordFactItem(Guid ComponentId, Guid? VersionId, bool Absent, DateTimeOffset? KnownInstalledAt);
 public sealed record StageImportRequest(Guid ProjectId, string? SourceFileName, string? Reason, List<StageImportRow>? Rows);
