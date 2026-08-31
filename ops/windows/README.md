@@ -29,6 +29,8 @@ Managed File Store           NAS / Network Share Backups
 
 The application and migration connection strings are never stored in these scripts or release packages. Normal Host/Worker traffic uses the application role; only the explicit `--migrate` command uses the migration role that can install `btree_gist` and change schema.
 
+`preflight.ps1` 会自动识别 `%LOCALAPPDATA%\ConfigHub\PostgreSQL17\bin` 和常见的 Program Files 安装目录；若 PostgreSQL 位于其他位置，传入 `-PostgreSqlBinDirectory <bin目录>`。客户端工具可用不等于 PostgreSQL Windows Service 已完成验收，两项会分别报告。
+
 ## Release and initial install
 
 Run from the repository root on a build machine:

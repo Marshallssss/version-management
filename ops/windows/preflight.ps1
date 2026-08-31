@@ -7,6 +7,7 @@ param(
     [int]$HttpsPort = 443,
     [string]$WorkerServiceName = 'ConfigHub.Worker',
     [string]$PostgreSqlServicePattern = 'postgresql*',
+    [string]$PostgreSqlBinDirectory,
     [string]$CertificateThumbprint,
     [string]$BackupRoot,
     [switch]$ReportOnly
@@ -53,8 +54,32 @@ $aspNetCoreModule = Test-Path 'HKLM:\SOFTWARE\Microsoft\IIS Extensions\AspNetCor
 Add-Check '.NET 10 Hosting Bundle' ($null -ne $aspNetCoreRuntime -and $aspNetCoreModule) "Runtime: $aspNetCoreRuntime；ANCM: $aspNetCoreModule"
 
 $postgresCommands = @('pg_dump', 'pg_restore', 'createdb', 'dropdb')
-$missingCommands = @($postgresCommands | Where-Object { $null -eq (Get-Command $_ -ErrorAction SilentlyContinue) })
-$postgresCommandDetail = if ($missingCommands.Count -eq 0) { 'pg_dump、pg_restore、createdb、dropdb 均可用。' } else { "缺少：$($missingCommands -join '、')" }
+$postgresBinCandidates = @()
+if (-not [string]::IsNullOrWhiteSpace($PostgreSqlBinDirectory)) {
+    $postgresBinCandidates += $PostgreSqlBinDirectory
+}
+$postgresBinCandidates += Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)) 'ConfigHub\PostgreSQL17\bin'
+$postgresBinCandidates += Get-ChildItem (Join-Path $env:ProgramFiles 'PostgreSQL') -Directory -ErrorAction SilentlyContinue |
+    ForEach-Object { Join-Path $_.FullName 'bin' }
+
+$postgresBinDirectory = $null
+foreach ($candidateDirectory in $postgresBinCandidates) {
+    if (-not (Test-Path $candidateDirectory -PathType Container)) { continue }
+    $missingFromCandidate = @($postgresCommands | Where-Object {
+        -not (Test-Path (Join-Path $candidateDirectory "$_.exe") -PathType Leaf)
+    })
+    if ($missingFromCandidate.Count -eq 0) {
+        $postgresBinDirectory = $candidateDirectory
+        break
+    }
+}
+$missingCommands = @($postgresCommands | Where-Object {
+    $candidate = if ($null -ne $postgresBinDirectory) { Join-Path $postgresBinDirectory "$_.exe" } else { $null }
+    $null -eq $candidate -and $null -eq (Get-Command $_ -ErrorAction SilentlyContinue)
+})
+$postgresCommandDetail = if ($missingCommands.Count -eq 0) {
+    if ($null -ne $postgresBinDirectory) { "pg_dump、pg_restore、createdb、dropdb 均可用：$postgresBinDirectory" } else { 'pg_dump、pg_restore、createdb、dropdb 均可通过 PATH 调用。' }
+} else { "缺少：$($missingCommands -join '、')；可传入 -PostgreSqlBinDirectory 指向 PostgreSQL bin 目录。" }
 Add-Check 'PostgreSQL 客户端工具' ($missingCommands.Count -eq 0) $postgresCommandDetail
 $postgresService = @(Get-Service -Name $PostgreSqlServicePattern -ErrorAction SilentlyContinue)
 $postgresServiceDetail = if ($postgresService.Count -gt 0) { ($postgresService | ForEach-Object { "$($_.Name): $($_.Status)" }) -join '; ' } else { "未找到服务：$PostgreSqlServicePattern" }
