@@ -9,6 +9,7 @@ $ErrorActionPreference = 'Stop'
 
 $requiredScripts = @(
     'Common.ps1',
+    'preflight.ps1',
     'publish.ps1',
     'install.ps1',
     'start.ps1',
@@ -32,6 +33,11 @@ foreach ($scriptName in $requiredScripts) {
     if ($errors.Count -gt 0) {
         throw "Windows operation script parse error in ${scriptName}: $($errors[0].Message)"
     }
+}
+
+$readinessReport = & (Join-Path $OperationsPath 'preflight.ps1') -Stage PreInstall -HostName localhost -BackupRoot $env:TEMP -ReportOnly
+if ($readinessReport.Count -lt 10 -or @($readinessReport | Where-Object { $_.Check -eq 'Windows Server' }).Count -ne 1 -or @($readinessReport | Where-Object { $_.Check -eq 'TLS 证书' }).Count -ne 1) {
+    throw 'Windows production preflight must emit its structured readiness report in ReportOnly mode.'
 }
 
 Write-Host "Windows operations preflight passed for $($requiredScripts.Count) scripts."

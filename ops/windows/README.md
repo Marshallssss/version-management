@@ -48,6 +48,20 @@ pwsh .\ops\windows\install.ps1 `
 
 The installer creates one IIS Site/Application Pool and one Windows Worker service. It does not install prerequisites, create certificates, create database users or manufacture secrets.
 
+## Target server preflight
+
+Before installation, run the read-only preflight in an elevated PowerShell session. It records no secrets and does not alter IIS, services, PostgreSQL, certificates or the backup path.
+
+```powershell
+pwsh .\ops\windows\preflight.ps1 `
+  -Stage PreInstall `
+  -HostName config-server `
+  -CertificateThumbprint '<thumbprint>' `
+  -BackupRoot \\nas\Engineering\ConfigHub
+```
+
+After installation, run the same command with `-Stage PostInstall` to additionally check the Worker service and HTTPS readiness endpoint. The script emits structured check objects, so the result can be retained with `| ConvertTo-Json` or `| Export-Csv`. Use `-ReportOnly` only when collecting an incomplete environment report; a normal preflight exits nonzero on any failed check.
+
 ## Nightly online backup
 
 Nightly backup does not stop IIS, API or Worker. Attachments are immutable and committed after their final file name exists, so a database-first dump plus file-store copy is recoverable as one manifest set.
