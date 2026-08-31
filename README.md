@@ -13,6 +13,7 @@
 - 本地身份体验已补强：登录使用用户名而非必须邮箱；密码规则为 6 位以上；Bootstrap Admin 支持本地一键启动脚本初始化和密码重置。
 - Step 3 已交付：Project、Component Tree、opaque Version Sequence、独立 Lifecycle、Project Clone、中文版本详情与自动化验收。
 - Step 4 至 Step 9 Core V1 已交付：不可变 Baseline、显式 Machine Target、FULL/PARTIAL Facts 投影、Drift/Risk/Compare、Trace/Search/Dashboard，以及只经 Domain Command 提交的导入。
+- **Pilot Release Freeze：`0.2.0-pilot.1`**。当前功能已固定为内部试点基线；Release build（0 warning / 0 error）、真实 PostgreSQL 17 Migration、完整目录/后台任务回归、浏览器兼容、Windows 运维预检、发布 manifest（77 文件 SHA-256）和发布版 SPA health 均已通过。V1.1 新功能在试点结论前暂停。
 - 所有重要写入均要求 actor、reason、correlation id 和 Idempotency-Key，并写入审计事件；进入下一阶段前持续执行 Release build、真实 Migration 与集成验收。
 - Step 11 试点执行单见 `docs/operations/internal-pilot.md`；它在生产集成通过后引导真实 Project、20–50 台 Machine、现有版本清单和工程师验收。
 

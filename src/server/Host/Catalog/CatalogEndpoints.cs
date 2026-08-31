@@ -317,7 +317,12 @@ public static class CatalogEndpoints
     private static async Task<IResult> GetMachineConfigurationAsync(Guid machineId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        return TypedResults.Ok(await db.MachineCurrentConfigurations.AsNoTracking().Where(x => x.MachineId == machineId).OrderBy(x => x.ConfigurationComponentId).Select(x => new { componentId = x.ConfigurationComponentId, versionId = x.ComponentVersionId, state = x.State.ToString(), stateEffectiveAt = x.StateEffectiveAt, knownInstalledAt = x.KnownInstalledAt }).ToListAsync(cancellationToken));
+        var items = await db.MachineCurrentConfigurations.AsNoTracking().Where(x => x.MachineId == machineId).OrderBy(x => x.ConfigurationComponentId).ToListAsync(cancellationToken);
+        var componentIds = items.Select(item => item.ConfigurationComponentId).ToArray();
+        var versionIds = items.Where(item => item.ComponentVersionId is not null).Select(item => item.ComponentVersionId!.Value).ToArray();
+        var components = await db.ConfigurationComponents.AsNoTracking().Where(item => componentIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, item => new { item.ComponentCode, item.Name }, cancellationToken);
+        var versions = await db.ComponentVersions.AsNoTracking().Where(item => versionIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, item => item.VersionNumber, cancellationToken);
+        return TypedResults.Ok(items.Select(item => new { componentId = item.ConfigurationComponentId, componentCode = components[item.ConfigurationComponentId].ComponentCode, componentName = components[item.ConfigurationComponentId].Name, versionId = item.ComponentVersionId, versionNumber = item.ComponentVersionId is null ? null : versions[item.ComponentVersionId.Value], state = item.State.ToString(), stateEffectiveAt = item.StateEffectiveAt, knownInstalledAt = item.KnownInstalledAt }));
     }
 
     private static async Task<IResult> GetMachineConfigurationAtAsync(Guid machineId, DateTimeOffset? at, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
@@ -382,7 +387,10 @@ public static class CatalogEndpoints
         var expected = await db.BaselineItems.AsNoTracking().Where(x => x.ConfigurationBaselineId == target).ToDictionaryAsync(x => x.ConfigurationComponentId, cancellationToken);
         var actual = await db.MachineCurrentConfigurations.AsNoTracking().Where(x => x.MachineId == machineId).ToDictionaryAsync(x => x.ConfigurationComponentId, cancellationToken);
         var ids = expected.Keys.Union(actual.Keys).ToArray(); var items = new List<object>(); var mismatch = false; var critical = false;
-        foreach (var componentId in ids) { expected.TryGetValue(componentId, out var wanted); actual.TryGetValue(componentId, out var found); var status = wanted is null ? "Extra" : found is null || found.State == CurrentConfigurationState.Absent ? "Missing" : wanted.ComponentVersionId == found.ComponentVersionId ? "Matched" : "Mismatch"; if (status != "Matched") mismatch = true; var versionId = found?.ComponentVersionId ?? wanted?.ComponentVersionId; if (versionId is not null && await db.ComponentVersions.AnyAsync(x => x.Id == versionId && x.Safety == VersionSafety.Blocked, cancellationToken)) critical = true; items.Add(new { componentId, status, expectedVersionId = wanted?.ComponentVersionId, actualVersionId = found?.ComponentVersionId }); }
+        var components = await db.ConfigurationComponents.AsNoTracking().Where(component => ids.Contains(component.Id)).ToDictionaryAsync(component => component.Id, component => new { component.ComponentCode, component.Name }, cancellationToken);
+        var versionIds = expected.Values.Select(item => item.ComponentVersionId).Concat(actual.Values.Where(item => item.ComponentVersionId is not null).Select(item => item.ComponentVersionId!.Value)).Distinct().ToArray();
+        var versions = await db.ComponentVersions.AsNoTracking().Where(version => versionIds.Contains(version.Id)).ToDictionaryAsync(version => version.Id, version => new { version.VersionNumber, version.Safety }, cancellationToken);
+        foreach (var componentId in ids) { expected.TryGetValue(componentId, out var wanted); actual.TryGetValue(componentId, out var found); var status = wanted is null ? "Extra" : found is null || found.State == CurrentConfigurationState.Absent ? "Missing" : wanted.ComponentVersionId == found.ComponentVersionId ? "Matched" : "Mismatch"; if (status != "Matched") mismatch = true; var versionId = found?.ComponentVersionId ?? wanted?.ComponentVersionId; if (versionId is not null && versions[versionId.Value].Safety == VersionSafety.Blocked) critical = true; items.Add(new { componentId, componentCode = components[componentId].ComponentCode, componentName = components[componentId].Name, status, expectedVersionId = wanted?.ComponentVersionId, expectedVersionNumber = wanted is null ? null : versions[wanted.ComponentVersionId].VersionNumber, actualVersionId = found?.ComponentVersionId, actualVersionNumber = found?.ComponentVersionId is null ? null : versions[found.ComponentVersionId.Value].VersionNumber }); }
         return TypedResults.Ok(new { matchStatus = mismatch ? "Mismatch" : "Matched", riskSeverity = critical ? "Critical" : "None", items });
     }
 
@@ -404,17 +412,19 @@ public static class CatalogEndpoints
         var left = states.Where(state => state.MachineId == leftMachineId).ToDictionary(state => state.ConfigurationComponentId);
         var right = states.Where(state => state.MachineId == rightMachineId).ToDictionary(state => state.ConfigurationComponentId);
         var versionIds = states.Where(state => state.ComponentVersionId is not null).Select(state => state.ComponentVersionId!.Value).Distinct().ToArray();
-        var blocked = await db.ComponentVersions.AsNoTracking().Where(version => versionIds.Contains(version.Id) && version.Safety == VersionSafety.Blocked).Select(version => version.Id).ToArrayAsync(cancellationToken);
+        var versions = await db.ComponentVersions.AsNoTracking().Where(version => versionIds.Contains(version.Id)).ToDictionaryAsync(version => version.Id, version => new { version.VersionNumber, version.Safety }, cancellationToken);
+        var componentIds = left.Keys.Union(right.Keys).ToArray();
+        var components = await db.ConfigurationComponents.AsNoTracking().Where(component => componentIds.Contains(component.Id)).ToDictionaryAsync(component => component.Id, component => new { component.ComponentCode, component.Name }, cancellationToken);
         var items = left.Keys.Union(right.Keys).OrderBy(componentId => componentId).Select(componentId =>
         {
             left.TryGetValue(componentId, out var before); right.TryGetValue(componentId, out var after);
             var leftVersion = before?.State == CurrentConfigurationState.Present ? before.ComponentVersionId : null;
             var rightVersion = after?.State == CurrentConfigurationState.Present ? after.ComponentVersionId : null;
             var status = leftVersion == rightVersion ? "Matched" : leftVersion is null ? "RightOnly" : rightVersion is null ? "LeftOnly" : "Mismatch";
-            return new { componentId, status, leftVersionId = leftVersion, rightVersionId = rightVersion };
+            return new { componentId, componentCode = components[componentId].ComponentCode, componentName = components[componentId].Name, status, leftVersionId = leftVersion, leftVersionNumber = leftVersion is null ? null : versions[leftVersion.Value].VersionNumber, rightVersionId = rightVersion, rightVersionNumber = rightVersion is null ? null : versions[rightVersion.Value].VersionNumber };
         }).ToArray();
         var matchStatus = items.All(item => item.status == "Matched") ? "Matched" : "Mismatch";
-        var riskSeverity = items.Any(item => (item.leftVersionId is not null && blocked.Contains(item.leftVersionId.Value)) || (item.rightVersionId is not null && blocked.Contains(item.rightVersionId.Value))) ? "Critical" : "None";
+        var riskSeverity = items.Any(item => (item.leftVersionId is not null && versions[item.leftVersionId.Value].Safety == VersionSafety.Blocked) || (item.rightVersionId is not null && versions[item.rightVersionId.Value].Safety == VersionSafety.Blocked)) ? "Critical" : "None";
         return TypedResults.Ok(new { leftMachineId, rightMachineId, matchStatus, riskSeverity, items });
     }
 
@@ -427,17 +437,19 @@ public static class CatalogEndpoints
         var historicalEvents = await db.DeploymentItems.AsNoTracking().Join(db.DeploymentBatches.AsNoTracking(), item => item.DeploymentBatchId, batch => batch.Id, (item, batch) => new { item, batch }).Where(entry => entry.batch.MachineId == machineId && entry.batch.EffectiveAt <= at.Value).OrderBy(entry => entry.batch.EffectiveAt).ThenBy(entry => entry.batch.RecordedAt).ThenBy(entry => entry.item.Id).Select(entry => new { componentId = entry.item.ConfigurationComponentId, versionId = entry.item.NewComponentVersionId, absent = entry.item.Result == DeploymentItemResult.Absent }).ToListAsync(cancellationToken);
         var historical = historicalEvents.GroupBy(entry => entry.componentId).ToDictionary(group => group.Key, group => group.Last());
         var versionIds = current.Values.Where(state => state.State == CurrentConfigurationState.Present && state.ComponentVersionId is not null).Select(state => state.ComponentVersionId!.Value).Concat(historical.Values.Where(state => !state.absent && state.versionId is not null).Select(state => state.versionId!.Value)).Distinct().ToArray();
-        var blocked = await db.ComponentVersions.AsNoTracking().Where(version => versionIds.Contains(version.Id) && version.Safety == VersionSafety.Blocked).Select(version => version.Id).ToArrayAsync(cancellationToken);
+        var versions = await db.ComponentVersions.AsNoTracking().Where(version => versionIds.Contains(version.Id)).ToDictionaryAsync(version => version.Id, version => new { version.VersionNumber, version.Safety }, cancellationToken);
+        var componentIds = current.Keys.Union(historical.Keys).ToArray();
+        var components = await db.ConfigurationComponents.AsNoTracking().Where(component => componentIds.Contains(component.Id)).ToDictionaryAsync(component => component.Id, component => new { component.ComponentCode, component.Name }, cancellationToken);
         var items = current.Keys.Union(historical.Keys).OrderBy(componentId => componentId).Select(componentId =>
         {
             current.TryGetValue(componentId, out var currentState); historical.TryGetValue(componentId, out var historicalState);
             var currentVersion = currentState?.State == CurrentConfigurationState.Present ? currentState.ComponentVersionId : null;
             var historicalVersion = historicalState is not null && !historicalState.absent ? historicalState.versionId : null;
             var status = currentVersion == historicalVersion ? "Matched" : currentVersion is null ? "HistoricalOnly" : historicalVersion is null ? "CurrentOnly" : "Mismatch";
-            return new { componentId, status, currentVersionId = currentVersion, historicalVersionId = historicalVersion };
+            return new { componentId, componentCode = components[componentId].ComponentCode, componentName = components[componentId].Name, status, currentVersionId = currentVersion, currentVersionNumber = currentVersion is null ? null : versions[currentVersion.Value].VersionNumber, historicalVersionId = historicalVersion, historicalVersionNumber = historicalVersion is null ? null : versions[historicalVersion.Value].VersionNumber };
         }).ToArray();
         var matchStatus = items.All(item => item.status == "Matched") ? "Matched" : "Mismatch";
-        var riskSeverity = items.Any(item => (item.currentVersionId is not null && blocked.Contains(item.currentVersionId.Value)) || (item.historicalVersionId is not null && blocked.Contains(item.historicalVersionId.Value))) ? "Critical" : "None";
+        var riskSeverity = items.Any(item => (item.currentVersionId is not null && versions[item.currentVersionId.Value].Safety == VersionSafety.Blocked) || (item.historicalVersionId is not null && versions[item.historicalVersionId.Value].Safety == VersionSafety.Blocked)) ? "Critical" : "None";
         return TypedResults.Ok(new { machineId, asOf = at.Value, matchStatus, riskSeverity, items });
     }
 
@@ -536,11 +548,11 @@ public static class CatalogEndpoints
         if (string.IsNullOrWhiteSpace(term) || term.Length < 2) return Results.ValidationProblem(new Dictionary<string, string[]> { ["query"] = ["搜索词至少需要两个字符。"] });
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         var pattern = $"%{term}%";
-        var projects = await db.Projects.AsNoTracking().Where(item => EF.Functions.ILike(item.Code, pattern) || EF.Functions.ILike(item.Name, pattern)).Select(item => new { type = "Project", id = item.Id, label = item.Code + " · " + item.Name }).Take(20).ToListAsync(cancellationToken);
-        var components = await db.ConfigurationComponents.AsNoTracking().Where(item => EF.Functions.ILike(item.ComponentCode, pattern) || EF.Functions.ILike(item.Name, pattern)).Select(item => new { type = "Component", id = item.Id, label = item.ComponentCode + " · " + item.Name }).Take(20).ToListAsync(cancellationToken);
-        var versions = await db.ComponentVersions.AsNoTracking().Where(item => EF.Functions.ILike(item.VersionNumber, pattern)).Select(item => new { type = "Version", id = item.Id, label = item.VersionNumber }).Take(20).ToListAsync(cancellationToken);
-        var baselines = await db.ConfigurationBaselines.AsNoTracking().Where(item => EF.Functions.ILike(item.BaselineCode, pattern)).Select(item => new { type = "Baseline", id = item.Id, label = item.BaselineCode }).Take(20).ToListAsync(cancellationToken);
-        var machines = await db.Machines.AsNoTracking().Where(item => EF.Functions.ILike(item.SerialNumber, pattern) || EF.Functions.ILike(item.Name, pattern)).Select(item => new { type = "Machine", id = item.Id, label = item.SerialNumber + " · " + item.Name }).Take(20).ToListAsync(cancellationToken);
+        var projects = await db.Projects.AsNoTracking().Where(item => EF.Functions.ILike(item.Code, pattern) || EF.Functions.ILike(item.Name, pattern)).Select(item => new { type = "Project", id = item.Id, projectId = item.Id, label = item.Code + " · " + item.Name }).Take(20).ToListAsync(cancellationToken);
+        var components = await db.ConfigurationComponents.AsNoTracking().Where(item => EF.Functions.ILike(item.ComponentCode, pattern) || EF.Functions.ILike(item.Name, pattern)).Select(item => new { type = "Component", id = item.Id, projectId = item.ProjectId, label = item.ComponentCode + " · " + item.Name }).Take(20).ToListAsync(cancellationToken);
+        var versions = await db.ComponentVersions.AsNoTracking().Where(item => EF.Functions.ILike(item.VersionNumber, pattern)).Join(db.ConfigurationComponents.AsNoTracking(), version => version.ComponentId, component => component.Id, (version, component) => new { type = "Version", id = version.Id, projectId = component.ProjectId, label = version.VersionNumber }).Take(20).ToListAsync(cancellationToken);
+        var baselines = await db.ConfigurationBaselines.AsNoTracking().Where(item => EF.Functions.ILike(item.BaselineCode, pattern)).Select(item => new { type = "Baseline", id = item.Id, projectId = item.ProjectId, label = item.BaselineCode }).Take(20).ToListAsync(cancellationToken);
+        var machines = await db.Machines.AsNoTracking().Where(item => EF.Functions.ILike(item.SerialNumber, pattern) || EF.Functions.ILike(item.Name, pattern)).Select(item => new { type = "Machine", id = item.Id, projectId = item.ProjectId, label = item.SerialNumber + " · " + item.Name }).Take(20).ToListAsync(cancellationToken);
         return TypedResults.Ok(projects.Cast<object>().Concat(components).Concat(versions).Concat(baselines).Concat(machines));
     }
 

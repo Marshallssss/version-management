@@ -1670,6 +1670,12 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 
 ## V1.1
 
+- **Pilot Release Freeze：`0.2.0-pilot.1`（2026-08-31）**。V1.1 新功能开发暂停；当前已交付内容作为下一工作日内部试点基线。冻结后只接受阻断试点的缺陷修复、回归验证和部署证据补充，新的功能切片在试点结论后再恢复。
+- 冻结回归已完成：`catalog-acceptance.ps1` 覆盖登录 → Project → Component → Version → Baseline → Machine → Target → Initial Snapshot/Observation → Drift → Compare → Search；`background-job-acceptance.ps1` 覆盖真实 Host/Worker/PostgreSQL 的成功与重试状态机；Windows 运维脚本预检、Web `crypto.randomUUID` 兼容检查、EF Pending Model Changes 和 Release build（0 warning / 0 error）均通过。
+- 发布验收已完成：离线 `win-x64` 发布目录以 `0.2.0-pilot.1` 生成，发布目录 Host 的真实 PostgreSQL 17 Migration 返回数据库已最新，`release-manifest.json` 的 77 个文件逐项 SHA-256 校验通过，发布版 SPA 根路径、`/health/live`、`/health/ready` 均为 HTTP 200。
+- Pilot UX Sweep 已完成：机台实际配置、机台比对和历史比对不再向用户显示组件/版本 GUID；内部枚举改为中文可读文本；关键写操作提供成功反馈；明确区分 Project Standard（推荐）和 Machine Target（显式实际目标）、FULL/PARTIAL 观察语义、Observation 与安装/升级的时间/业务含义，以及 Match 与 Risk 可同时存在；全局搜索结果可直接打开项目、基线、版本或机台。
+- **Production Integration Pending 仍然成立**：本机 PostgreSQL 17 与发布目录验证不等于正式部署。IIS、Windows Service、TLS、DNS、防火墙、服务账户、NAS 备份恢复及目标服务器受管 PostgreSQL Service 仍须在目标 Windows 11 Pro/Enterprise 或 Windows Server 环境完成验收。
+
 - Baseline Review Workflow。
 - Rollback/Correction Commands 和 UI。
 - Bulk Target/Bulk Deployment。
@@ -1713,10 +1719,8 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 
 ### V1.1 Immediate Next Work
 
-- 当前进入 **1B Fact Rollback/Correction** 的设计与实现；在改模型前先读取现有 Deployment Fact、Current Projection 和历史 API，确认追加式事实的最小关联字段与 API 契约。
-- 发布命令必须校验最新评审为 Approved；发布后的不可修改约束保持不变。送审或已通过的草稿也禁止修改快照必需性，驳回后才可修改并重新送审。
-- 自动验收：创建 Draft、送审、未批准发布 HTTP 409、管理员批准、批准后发布、幂等重放、审计记录和非管理员拒绝处理评审。
-- 这不是 Phase 2 的双人审批或通用工作流框架；V1.1 只提供基线发布前的最小可审计评审门禁。
+- 当前处于 `0.2.0-pilot.1` Freeze：先执行内部试点并收集阻断问题，不继续开发 3A 后续 UI/验收、附件、导入映射或保存视图。
+- 试点通过后，恢复顺序为 3A 的 CSV 导出中文 UI、导出自动验收与全局部署检索；继续保持每个 Vertical Slice 的数据库 → Domain/Application → API → UI → 自动化测试 → Release/Migration/集成验收闭环。
 
 ## Phase 2
 

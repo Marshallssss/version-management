@@ -40,7 +40,7 @@ export function BulkFactPanel({ projects }: { projects: ProjectSummary[] }) {
       <div className="component-list wide-field">{projectId && (selectedMachines.length ? selectedMachines.map(machine => <label className="component-row" key={machine.id}><span><strong>{machine.serialNumber}</strong><small>{machine.name}</small></span><input type="checkbox" checked={machineIds.includes(machine.id)} onChange={() => toggle(machine.id)} /></label>) : <p className="empty-state">该项目没有可选机台。</p>)}</div>
       <button className="primary-action" type="submit" disabled={record.isPending || !versionId || machineIds.length === 0}>{record.isPending ? '正在记录' : `记录 ${machineIds.length} 台机台`}</button>
     </form>
-    <p className="empty-state">批量入口固定为局部事实；完整扫描、回退与更正仍需使用单机记录，以保留各机台的完整语义。</p>
+    <p className="empty-state">批量入口固定为局部事实，只更新所选组件，不会清除未列出的组件。完整扫描、回退与更正仍需使用单机记录，以保留各机台的完整语义。</p>
     {record.data && <p className="empty-state">已记录 {record.data.succeeded} 台；失败 {record.data.failed} 台。</p>}
     {record.isError && <p className="error-strip">{record.error.message}</p>}
   </section>
