@@ -294,19 +294,19 @@ if (-not [string]::IsNullOrWhiteSpace($ConnectionString)) {
     $psql = 'C:\Program Files\PostgreSQL\17\bin\psql.exe'
     if (-not (Test-Path $psql)) { throw 'psql.exe is required to verify the baseline immutability trigger.' }
     $psqlConnection = ($ConnectionString -replace ';', ' ') -replace '(?i)\bHost=', 'host=' -replace '(?i)\bPort=', 'port=' -replace '(?i)\bDatabase=', 'dbname=' -replace '(?i)\bUsername=', 'user=' -replace '(?i)\bPassword=', 'password='
-    $result = & $psql $psqlConnection -v ON_ERROR_STOP=1 -c "UPDATE baseline_items SET sort_order = sort_order + 1000 WHERE configuration_baseline_id = '$($baseline.id)'" 2>&1
+    $result = & $psql "--dbname=$psqlConnection" -v ON_ERROR_STOP=1 -c "UPDATE baseline_items SET sort_order = sort_order + 1000 WHERE configuration_baseline_id = '$($baseline.id)'" 2>&1
     if ($LASTEXITCODE -eq 0 -or ($result -join [Environment]::NewLine) -notmatch 'Items of released baseline cannot be modified') {
         throw 'Released baseline item update was not rejected by the PostgreSQL trigger.'
     }
-    $overlap = & $psql $psqlConnection -v ON_ERROR_STOP=1 -c "INSERT INTO project_standard_assignments (id, project_id, configuration_baseline_id, valid_from, valid_to, assigned_by, reason) VALUES (gen_random_uuid(), '$($project.id)', '$($baseline.id)', now() - interval '1 minute', now() + interval '1 minute', 'test', 'overlap test')" 2>&1
+    $overlap = & $psql "--dbname=$psqlConnection" -v ON_ERROR_STOP=1 -c "INSERT INTO project_standard_assignments (id, project_id, configuration_baseline_id, valid_from, valid_to, assigned_by, reason) VALUES (gen_random_uuid(), '$($project.id)', '$($baseline.id)', now() - interval '1 minute', now() + interval '1 minute', 'test', 'overlap test')" 2>&1
     if ($LASTEXITCODE -eq 0 -or ($overlap -join [Environment]::NewLine) -notmatch 'ex_project_standard_assignments_no_overlap') {
         throw 'Overlapping project standard assignment was not rejected by the PostgreSQL exclusion constraint.'
     }
-    $secondCurrentTarget = & $psql $psqlConnection -v ON_ERROR_STOP=1 -c "INSERT INTO machine_target_assignments (id, machine_id, configuration_baseline_id, valid_from, valid_to, assigned_by, reason) VALUES (gen_random_uuid(), '$($machine.id)', '$($baseline.id)', now(), NULL, 'test', 'second current target test')" 2>&1
+    $secondCurrentTarget = & $psql "--dbname=$psqlConnection" -v ON_ERROR_STOP=1 -c "INSERT INTO machine_target_assignments (id, machine_id, configuration_baseline_id, valid_from, valid_to, assigned_by, reason) VALUES (gen_random_uuid(), '$($machine.id)', '$($baseline.id)', now(), NULL, 'test', 'second current target test')" 2>&1
     if ($LASTEXITCODE -eq 0 -or ($secondCurrentTarget -join [Environment]::NewLine) -notmatch 'ux_machine_target_assignments_current_machine') {
         throw 'A second current machine target was not rejected by the PostgreSQL unique constraint.'
     }
-    $targetOverlap = & $psql $psqlConnection -v ON_ERROR_STOP=1 -c "INSERT INTO machine_target_assignments (id, machine_id, configuration_baseline_id, valid_from, valid_to, assigned_by, reason) VALUES (gen_random_uuid(), '$($machine.id)', '$($baseline.id)', now() - interval '1 minute', now() + interval '1 minute', 'test', 'overlap target test')" 2>&1
+    $targetOverlap = & $psql "--dbname=$psqlConnection" -v ON_ERROR_STOP=1 -c "INSERT INTO machine_target_assignments (id, machine_id, configuration_baseline_id, valid_from, valid_to, assigned_by, reason) VALUES (gen_random_uuid(), '$($machine.id)', '$($baseline.id)', now() - interval '1 minute', now() + interval '1 minute', 'test', 'overlap target test')" 2>&1
     if ($LASTEXITCODE -eq 0 -or ($targetOverlap -join [Environment]::NewLine) -notmatch 'ex_machine_target_assignments_no_overlap') {
         throw 'Overlapping machine target assignment was not rejected by the PostgreSQL exclusion constraint.'
     }

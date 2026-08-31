@@ -26,8 +26,8 @@ public sealed class BackgroundJobLeaseService(
                 SELECT *
                 FROM background_jobs
                 WHERE
-                    (status = 'Pending' AND available_at <= {DateTimeOffset.UtcNow})
-                    OR (status = 'Processing' AND locked_at < {staleBefore})
+                    (status IN ('Pending', 'Retry') AND available_at <= {DateTimeOffset.UtcNow})
+                    OR (status = 'Running' AND locked_at < {staleBefore})
                 ORDER BY available_at, created_at
                 FOR UPDATE SKIP LOCKED
                 LIMIT 1
@@ -40,10 +40,11 @@ public sealed class BackgroundJobLeaseService(
             return null;
         }
 
-        job.Status = BackgroundJobStatus.Processing;
+        job.Status = BackgroundJobStatus.Running;
         job.LockedAt = DateTimeOffset.UtcNow;
         job.LockedBy = workerId;
         job.Attempts += 1;
+        job.LastAttemptAt = DateTimeOffset.UtcNow;
         await database.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
@@ -61,7 +62,7 @@ public sealed class BackgroundJobLeaseService(
     {
         await using var database = await contextFactory.CreateDbContextAsync(cancellationToken);
         var job = await FindOwnedJobAsync(database, jobId, workerId, cancellationToken);
-        job.Status = BackgroundJobStatus.Completed;
+        job.Status = BackgroundJobStatus.Succeeded;
         job.CompletedAt = DateTimeOffset.UtcNow;
         job.LockedAt = null;
         job.LockedBy = null;
@@ -79,7 +80,7 @@ public sealed class BackgroundJobLeaseService(
         var job = await FindOwnedJobAsync(database, jobId, workerId, cancellationToken);
         var shouldRetry = job.Attempts < _options.MaximumAttempts;
 
-        job.Status = shouldRetry ? BackgroundJobStatus.Pending : BackgroundJobStatus.Failed;
+        job.Status = shouldRetry ? BackgroundJobStatus.Retry : BackgroundJobStatus.Failed;
         job.AvailableAt = shouldRetry
             ? DateTimeOffset.UtcNow.AddSeconds(Math.Min(300, Math.Pow(2, job.Attempts)))
             : job.AvailableAt;
@@ -98,7 +99,7 @@ public sealed class BackgroundJobLeaseService(
     {
         return await database.BackgroundJobs.SingleOrDefaultAsync(
                 job => job.Id == jobId
-                    && job.Status == BackgroundJobStatus.Processing
+                    && job.Status == BackgroundJobStatus.Running
                     && job.LockedBy == workerId,
                 cancellationToken)
             ?? throw new InvalidOperationException($"Background job {jobId} is no longer leased by this worker.");

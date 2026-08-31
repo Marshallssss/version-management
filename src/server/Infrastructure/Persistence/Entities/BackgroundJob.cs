@@ -20,6 +20,8 @@ public sealed class BackgroundJob
 
     public int Attempts { get; set; }
 
+    public DateTimeOffset? LastAttemptAt { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
 
     public DateTimeOffset? CompletedAt { get; set; }
@@ -30,7 +32,8 @@ public sealed class BackgroundJob
 public enum BackgroundJobStatus
 {
     Pending,
-    Processing,
-    Completed,
-    Failed
+    Running,
+    Succeeded,
+    Failed,
+    Retry
 }

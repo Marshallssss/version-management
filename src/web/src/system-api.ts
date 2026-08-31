@@ -8,7 +8,7 @@ export interface SystemVersion {
   serverTime: string
 }
 
-export type BackgroundJobStatus = 'Pending' | 'Processing' | 'Completed' | 'Failed'
+export type BackgroundJobStatus = 'Pending' | 'Running' | 'Succeeded' | 'Failed' | 'Retry'
 
 export interface BackgroundJobSummary {
   id: string
@@ -16,6 +16,7 @@ export interface BackgroundJobSummary {
   status: BackgroundJobStatus
   attempts: number
   createdAt: string
+  lastAttemptAt: string | null
   completedAt: string | null
   lastError: string | null
 }

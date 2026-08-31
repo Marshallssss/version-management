@@ -50,9 +50,10 @@ internal static class ConfigHubModel
                 .HasConversion<string>();
             entity.Property(job => job.AvailableAt).HasColumnName("available_at");
             entity.Property(job => job.LockedAt).HasColumnName("locked_at");
-            entity.Property(job => job.LockedBy).HasColumnName("locked_by").HasMaxLength(240);
-            entity.Property(job => job.Attempts).HasColumnName("attempts");
-            entity.Property(job => job.CreatedAt).HasColumnName("created_at");
+              entity.Property(job => job.LockedBy).HasColumnName("locked_by").HasMaxLength(240);
+              entity.Property(job => job.Attempts).HasColumnName("attempts");
+              entity.Property(job => job.LastAttemptAt).HasColumnName("last_attempt_at");
+              entity.Property(job => job.CreatedAt).HasColumnName("created_at");
             entity.Property(job => job.CompletedAt).HasColumnName("completed_at");
             entity.Property(job => job.LastError).HasColumnName("last_error").HasMaxLength(4000);
             entity.HasIndex(job => new { job.Status, job.AvailableAt })

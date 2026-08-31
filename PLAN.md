@@ -1702,7 +1702,9 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
    - **1B-2 Correction Fact（已交付）**：真实 EF Migration 已为 `deployment_batches.corrects_deployment_batch_id` 增加受限外键与索引；Correction 只追加新 Fact、不得删除/更新原 Fact。Correction 的 EffectiveAt 继承原 Fact，RecordedAt 仍记录更正实际发生时间，避免把更正时间写成安装或观察时间。中文机台页可选择原事实并记录更正；`catalog-acceptance.ps1` 覆盖关联、原 Fact 保留、继承生效时间的 Current Actual 更新与幂等重放。Release build、真实 Migration、Web 兼容与 Windows 运维预检均已通过。
    - 验收：回退后 Current Actual 更新、历史 Fact 保留；更正不会删除原 Fact；PARTIAL/FULL 行为仍正确；权限、Audit、Correlation、Idempotency 与重放全部覆盖。
 3. **1C 显式批量 Target（`bulk_operations`，已交付）**：单次显式 Target Assignment 之上已新增可审计的批量操作/逐机结果；Project Standard 不会自动写为 Machine Target。真实 EF Migration 创建 `bulk_operations`/`bulk_operation_items`，记录同步状态、操作者、原因、逐机 Succeeded/Skipped 结果。命令仅接受同项目、用户明确选中的 Machine id 与已发布 Baseline；重复指向同一 Baseline 的机台记录为 Skipped，不关闭或重写其有效区间。中文机台页已接入项目、基线和多机选择。`catalog-acceptance.ps1` 覆盖重放、逐机历史区间和 Skipped；Release build、真实 Migration、Web 兼容与 Windows 运维预检均已通过。跨项目和空/重复机台输入由 API 验证拒绝；未选中的无 Target Machine 不被隐式补齐。
-4. **1D 批量 Deployment/Observation**：批量仅编排既有事实命令，不能绕过版本、组件、FULL/PARTIAL、Audit 或幂等规则。需要固定后台 Job 的 Pending → Running → Succeeded/Failed → Retry 语义，并测试失败重试及逐机结果。
+4. **1D 批量 Deployment/Observation（进行中）**：批量仅编排既有事实命令，不能绕过版本、组件、FULL/PARTIAL、Audit 或幂等规则。
+   - **1D-0 后台 Job 状态机（已交付）**：真实 EF Migration 已增加 `last_attempt_at`，并将既有 `Processing/Completed` 前进为 `Running/Succeeded`；状态机固定为 Pending → Running → Succeeded，失败时 Running → Retry → Running，达到最大次数后 → Failed。管理员运行总览显示等待重试、上次尝试时间和新状态中文文本。`background-job-acceptance.ps1` 在真实 Host/Worker/PostgreSQL 上验证成功任务的 `Succeeded`、尝试/完成时间，以及无处理器任务的 `Running → Retry`、错误与清理；目录验收、Release build、真实 Migration 均已回归通过。
+   - **1D-1 批量事实编排（后续）**：批量入口只调度已验证的单机 Fact 命令，持久化逐机结果；测试失败重试、FULL/PARTIAL 与权限/Audit/Idempotency。
 5. **2A 历史 Actual 与时间点读取**：从 Deployment Facts 可重建指定时间的配置；UI 展示历史快照而非把当前投影伪装为历史。验收覆盖有效时间乱序、Absent、FULL 与 PARTIAL。
 6. **2B 比较能力**：依次实现 Machine vs Machine、Machine Current vs Historical；保持 Match（版本差异）与 Risk（版本安全）分离，不提前扩展为万能 Compare。
 7. **3A Exposure 与可导出追溯**：以 Blocked 时间窗口计算 Exposure Snapshot 表；随后增加受权限保护的 Compare/Impact CSV 导出和部署全局检索。验收包含时间窗口边界、不可变导出审计及无权限拒绝。

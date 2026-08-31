@@ -174,6 +174,7 @@ app.MapGet("/api/v1/system/status", async (
             status = job.Status.ToString(),
             attempts = job.Attempts,
             createdAt = job.CreatedAt,
+            lastAttemptAt = job.LastAttemptAt,
             completedAt = job.CompletedAt,
             lastError = job.LastError
         })

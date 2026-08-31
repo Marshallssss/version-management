@@ -21,9 +21,10 @@ const navigation = [
 
 const statusText: Record<BackgroundJobStatus, string> = {
   Pending: '等待执行',
-  Processing: '执行中',
-  Completed: '已完成',
+  Running: '执行中',
+  Succeeded: '已完成',
   Failed: '失败',
+  Retry: '等待重试',
 }
 
 const connectivityText = { online: '已连接', offline: '未连接', checking: '检测中' }
@@ -261,7 +262,7 @@ function App() {
               </section>
               {isAdmin && <section className="telemetry-panel queue-panel">
                 <div className="panel-heading"><div><span className="section-index">队列概览</span><h3>后台任务</h3></div><span className="count">{status.data?.jobs.length ?? 0}</span></div>
-                <div className="queue-summary"><div><span>等待执行</span><b>{queueCount('Pending')}</b></div><div><span>执行中</span><b>{queueCount('Processing')}</b></div><div><span>已完成</span><b>{queueCount('Completed')}</b></div><div><span>失败</span><b>{queueCount('Failed')}</b></div></div>
+                <div className="queue-summary"><div><span>等待执行</span><b>{queueCount('Pending')}</b></div><div><span>执行中</span><b>{queueCount('Running')}</b></div><div><span>等待重试</span><b>{queueCount('Retry')}</b></div><div><span>已完成</span><b>{queueCount('Succeeded')}</b></div><div><span>失败</span><b>{queueCount('Failed')}</b></div></div>
               </section>}
             </>}
 
@@ -278,7 +279,7 @@ function App() {
               </section>
               <section className="status-panel jobs-panel">
                 <div className="panel-heading"><div><span className="section-index">最近任务</span><h3>执行记录</h3></div><button type="button" onClick={() => void status.refetch()} disabled={status.isFetching}>{status.isFetching ? '正在刷新' : '刷新'}</button></div>
-                {status.data?.jobs.length ? <div className="job-list">{status.data.jobs.map((job) => <article className="job-row" key={job.id}><div><strong>{jobTypeText[job.jobType] ?? job.jobType}</strong><span>{formatTime(job.createdAt)}</span></div><span className={`job-state ${job.status.toLowerCase()}`}>{statusText[job.status]}</span><small>第 {job.attempts} 次</small>{job.lastError && <p>{job.lastError}</p>}</article>)}</div> : <p className="empty-state">还没有任务记录。提交一条连通性任务即可开始验证。</p>}
+                {status.data?.jobs.length ? <div className="job-list">{status.data.jobs.map((job) => <article className="job-row" key={job.id}><div><strong>{jobTypeText[job.jobType] ?? job.jobType}</strong><span>{formatTime(job.createdAt)}{job.lastAttemptAt && `；上次尝试 ${formatTime(job.lastAttemptAt)}`}</span></div><span className={`job-state ${job.status.toLowerCase()}`}>{statusText[job.status]}</span><small>第 {job.attempts} 次</small>{job.lastError && <p>{job.lastError}</p>}</article>)}</div> : <p className="empty-state">还没有任务记录。提交一条连通性任务即可开始验证。</p>}
               </section>
             </>}
 
