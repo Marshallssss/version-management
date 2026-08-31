@@ -76,6 +76,8 @@ Expand-Archive .\artifacts\ConfigHub-offline-nuget-win-x64-*.zip -DestinationPat
 .\start-local.ps1 -NuGetConfigFile .\.confighub\NuGet.Config
 ```
 
+新版启动脚本会自动识别根目录的 `.confighub\NuGet.Config`，因此解压完成后直接执行 `start-local.cmd` 或 `.\start-local.ps1` 也会使用离线源；显式参数仍可用于指定公司镜像或其他位置的配置。
+
 公司镜像也可以直接作为 `-NuGetConfigFile` 传入；前端若同样受限，附加 `-NpmRegistry https://npm.company.example/`，或带上已构建的 `src\server\Host\wwwroot` 并使用 `-SkipFrontendBuild`。
 
 手工验证命令：

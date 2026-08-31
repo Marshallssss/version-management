@@ -19,6 +19,7 @@ $webRoot = Join-Path $repoRoot 'src\web'
 $hostProject = Join-Path $repoRoot 'src\server\Host\ConfigHub.Host.csproj'
 $url = "http://0.0.0.0:$Port"
 $localConfigurationPath = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)) 'ConfigHub\appsettings.local.json'
+$bundledOfflineNuGetConfig = Join-Path $repoRoot '.confighub\NuGet.Config'
 
 function Assert-CommandAvailable {
     param(
@@ -186,6 +187,11 @@ Set-Location $repoRoot
 
 Assert-CommandAvailable -Command 'dotnet' -DisplayName '.NET SDK'
 Assert-CommandAvailable -Command 'npm' -DisplayName 'Node.js/npm'
+
+if ([string]::IsNullOrWhiteSpace($NuGetConfigFile) -and (Test-Path $bundledOfflineNuGetConfig -PathType Leaf)) {
+    $NuGetConfigFile = $bundledOfflineNuGetConfig
+    Write-Host 'Detected the bundled offline NuGet source.'
+}
 
 $restoreArguments = @('restore', $hostProject)
 if (-not [string]::IsNullOrWhiteSpace($NuGetConfigFile)) {
