@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { assignMachineTarget, assignProjectMember, assignProjectStandard, changeUserRole, changeVersionMaturity, changeVersionSafety, cloneProject, commitImport, compareBaselines, createBaseline, createComponent, createComponentVersion, createMachine, createProject, createUser, decideBaselineReview, getBaselineDetail, getBaselines, getCurrentUser, getDashboard, getImportPreview, getMachineConfiguration, getMachineDrift, getMachineFacts, getMachineTarget, getMachineTargetHistory, getMachines, getProject, getProjectMembers, getProjectStandard, getProjects, getUsers, getVersionDetail, getVersionImpact, login, logout, moveComponent, recommendVersion, recordMachineFacts, releaseBaseline, requestBaselineReview, searchCatalog, setBaselineItemRequirement, stageImport } from './catalog-api'
 import { enqueueNoopJob, getSystemStatus, getSystemVersion, type BackgroundJobStatus } from './system-api'
+import { RollbackFactPanel } from './RollbackFactPanel'
 
 const navigation = [
   { id: 'overview', label: '运行总览', available: true },
@@ -203,7 +204,7 @@ function App() {
   const setRequirement = useMutation({ mutationFn: () => setBaselineItemRequirement(selectedBaselineId, baselineRequirementItemId, { requirement: baselineRequirement, reason: baselineRequirementReason }), onSuccess: async () => { setBaselineRequirementReason(''); await queryClient.invalidateQueries({ queryKey: ['baseline-detail', selectedBaselineId] }) } })
   const assignStandard = useMutation({ mutationFn: ({ projectId, baselineId, reason }: { projectId: string; baselineId: string; reason: string }) => assignProjectStandard(projectId, baselineId, reason), onSuccess: async () => { setStandardReason(''); await queryClient.invalidateQueries({ queryKey: ['project-standard', baselineProjectId] }) } })
   const addMachine = useMutation({ mutationFn: createMachine, onSuccess: async () => { setMachineSerial(''); setMachineName(''); setMachineType(''); setMachineReason(''); await queryClient.invalidateQueries({ queryKey: ['machines'] }) } })
-  const recordFacts = useMutation({ mutationFn: ({ machineId, componentId, versionId, coverage, reason }: { machineId: string; componentId: string; versionId: string; coverage: string; reason: string }) => recordMachineFacts(machineId, { operationType: 'Observation', coverage, sourceType: 'manual-ui', reason, items: [{ componentId, versionId, absent: false, knownInstalledAt: null }] }), onSuccess: async () => { setFactReason(''); await queryClient.invalidateQueries({ queryKey: ['machine-configuration', selectedMachineId] }) } })
+  const recordFacts = useMutation({ mutationFn: ({ machineId, componentId, versionId, operationType, coverage, reason }: { machineId: string; componentId: string; versionId: string; operationType?: string; coverage: string; reason: string }) => recordMachineFacts(machineId, { operationType: operationType ?? 'Observation', coverage, sourceType: 'manual-ui', reason, items: [{ componentId, versionId, absent: false, knownInstalledAt: null }] }), onSuccess: async () => { setFactReason(''); await queryClient.invalidateQueries({ queryKey: ['machine-configuration', selectedMachineId] }); await queryClient.invalidateQueries({ queryKey: ['machine-facts', selectedMachineId] }); await queryClient.invalidateQueries({ queryKey: ['machine-drift', selectedMachineId] }) } })
 
   const connectivity = system.isSuccess ? 'online' : system.isError ? 'offline' : 'checking'
   const visibleNavigation = navigation.filter((item) => !item.adminOnly || isAdmin)
@@ -375,6 +376,7 @@ function App() {
         ) : (
           <section className="pending-page"><span className="section-index">后续垂直切片</span><h2>{selectedNavigation.label}尚未实现</h2><p>当前版本只完成了运行基础设施和后台任务链路。{selectedNavigation.label}将在核心领域模型与对应 API 落地后开放，现阶段不会提供无法保存或追溯的占位操作。</p><button className="primary-action" type="button" onClick={() => setActivePage('overview')}>返回运行总览</button></section>
         )}
+        {activePage === 'machines' && selectedMachine && <RollbackFactPanel machineId={selectedMachine.id} components={machineProjectDetail.data?.components ?? []} />}
       </main>
     </div>
   )

@@ -177,6 +177,11 @@ public static class CatalogEndpoints
         if (existing is not null) { if (existing.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (existing.Result is not null) return TypedResults.Ok(existing.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
         var machine = await db.Machines.SingleOrDefaultAsync(x => x.Id == machineId, cancellationToken); if (machine is null) return Results.NotFound();
         if (!await HasProjectWriteAccessAsync(db, context, machine.ProjectId, cancellationToken)) return Results.Forbid();
+        if (operation == DeploymentOperationType.Rollback)
+        {
+            if (!await HasProjectWriteAccessAsync(db, context, machine.ProjectId, cancellationToken, requireSeniorMembership: true)) return Results.Forbid();
+            if (coverage != ObservationCoverage.Partial || request.Items.Any(item => item.Absent)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = ["回退必须是局部记录，且每个组件必须指定要恢复的版本。"] });
+        }
         var sourceType = request.SourceType.Trim(); var externalEventId = NormalizeOptional(request.ExternalEventId, 200);
         if (externalEventId is not null && await db.DeploymentBatches.AnyAsync(item => item.SourceType == sourceType && item.ExternalEventId == externalEventId, cancellationToken)) return Results.Conflict(new { message = "该来源的外部事件已记录。" });
         var now = DateTimeOffset.UtcNow; await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken); db.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }); var batch = new DeploymentBatch { Id = Guid.NewGuid(), MachineId = machineId, OperationType = operation, Coverage = coverage, SourceType = sourceType, ExternalEventId = externalEventId, RecordedAt = now, EffectiveAt = request.EffectiveAt ?? now }; db.DeploymentBatches.Add(batch);

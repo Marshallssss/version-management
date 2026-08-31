@@ -12,5 +12,5 @@ public sealed class DeploymentBatch
     public DateTimeOffset EffectiveAt { get; set; }
 }
 
-public enum DeploymentOperationType { Install, Upgrade, InitialSnapshot, Observation }
+public enum DeploymentOperationType { Install, Upgrade, InitialSnapshot, Observation, Rollback }
 public enum ObservationCoverage { Full, Partial }
