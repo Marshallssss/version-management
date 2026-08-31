@@ -1699,7 +1699,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
    - Rollback 是新的、追加式 Deployment Fact，明确记录从当前版本回到目标版本，绝不改写旧事实或 `machine_current_configurations` 的历史来源。
    - Correction 是新的、追加式事实更正记录，必须引用被更正的 Fact，保留原 Fact、操作者、原因、关联 id 与原始观察/安装时间语义；不得用 Observation 时间伪造 Installed Time。
    - **1B-1 Rollback Fact（已交付）**：无 Schema 变更的独立 Rollback Operation 已落地；仅项目 SeniorEngineer 可写，强制 PARTIAL 且不得声明 Absent。中文机台页提供“记录组件回退”，只显示不同于当前 Actual 的已知组件版本。`catalog-acceptance.ps1` 覆盖 Current Actual 更新、原 Fact 保留、幂等重放和 FULL rollback HTTP 400；Release build、真实 Migration 检查、Web 兼容与 Windows 运维预检均已通过。
-   - **1B-2 Correction Fact（后续）**：再新增真实 Migration 的被更正 Fact 关联字段；Correction 只追加新 Fact、不得删除/更新原 Fact。
+   - **1B-2 Correction Fact（已交付）**：真实 EF Migration 已为 `deployment_batches.corrects_deployment_batch_id` 增加受限外键与索引；Correction 只追加新 Fact、不得删除/更新原 Fact。Correction 的 EffectiveAt 继承原 Fact，RecordedAt 仍记录更正实际发生时间，避免把更正时间写成安装或观察时间。中文机台页可选择原事实并记录更正；`catalog-acceptance.ps1` 覆盖关联、原 Fact 保留、继承生效时间的 Current Actual 更新与幂等重放。Release build、真实 Migration、Web 兼容与 Windows 运维预检均已通过。
    - 验收：回退后 Current Actual 更新、历史 Fact 保留；更正不会删除原 Fact；PARTIAL/FULL 行为仍正确；权限、Audit、Correlation、Idempotency 与重放全部覆盖。
 3. **1C 显式批量 Target（`bulk_operations`）**：先完成单次显式 Target Assignment，再引入可审计的批量操作/逐机结果；不得把 Project Standard 自动写为 Machine Target。验收覆盖部分失败、重放、每台 Machine 独立历史区间及无 Target Machine 不被隐式补齐。
 4. **1D 批量 Deployment/Observation**：批量仅编排既有事实命令，不能绕过版本、组件、FULL/PARTIAL、Audit 或幂等规则。需要固定后台 Job 的 Pending → Running → Succeeded/Failed → Retry 语义，并测试失败重试及逐机结果。
