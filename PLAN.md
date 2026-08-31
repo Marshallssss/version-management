@@ -1901,6 +1901,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 6C 复核补强进行中：手工 Observation 不再要求输入组件/版本 GUID，而是按所选机台所属项目显示中文组件与版本选择器；切换机台或组件会清空不再有效的选择。
 - 6B 验收补强进行中：自动化验收新增 FULL Observation 遗漏组件投影为 Absent 的断言，并验证 Observation 的时间不会回填为 `KnownInstalledAt`。
 - 6B 验收补强进行中：自动化验收还提供明确的历史 `KnownInstalledAt`，并验证后续未提供安装时间的 PARTIAL Observation 会保留该值，确保安装时间与观察时间始终独立。
+- 6B 复核补强进行中：Current Projection 仅接受不早于当前 `StateEffectiveAt` 的事实，迟到 Observation 仍保留在事实历史但不会回退当前状态；中文机台页分别展示状态生效时间与已知安装时间，避免两种时间语义混淆。
 
 ## Step 7 — Drift/Risk/Compare
 

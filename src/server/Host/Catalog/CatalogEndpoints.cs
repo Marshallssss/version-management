@@ -410,7 +410,7 @@ public static class CatalogEndpoints
     {
         var current = await db.MachineCurrentConfigurations.FindAsync([machineId, componentId], cancellationToken);
         if (current is null) db.MachineCurrentConfigurations.Add(new MachineCurrentConfiguration { MachineId = machineId, ConfigurationComponentId = componentId, ComponentVersionId = versionId, State = absent ? CurrentConfigurationState.Absent : CurrentConfigurationState.Present, StateEffectiveAt = effectiveAt, KnownInstalledAt = knownInstalledAt, SourceDeploymentItemId = sourceItemId });
-        else { current.ComponentVersionId = versionId; current.State = absent ? CurrentConfigurationState.Absent : CurrentConfigurationState.Present; current.StateEffectiveAt = effectiveAt; current.KnownInstalledAt = knownInstalledAt ?? current.KnownInstalledAt; current.SourceDeploymentItemId = sourceItemId; }
+        else if (effectiveAt >= current.StateEffectiveAt) { current.ComponentVersionId = versionId; current.State = absent ? CurrentConfigurationState.Absent : CurrentConfigurationState.Present; current.StateEffectiveAt = effectiveAt; current.KnownInstalledAt = knownInstalledAt ?? current.KnownInstalledAt; current.SourceDeploymentItemId = sourceItemId; }
     }
 
     private static async Task<IResult> GetProjectAsync(
