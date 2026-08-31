@@ -82,6 +82,10 @@ Expand-Archive .\artifacts\ConfigHub-offline-nuget-win-x64-*.zip -DestinationPat
 
 公司镜像也可以直接作为 `-NuGetConfigFile` 传入；前端若同样受限，附加 `-NpmRegistry https://npm.company.example/`，或带上已构建的 `src\server\Host\wwwroot` 并使用 `-SkipFrontendBuild`。
 
+## 已发布 Windows 包
+
+仓库通过 Git LFS 提供 `artifacts/ConfigHub-release-0.1.1-win-x64.zip`。该包已包含 Host、Worker 和前端静态文件，可用于修复旧版浏览器/WebView 缺失 `crypto.randomUUID` 时无法创建 Project 的问题。目标机获取该包后应使用 `ops\windows\upgrade.ps1` 完成受控升级，不在目标机运行 restore 或 npm。
+
 手工验证命令：
 
 ```powershell
