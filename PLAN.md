@@ -1885,6 +1885,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 5A 已交付：Machine Registry 以全局规范化序列号作为身份，项目归属、名称、机型和归档状态独立保存；创建、重复序列号与同键幂等重放已纳入自动验收。Target Assignment 保持独立，禁止从 Project Standard 自动补值。
 - 5B 已交付：Machine Target Assignment 保存独立有效区间、actor 和 reason；不在 Machine 保存 Target 指针，也不由 Project Standard 自动创建 Assignment。API 已限制同项目 Released Baseline，并在事务内持久化 Idempotency 与 Audit；自动验收覆盖显式指派和同键重放，中文机台页提供显式指派界面。
 - 5B 复核补强进行中：新增当前 Target 的只读 API 和机台页中文状态展示；自动化验收断言 Project Standard 切换到新 Revision 后，既有 Machine Target 仍指向原 Baseline。
+- 5B 复核补强进行中：`catalog-acceptance.ps1` 直连真实 PostgreSQL 验证 `machine_target_assignments` 的唯一当前值与 GiST 时间区间排斥约束，避免只依赖应用层关闭上一条 Assignment。
 
 ## Step 6 — Facts → Current Actual
 
