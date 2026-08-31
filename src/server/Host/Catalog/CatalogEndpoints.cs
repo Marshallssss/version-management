@@ -31,6 +31,7 @@ public static class CatalogEndpoints
         endpoints.MapPost("/api/v1/machines", CreateMachineAsync).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/machines/{machineId:guid}/target", AssignMachineTargetAsync).RequireAuthorization("SeniorEngineer");
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/target", GetMachineTargetAsync).RequireAuthorization();
+        endpoints.MapGet("/api/v1/machines/{machineId:guid}/target-history", GetMachineTargetHistoryAsync).RequireAuthorization();
         endpoints.MapPost("/api/v1/machines/{machineId:guid}/facts", RecordFactsAsync).RequireAuthorization("Engineer");
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/configuration", GetMachineConfigurationAsync).RequireAuthorization();
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/facts", ListMachineFactsAsync).RequireAuthorization();
@@ -141,6 +142,27 @@ public static class CatalogEndpoints
             .Select(item => new { baselineId = item.ConfigurationBaselineId, validFrom = item.ValidFrom, baselineCode = database.ConfigurationBaselines.Where(baseline => baseline.Id == item.ConfigurationBaselineId).Select(baseline => baseline.BaselineCode).Single() })
             .SingleOrDefaultAsync(cancellationToken);
         return TypedResults.Ok(target);
+    }
+
+    private static async Task<IResult> GetMachineTargetHistoryAsync(Guid machineId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        await using var database = await factory.CreateDbContextAsync(cancellationToken);
+        if (!await database.Machines.AnyAsync(machine => machine.Id == machineId, cancellationToken)) return Results.NotFound();
+        var history = await database.MachineTargetAssignments.AsNoTracking()
+            .Where(item => item.MachineId == machineId)
+            .OrderByDescending(item => item.ValidFrom)
+            .Select(item => new
+            {
+                id = item.Id,
+                baselineId = item.ConfigurationBaselineId,
+                baselineCode = database.ConfigurationBaselines.Where(baseline => baseline.Id == item.ConfigurationBaselineId).Select(baseline => baseline.BaselineCode).Single(),
+                validFrom = item.ValidFrom,
+                validTo = item.ValidTo,
+                item.AssignedBy,
+                item.Reason
+            })
+            .ToListAsync(cancellationToken);
+        return TypedResults.Ok(history);
     }
 
     private static async Task<IResult> RecordFactsAsync(Guid machineId, RecordFactsRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
