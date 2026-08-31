@@ -87,8 +87,8 @@ function Ensure-ConnectionString {
     foreach ($candidate in $candidates) {
         $value = $candidate.Value
         if ([string]::IsNullOrWhiteSpace($value)) { continue }
-        if ($value.TrimStart().StartsWith('$env:', [StringComparison]::OrdinalIgnoreCase) -or $value -notmatch '=') {
-            Write-Warning "Ignoring invalid $($candidate.Source) value for ConnectionStrings__$Name. Enter a real PostgreSQL connection string, not a literal `$env:... expression."
+        if (-not (Test-ConnectionStringValue -Value $value)) {
+            Write-Warning "Ignoring invalid $($candidate.Source) value for ConnectionStrings__$Name. Enter a real PostgreSQL connection string, not a literal `$env:... expression or a sample password."
             continue
         }
 
@@ -98,12 +98,42 @@ function Ensure-ConnectionString {
 
     Write-Host ""
     Write-Host "Missing database connection string: ConnectionStrings__$Name"
-    $entered = Read-Host "Enter ConnectionStrings__$Name for this run"
-    if ([string]::IsNullOrWhiteSpace($entered)) {
-        throw "ConnectionStrings__$Name cannot be empty."
+    $entered = Read-Host "Enter ConnectionStrings__$Name (it will be saved for future local runs)"
+    if (-not (Test-ConnectionStringValue -Value $entered)) {
+        throw "ConnectionStrings__$Name must be a real PostgreSQL connection string with actual credentials."
     }
 
     [Environment]::SetEnvironmentVariable("ConnectionStrings__$Name", $entered, 'Process')
+    Save-LocalConnectionString -Name $Name -Value $entered
+}
+
+function Test-ConnectionStringValue {
+    param([string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value) -or $Value -notmatch '=') { return $false }
+    $trimmed = $Value.TrimStart()
+    if ($trimmed.StartsWith('$env:', [StringComparison]::OrdinalIgnoreCase)) { return $false }
+    return $Value -notmatch '(?i)Password\s*=\s*(你的密码|<[^>]+>|\.\.\.)\s*(;|$)'
+}
+
+function Save-LocalConnectionString {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Value
+    )
+
+    $configuration = @{}
+    if (Test-Path $localConfigurationPath -PathType Leaf) {
+        $configuration = Get-Content $localConfigurationPath -Raw | ConvertFrom-Json -AsHashtable
+    }
+    if (-not $configuration.ContainsKey('ConnectionStrings') -or $null -eq $configuration.ConnectionStrings) {
+        $configuration.ConnectionStrings = @{}
+    }
+
+    $configuration.ConnectionStrings[$Name] = $Value
+    New-Item -ItemType Directory -Path (Split-Path $localConfigurationPath -Parent) -Force | Out-Null
+    $configuration | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $localConfigurationPath -Encoding UTF8
+    Write-Host "Saved ConnectionStrings__$Name to $localConfigurationPath"
 }
 
 function Read-PlainTextSecret {
