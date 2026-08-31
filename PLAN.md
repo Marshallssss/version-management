@@ -1689,6 +1689,27 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 状态：开发中。
 - 评审独立于 `ConfigurationBaseline.State`：基线仍只使用 Draft/Released/Deprecated/Archived；评审记录使用 Pending/Approved/Rejected，避免把流程状态混入生命周期。
 - Draft 基线由项目 SeniorEngineer 送审；只有 Admin 可以通过或驳回。每个关键写操作均要求 `reason`、`Idempotency-Key`、actor 与 correlation id，并追加 Audit。
+
+### V1.1 Delivery Plan - Vertical Slices
+
+所有切片都遵循：真实 EF Migration（仅前进）→ Domain/Application → API → 中文 UI → 自动化验收 → Release build、真实 Migration 与基础集成验收。完成一片才进入下一片；每次代码修改均随 `PLAN.md` 更新并提交推送。
+
+1. **1A 基线评审门禁（已交付）**：独立 Pending/Approved/Rejected 评审记录；评审通过才允许发布，且不污染 Baseline 生命周期。
+2. **1B 事实回退与更正（下一片）**：
+   - Rollback 是新的、追加式 Deployment Fact，明确记录从当前版本回到目标版本，绝不改写旧事实或 `machine_current_configurations` 的历史来源。
+   - Correction 是新的、追加式事实更正记录，必须引用被更正的 Fact，保留原 Fact、操作者、原因、关联 id 与原始观察/安装时间语义；不得用 Observation 时间伪造 Installed Time。
+   - 验收：回退后 Current Actual 更新、历史 Fact 保留；更正不会删除原 Fact；PARTIAL/FULL 行为仍正确；权限、Audit、Correlation、Idempotency 与重放全部覆盖。
+3. **1C 显式批量 Target（`bulk_operations`）**：先完成单次显式 Target Assignment，再引入可审计的批量操作/逐机结果；不得把 Project Standard 自动写为 Machine Target。验收覆盖部分失败、重放、每台 Machine 独立历史区间及无 Target Machine 不被隐式补齐。
+4. **1D 批量 Deployment/Observation**：批量仅编排既有事实命令，不能绕过版本、组件、FULL/PARTIAL、Audit 或幂等规则。需要固定后台 Job 的 Pending → Running → Succeeded/Failed → Retry 语义，并测试失败重试及逐机结果。
+5. **2A 历史 Actual 与时间点读取**：从 Deployment Facts 可重建指定时间的配置；UI 展示历史快照而非把当前投影伪装为历史。验收覆盖有效时间乱序、Absent、FULL 与 PARTIAL。
+6. **2B 比较能力**：依次实现 Machine vs Machine、Machine Current vs Historical；保持 Match（版本差异）与 Risk（版本安全）分离，不提前扩展为万能 Compare。
+7. **3A Exposure 与可导出追溯**：以 Blocked 时间窗口计算 Exposure Snapshot 表；随后增加受权限保护的 Compare/Impact CSV 导出和部署全局检索。验收包含时间窗口边界、不可变导出审计及无权限拒绝。
+8. **3B 附件、导入映射、保存视图**：附件只能通过 Immutable File Object 服务进入 Baseline/Deployment；导入映射仍走 Stage → Validate → Preview → Domain Commands；保存视图只保存用户筛选偏好，不保存或篡改领域状态。
+9. **每两片后的发布检查**：生成 Windows `win-x64` Release 包、发布目录执行 Migration、运行核心集成测试；目标 Windows 11/IIS、Windows Service、TLS、NAS Restore 演练仍单列为 Production Integration Pending。
+
+### V1.1 Immediate Next Work
+
+- 当前进入 **1B Fact Rollback/Correction** 的设计与实现；在改模型前先读取现有 Deployment Fact、Current Projection 和历史 API，确认追加式事实的最小关联字段与 API 契约。
 - 发布命令必须校验最新评审为 Approved；发布后的不可修改约束保持不变。送审或已通过的草稿也禁止修改快照必需性，驳回后才可修改并重新送审。
 - 自动验收：创建 Draft、送审、未批准发布 HTTP 409、管理员批准、批准后发布、幂等重放、审计记录和非管理员拒绝处理评审。
 - 这不是 Phase 2 的双人审批或通用工作流框架；V1.1 只提供基线发布前的最小可审计评审门禁。
