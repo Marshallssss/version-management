@@ -1900,11 +1900,11 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 6C 已交付：中文“机台”界面已接入真实机台创建、列表、Current Actual 读取和幂等事实录入；事实录入表单要求原因并默认 PARTIAL。
 - 6D 已交付：中文“部署记录”页可按机台读取 Deployment/Observation Batch 历史，明确展示操作、覆盖范围、记录时间和生效时间；`catalog-acceptance.ps1` 覆盖 FULL InitialSnapshot 与 PARTIAL Observation 历史读取。
 - 6C 已交付：中文机台页支持创建、列表、Current Actual 读取和手工 Observation 录入；默认 `PARTIAL`，只有用户显式选择才发送 `FULL`，并要求填写原因。
-- 6C 复核补强进行中：手工 Observation 不再要求输入组件/版本 GUID，而是按所选机台所属项目显示中文组件与版本选择器；切换机台或组件会清空不再有效的选择。
-- 6B 验收补强进行中：自动化验收新增 FULL Observation 遗漏组件投影为 Absent 的断言，并验证 Observation 的时间不会回填为 `KnownInstalledAt`。
-- 6B 验收补强进行中：自动化验收还提供明确的历史 `KnownInstalledAt`，并验证后续未提供安装时间的 PARTIAL Observation 会保留该值，确保安装时间与观察时间始终独立。
-- 6B 复核补强进行中：Current Projection 仅接受不早于当前 `StateEffectiveAt` 的事实，迟到 Observation 仍保留在事实历史但不会回退当前状态；中文机台页分别展示状态生效时间与已知安装时间，避免两种时间语义混淆。
-- 6B 复核补强进行中：不同 `Idempotency-Key` 的相同 `(source_type, external_event_id)` 事实在 Application 层返回 HTTP 409，并继续由 PostgreSQL 唯一索引兜底；验收验证不会产生第二个事实批次。
+- 6C 复核补强已交付：手工 Observation 不再要求输入组件/版本 GUID，而是按所选机台所属项目显示中文组件与版本选择器；切换机台或组件会清空不再有效的选择。
+- 6B 验收补强已交付：自动化验收新增 FULL Observation 遗漏组件投影为 Absent 的断言，并验证 Observation 的时间不会回填为 `KnownInstalledAt`。
+- 6B 验收补强已交付：自动化验收还提供明确的历史 `KnownInstalledAt`，并验证后续未提供安装时间的 PARTIAL Observation 会保留该值，确保安装时间与观察时间始终独立。
+- 6B 复核补强已交付：Current Projection 仅接受不早于当前 `StateEffectiveAt` 的事实，迟到 Observation 仍保留在事实历史但不会回退当前状态；中文机台页分别展示状态生效时间与已知安装时间，避免两种时间语义混淆。
+- 6B 复核补强已交付：不同 `Idempotency-Key` 的相同 `(source_type, external_event_id)` 事实在 Application 层返回 HTTP 409，并继续由 PostgreSQL 唯一索引兜底；验收验证不会产生第二个事实批次。
 
 ## Step 7 — Drift/Risk/Compare
 
@@ -1914,7 +1914,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 7B 已交付：中文机台详情实时显示独立的“配置匹配”和“风险等级”字段，避免把 Match 与 Risk 合并成单一状态。
 - 7C 已交付：Core V1 Compare 支持 Baseline vs Baseline，仅返回 Same/Changed/Added/Removed 的快照差异；不扩展 Machine vs Machine 或通用 Compare。中文“配置比对”页已接入，`catalog-acceptance.ps1` 覆盖版本变化被标记为 `Changed`。
 - 7D 已交付：机台列表使用可重建的 `machine_drift_summaries` 投影，投影保存独立 Match 与 Risk，并在事实、目标和版本安全状态改变后刷新。列表提供摘要字段，单机摘要 API 用于自动化验收；真实 PostgreSQL Migration、Release build 和 `catalog-acceptance.ps1` 已通过。
-- 7C 复核补强进行中：Baseline Compare API 明确拒绝跨项目或同一基线比对，并基于冻结 Item 快照返回组件编码、名称和左右版本号；中文界面不再显示 GUID，自动验收覆盖 `Changed` 的可读快照。
+- 7C 复核补强已交付：Baseline Compare API 明确拒绝跨项目或同一基线比对，并基于冻结 Item 快照返回组件编码、名称和左右版本号；中文界面不再显示 GUID，自动验收覆盖 `Changed` 的可读快照。
 
 ## Step 8 — Trace/Impact/Search
 
@@ -1930,7 +1930,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 9B 已交付：中文“导入预览”页把 `componentCode,versionNumber` 行数据提交到 staging，API 校验并返回逐行预览；创建预览与提交都要求持久化 Idempotency-Key。`catalog-acceptance.ps1` 覆盖有效/无效行及预览重放。
 - 9C 已交付：预览校验同时检查组件项目归属、业务版本重复及同批次重复；只将错误写入 staging 行，仍不得写入业务表。`catalog-acceptance.ps1` 已覆盖既有 `opaque-b` 版本被拒绝预览。
 - 9D 已交付：`CreateComponentVersionCommand` 已成为 UI 与 Import 共用的版本创建命令，集中 sequence、重复检查与 Audit；导入 Commit 只调用该命令，要求 Idempotency-Key 并在事务内更新批次状态。中文 UI 仅为已验证批次显示提交操作，`catalog-acceptance.ps1` 已覆盖提交与重放。
-- 9D 复核补强进行中：Import Preview 读取端点同样要求 Engineer 角色与项目范围写权限，避免已知 Batch ID 绕过导入工作流的授权边界；自动化验收覆盖未加入项目的 Engineer 返回 HTTP 403。
+- 9D 复核补强已交付：Import Preview 读取端点同样要求 Engineer 角色与项目范围写权限，避免已知 Batch ID 绕过导入工作流的授权边界；自动化验收覆盖未加入项目的 Engineer 返回 HTTP 403。
 - 3A/3C 补强已交付：Component 与 Version 创建统一要求 reason 和 Idempotency-Key，Audit 保存创建原因；Import Commit 复用同一版本命令并传入批次原因。`catalog-acceptance.ps1` 已覆盖组件与版本同键重放。
 - 3D 补强已交付：版本 Safety 变更要求 Idempotency-Key，并在同一事务中写入生命周期、Audit、推荐撤销与受影响机台的 Drift Summary；真实验收覆盖 Blocked 后仍保持 `Matched + Critical`。
 - 3D 补强已交付：版本 Maturity 与 Safety 变更均接入持久化 Idempotency；Safety 在同一事务中写生命周期、Audit、推荐撤销和 Drift Summary。`catalog-acceptance.ps1` 已覆盖 Maturity 同键重放及 Blocked 后 `Matched + Critical`。
