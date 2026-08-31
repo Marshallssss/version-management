@@ -1912,6 +1912,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 7B 已交付：中文机台详情实时显示独立的“配置匹配”和“风险等级”字段，避免把 Match 与 Risk 合并成单一状态。
 - 7C 已交付：Core V1 Compare 支持 Baseline vs Baseline，仅返回 Same/Changed/Added/Removed 的快照差异；不扩展 Machine vs Machine 或通用 Compare。中文“配置比对”页已接入，`catalog-acceptance.ps1` 覆盖版本变化被标记为 `Changed`。
 - 7D 已交付：机台列表使用可重建的 `machine_drift_summaries` 投影，投影保存独立 Match 与 Risk，并在事实、目标和版本安全状态改变后刷新。列表提供摘要字段，单机摘要 API 用于自动化验收；真实 PostgreSQL Migration、Release build 和 `catalog-acceptance.ps1` 已通过。
+- 7C 复核补强进行中：Baseline Compare API 明确拒绝跨项目或同一基线比对，并基于冻结 Item 快照返回组件编码、名称和左右版本号；中文界面不再显示 GUID，自动验收覆盖 `Changed` 的可读快照。
 
 ## Step 8 — Trace/Impact/Search
 

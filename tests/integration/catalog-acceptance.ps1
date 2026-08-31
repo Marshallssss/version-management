@@ -145,7 +145,7 @@ $secondBaselineBody = @{ seriesCode = "SERIES2-$suffix"; baselineCode = "BL2-$su
 $secondBaseline = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/baselines")) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() } -ContentType 'application/json' -Body $secondBaselineBody
 Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/baselines/$($secondBaseline.id)/release")) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() } -ContentType 'application/json' -Body $releaseBody | Out-Null
 $compare = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/baselines/$($baseline.id)/compare/$($secondBaseline.id)"))
-if (@($compare.items | Where-Object { $_.componentId -eq $component.id -and $_.status -eq 'Changed' }).Count -ne 1) { throw 'Expected changed component in baseline comparison.' }
+if (@($compare.items | Where-Object { $_.componentId -eq $component.id -and $_.status -eq 'Changed' -and $_.componentCode -eq 'CONTROL' -and $_.leftVersionNumber -eq 'opaque-b' -and $_.rightVersionNumber -eq 'opaque-c' }).Count -ne 1) { throw 'Baseline comparison must return frozen readable snapshots and changed versions.' }
 $baselineList = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/baselines"))
 if ($baselineList.Count -ne 2 -or @($baselineList | Where-Object { $_.state -eq 'Released' }).Count -ne 2) { throw 'Expected listed released baseline snapshots.' }
 $standardBody = @{ configurationBaselineId = $baseline.id; reason = '自动化项目标准验收' } | ConvertTo-Json

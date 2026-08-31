@@ -203,6 +203,10 @@ public static class CatalogEndpoints
     private static async Task<IResult> CompareBaselinesAsync(Guid leftBaselineId, Guid rightBaselineId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        if (leftBaselineId == rightBaselineId) return Results.ValidationProblem(new Dictionary<string, string[]> { ["baseline"] = ["请选择两个不同的基线进行比对。"] });
+        var baselines = await db.ConfigurationBaselines.AsNoTracking().Where(item => item.Id == leftBaselineId || item.Id == rightBaselineId).Select(item => new { item.Id, item.ProjectId }).ToListAsync(cancellationToken);
+        if (baselines.Count != 2) return Results.NotFound();
+        if (baselines[0].ProjectId != baselines[1].ProjectId) return Results.ValidationProblem(new Dictionary<string, string[]> { ["baseline"] = ["仅支持同一项目内的基线比对。"] });
         var left = await db.BaselineItems.AsNoTracking()
             .Where(item => item.ConfigurationBaselineId == leftBaselineId)
             .ToDictionaryAsync(item => item.ConfigurationComponentId, cancellationToken);
@@ -230,8 +234,12 @@ public static class CatalogEndpoints
             {
                 componentId,
                 status,
+                componentCode = before?.ComponentCodeSnapshot ?? after?.ComponentCodeSnapshot,
+                componentName = before?.ComponentNameSnapshot ?? after?.ComponentNameSnapshot,
                 leftVersionId = before?.ComponentVersionId,
-                rightVersionId = after?.ComponentVersionId
+                leftVersionNumber = before?.VersionNumberSnapshot,
+                rightVersionId = after?.ComponentVersionId,
+                rightVersionNumber = after?.VersionNumberSnapshot
             };
         });
 
