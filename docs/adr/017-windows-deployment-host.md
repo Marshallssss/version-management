@@ -1,6 +1,6 @@
 # ADR-017: Windows 11 or Windows Server IIS deployment host
 
-Status: Accepted  
+Status: Accepted
 Date: 2026-08-31
 
 ## Decision
