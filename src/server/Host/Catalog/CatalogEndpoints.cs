@@ -39,6 +39,7 @@ public static class CatalogEndpoints
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/target-history", GetMachineTargetHistoryAsync).RequireAuthorization();
         endpoints.MapPost("/api/v1/machines/{machineId:guid}/facts", RecordFactsAsync).RequireAuthorization("Engineer");
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/configuration", GetMachineConfigurationAsync).RequireAuthorization();
+        endpoints.MapGet("/api/v1/machines/{machineId:guid}/configuration-at", GetMachineConfigurationAtAsync).RequireAuthorization();
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/facts", ListMachineFactsAsync).RequireAuthorization();
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/drift", GetMachineDriftAsync).RequireAuthorization();
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/drift-summary", GetMachineDriftSummaryAsync).RequireAuthorization();
@@ -313,6 +314,53 @@ public static class CatalogEndpoints
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         return TypedResults.Ok(await db.MachineCurrentConfigurations.AsNoTracking().Where(x => x.MachineId == machineId).OrderBy(x => x.ConfigurationComponentId).Select(x => new { componentId = x.ConfigurationComponentId, versionId = x.ComponentVersionId, state = x.State.ToString(), stateEffectiveAt = x.StateEffectiveAt, knownInstalledAt = x.KnownInstalledAt }).ToListAsync(cancellationToken));
+    }
+
+    private static async Task<IResult> GetMachineConfigurationAtAsync(Guid machineId, DateTimeOffset? at, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        if (at is null) return Results.ValidationProblem(new Dictionary<string, string[]> { ["at"] = ["必须提供 ISO 8601 时间点。"] });
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        if (!await db.Machines.AnyAsync(machine => machine.Id == machineId, cancellationToken)) return Results.NotFound();
+
+        var events = await db.DeploymentItems.AsNoTracking()
+            .Join(db.DeploymentBatches.AsNoTracking(), item => item.DeploymentBatchId, batch => batch.Id, (item, batch) => new { item, batch })
+            .Where(entry => entry.batch.MachineId == machineId && entry.batch.EffectiveAt <= at.Value)
+            .OrderBy(entry => entry.batch.EffectiveAt)
+            .ThenBy(entry => entry.batch.RecordedAt)
+            .ThenBy(entry => entry.item.Id)
+            .Select(entry => new
+            {
+                componentId = entry.item.ConfigurationComponentId,
+                versionId = entry.item.NewComponentVersionId,
+                state = entry.item.Result == DeploymentItemResult.Absent ? "Absent" : "Present",
+                stateEffectiveAt = entry.batch.EffectiveAt,
+                recordedAt = entry.batch.RecordedAt,
+                knownInstalledAt = entry.item.KnownInstalledAt
+            })
+            .ToListAsync(cancellationToken);
+
+        var latestByComponent = events.GroupBy(entry => entry.componentId).Select(group => group.Last()).OrderBy(entry => entry.componentId).ToArray();
+        var componentIds = latestByComponent.Select(entry => entry.componentId).ToArray();
+        var versionIds = latestByComponent.Where(entry => entry.versionId is not null).Select(entry => entry.versionId!.Value).ToArray();
+        var componentNames = await db.ConfigurationComponents.AsNoTracking().Where(component => componentIds.Contains(component.Id)).ToDictionaryAsync(component => component.Id, component => new { component.ComponentCode, component.Name }, cancellationToken);
+        var versionNumbers = await db.ComponentVersions.AsNoTracking().Where(version => versionIds.Contains(version.Id)).ToDictionaryAsync(version => version.Id, version => version.VersionNumber, cancellationToken);
+
+        return TypedResults.Ok(new
+        {
+            asOf = at.Value,
+            items = latestByComponent.Select(entry => new
+            {
+                entry.componentId,
+                componentCode = componentNames[entry.componentId].ComponentCode,
+                componentName = componentNames[entry.componentId].Name,
+                entry.versionId,
+                versionNumber = entry.versionId is null ? null : versionNumbers[entry.versionId.Value],
+                entry.state,
+                entry.stateEffectiveAt,
+                entry.recordedAt,
+                entry.knownInstalledAt
+            })
+        });
     }
 
     private static async Task<IResult> ListMachineFactsAsync(Guid machineId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)

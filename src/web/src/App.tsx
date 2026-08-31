@@ -5,6 +5,7 @@ import { enqueueNoopJob, getSystemStatus, getSystemVersion, type BackgroundJobSt
 import { RollbackFactPanel } from './RollbackFactPanel'
 import { BulkTargetPanel } from './BulkTargetPanel'
 import { BulkFactPanel } from './BulkFactPanel'
+import { HistoricalConfigurationPanel } from './HistoricalConfigurationPanel'
 
 const navigation = [
   { id: 'overview', label: '运行总览', available: true },
@@ -380,6 +381,7 @@ function App() {
           <section className="pending-page"><span className="section-index">后续垂直切片</span><h2>{selectedNavigation.label}尚未实现</h2><p>当前版本只完成了运行基础设施和后台任务链路。{selectedNavigation.label}将在核心领域模型与对应 API 落地后开放，现阶段不会提供无法保存或追溯的占位操作。</p><button className="primary-action" type="button" onClick={() => setActivePage('overview')}>返回运行总览</button></section>
         )}
         {activePage === 'machines' && selectedMachine && <RollbackFactPanel machineId={selectedMachine.id} components={machineProjectDetail.data?.components ?? []} />}
+        {activePage === 'machines' && selectedMachine && <HistoricalConfigurationPanel machine={selectedMachine} />}
         {activePage === 'machines' && projects.data && <BulkTargetPanel projects={projects.data} />}
         {activePage === 'deployments' && projects.data && <BulkFactPanel projects={projects.data} />}
       </main>

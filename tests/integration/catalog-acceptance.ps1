@@ -243,6 +243,9 @@ $staleObservation = @{ operationType = 'Observation'; coverage = 'Partial'; sour
 Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($machine.id)/facts")) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() } -ContentType 'application/json' -Body $staleObservation | Out-Null
 $afterStaleObservation = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($machine.id)/configuration"))
 if (@($afterStaleObservation | Where-Object { $_.componentId -eq $component.id -and $_.versionId -eq $firstVersion.id -and $_.state -eq 'Present' }).Count -ne 1) { throw 'An earlier observation must not overwrite a newer current configuration state.' }
+$historicalAt = [DateTimeOffset]::UtcNow.AddDays(-6).ToString('O')
+$historicalConfiguration = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($machine.id)/configuration-at?at=$([Uri]::EscapeDataString($historicalAt))"))
+if (@($historicalConfiguration.items | Where-Object { $_.componentId -eq $component.id -and $_.versionId -eq $secondVersion.id -and $_.state -eq 'Present' -and $_.knownInstalledAt -eq $null }).Count -ne 1) { throw 'Historical configuration must rebuild the effective fact state without substituting the current projection or observation time for installed time.' }
 $rollbackHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString(); 'X-Correlation-ID' = "rollback-$suffix" }
 $rollbackBody = @{ operationType = 'Rollback'; coverage = 'Partial'; sourceType = 'automation'; reason = '自动化组件回退验收'; items = @(@{ componentId = $component.id; versionId = $secondVersion.id; absent = $false; knownInstalledAt = $null }) } | ConvertTo-Json -Depth 5
 $rollback = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($machine.id)/facts")) -Headers $rollbackHeaders -ContentType 'application/json' -Body $rollbackBody
