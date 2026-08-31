@@ -33,7 +33,7 @@ Project
 - React + TypeScript + Vite + Ant Design + TanStack Query。
 - ASP.NET Core / .NET 10。
 - EF Core + Npgsql。
-- PostgreSQL 18 Native Windows Service。
+- PostgreSQL 18 Native Windows Service（计划生产目标；当前实际验证运行时为 PostgreSQL 17，正式目标版本与 Windows Service 验收仍待完成）。
 - Modular Monolith。
 - Single Database、Single Server First。
 - IIS 托管单一 ASP.NET Core Application。
@@ -1447,7 +1447,7 @@ Audit 表 Append-only；应用账号无 Update/Delete 权限。领域历史仍�
 
 ## Database
 
-- PostgreSQL 18 最新受支持 Minor。
+- PostgreSQL 18 最新受支持 Minor（目标 Windows Server 的生产前置条件；本机仅完成 PostgreSQL 17 开发实例验证）。
 - `pg_trgm`。
 - GIN/FTS。
 - Range/Exclusion Constraint。
@@ -1487,7 +1487,7 @@ React Vite Build 输出复制到 ASP.NET Core `wwwroot`。API Route 先映射，
 ## U2. Worker and PostgreSQL
 
 - `ConfigHub.Worker` 作为低权限 Windows Service。
-- PostgreSQL 18 作为 Native Windows Service。
+- PostgreSQL 18 作为 Native Windows Service（计划形态；当前未在目标服务器验收）。
 - API 与 Worker 使用独立数据库账号。
 - PostgreSQL 只允许本机应用连接。
 - Worker 负责 Import、Background Jobs、Drift Summary Refresh。
