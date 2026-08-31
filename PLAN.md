@@ -1943,7 +1943,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 ## Step 10 — Production Hardening
 
 - Permission、Immutability、Temporal、Projection Rebuild、Performance、Backup Restore、Upgrade、Security Tests。
-- 10A 进行中：认证 Project Create 的 HTTP 401 自动验收继续保留；完整角色矩阵需以可控身份种子和 HTTP 客户端测试夹具实施。验收发现旧 Clone Preview API 会落入 SPA fallback，因此移除无副作用的 Preview Command，中文界面改为直接基于已加载 Project Detail 显示将复制的组件数和排除的版本数。
+- 10A 已交付：认证 Project Create 的 HTTP 401 自动验收继续保留；`catalog-acceptance.ps1` 以动态用户与独立 Cookie Session 形成可控 HTTP 角色矩阵，验证匿名拒绝、Viewer 拒绝、Engineer 不能访问管理员目录但可在其项目创建 Component/Version 和入队后台任务、未加入项目的 Engineer/SeniorEngineer 被拒绝，以及已加入项目的 SeniorEngineer 可创建 Baseline；该工程师创建的组件带版本参与 FULL 快照，继续验证 Partial Observation 的不丢失语义和三组件树的 Clone 不复制版本规则。验收发现旧 Clone Preview API 会落入 SPA fallback，因此移除无副作用的 Preview Command，中文界面改为直接基于已加载 Project Detail 显示将复制的组件数和排除的版本数。
 - 10A 可用性补强已交付：在目录和系统状态读取端点收紧为登录后访问后，中文前端将所有受保护查询绑定到当前身份；未登录状态不再触发无意义的 HTTP 401 或将受保护数据误显示为“正在读取”，运行总览改显示“—”而非误导性零值，受保护导航会引导至中文登录页，登录后自动恢复读取；登出清除会话查询缓存，避免旧身份数据残留在界面。
 - 10B 已交付：仅 Admin 可调用的 Drift Summary 重建命令只重新计算 `machine_drift_summaries`，不修改 Target、Actual 或事实历史；命令要求 reason、correlation id、Audit 与持久化 Idempotency。`catalog-acceptance.ps1` 已覆盖重建和同键重放，Release、真实 Migration 与完整集成验收均已通过。
 - 10C 已交付（本机 smoke）：`ops/windows/backup.ps1` 已在本机 PostgreSQL 17 上完成 Online 备份，覆盖数据库 custom dump、文件复制、manifest 与 SHA-256 校验。未执行 Restore，正式 Windows Server 的 NAS、服务账户和恢复演练仍属于 Production Integration Pending。
