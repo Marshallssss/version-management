@@ -55,7 +55,7 @@ start-local.cmd
 
 ## 严格代理或离线本地运行
 
-默认的 `dotnet restore` 会使用当前 NuGet 配置；若公司代理拦截 `api.nuget.org`，请使用公司 NuGet 镜像，或从已成功还原的构建机导出离线包源。离线源和 `NuGet.Config` 位于 `.confighub`，不会提交到 Git。
+默认的 `dotnet restore` 会使用当前 NuGet 配置；若公司代理拦截 `api.nuget.org`，请使用公司 NuGet 镜像，或从已成功还原的构建机导出离线包源。离线源和 `NuGet.Config` 位于 `.confighub`，不会提交到 Git。仓库同时通过 Git LFS 发布 `artifacts/ConfigHub-offline-nuget-win-x64-*.zip`，方便严格内网直接取得已验证的离线依赖包。
 
 在具备已还原 NuGet 缓存的构建机执行：
 
@@ -63,7 +63,14 @@ start-local.cmd
 .\ops\windows\export-offline-nuget-source.ps1 -Runtime win-x64
 ```
 
-将生成的 `.confighub` 目录连同源码复制到受限机器后，本地启动使用：
+从 GitHub 克隆时请先拉取 LFS 文件并解压该离线包到项目根目录：
+
+```powershell
+git lfs pull
+Expand-Archive .\artifacts\ConfigHub-offline-nuget-win-x64-*.zip -DestinationPath . -Force
+```
+
+也可以将构建机生成的 `.confighub` 目录连同源码复制到受限机器。完成后，本地启动使用：
 
 ```powershell
 .\start-local.ps1 -NuGetConfigFile .\.confighub\NuGet.Config

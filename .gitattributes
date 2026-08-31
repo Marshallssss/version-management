@@ -1,0 +1,1 @@
+artifacts/ConfigHub-offline-nuget-win-x64-*.zip filter=lfs diff=lfs merge=lfs -text

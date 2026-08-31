@@ -13,7 +13,9 @@ src/server/Host/wwwroot/*
 .env
 .env.*
 !.env.example
-artifacts/
+artifacts/*
+!artifacts/ConfigHub-offline-nuget-win-x64-*.zip
+artifacts/ConfigHub-offline-nuget-win-x64-20260831142143.zip
 .confighub/
 coverage/
 *.log
