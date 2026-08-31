@@ -30,8 +30,8 @@ $isAdministrator = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::
 Add-Check '管理员会话' $isAdministrator '安装和恢复必须在提升权限 PowerShell 中运行。'
 
 $operatingSystem = Get-CimInstance Win32_OperatingSystem
-$isServer = $operatingSystem.ProductType -ne 1
-Add-Check 'Windows Server' $isServer "$($operatingSystem.Caption)（版本 $($operatingSystem.Version)）"
+$isSupportedWindowsHost = $operatingSystem.Caption -match 'Windows 1[01]|Windows Server'
+Add-Check 'Windows 部署主机' $isSupportedWindowsHost "$($operatingSystem.Caption)（版本 $($operatingSystem.Version)）；支持 Windows 11 Pro/Enterprise 或 Windows Server。"
 Add-Check 'PowerShell 7.4' ($PSVersionTable.PSVersion -ge [version]'7.4') "当前版本 $($PSVersionTable.PSVersion)"
 
 $webServerFeature = Get-Command Get-WindowsFeature -ErrorAction SilentlyContinue
@@ -39,7 +39,13 @@ if ($null -ne $webServerFeature) {
     $iisInstalled = (Get-WindowsFeature Web-Server).Installed
     Add-Check 'IIS Web Server' $iisInstalled '需要 Web Server 角色。'
 } else {
-    Add-Check 'IIS Web Server' $false '未找到 Get-WindowsFeature；请在 Windows Server 上运行。'
+    try {
+        $iisFeature = Get-WindowsOptionalFeature -Online -FeatureName IIS-WebServerRole -ErrorAction Stop
+        $iisInstalled = $iisFeature.State -eq 'Enabled'
+        Add-Check 'IIS Web Server' $iisInstalled "Windows Optional Feature IIS-WebServerRole: $($iisFeature.State)"
+    } catch {
+        Add-Check 'IIS Web Server' $false "无法读取 IIS 安装状态：$($_.Exception.Message)"
+    }
 }
 
 $aspNetCoreRuntime = (& dotnet --list-runtimes 2>$null | Where-Object { $_ -match '^Microsoft\.AspNetCore\.App 10\.' } | Select-Object -First 1)

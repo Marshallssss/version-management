@@ -1447,7 +1447,7 @@ Audit 表 Append-only；应用账号无 Update/Delete 权限。领域历史仍�
 
 ## Database
 
-- PostgreSQL 18 最新受支持 Minor（目标 Windows Server 的生产前置条件；本机仅完成 PostgreSQL 17 开发实例验证）。
+- PostgreSQL 18 最新受支持 Minor（目标 Windows 部署主机的生产前置条件；本机仅完成 PostgreSQL 17 开发实例验证）。
 - `pg_trgm`。
 - GIN/FTS。
 - Range/Exclusion Constraint。
@@ -1800,7 +1800,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 
 - 将本 PLAN 作为架构基线。
 - 建立 ADR-001 至 ADR-015。
-- 确认 Windows Server、DNS、TLS、Service Accounts、PostgreSQL Ownership、Backup Destination。
+- 确认 Windows 部署主机、DNS、TLS、Service Accounts、PostgreSQL Ownership、Backup Destination。
 - 准备一个真实 Project 的脱敏样本。
 
 ## Step 1 — Windows Production Skeleton
@@ -1833,7 +1833,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 
 - 本地功能验收已完成：.NET 10、React 生产构建、PostgreSQL 17、Foundation Migration、Host、数据库健康检查和 PostgreSQL-backed Worker 已在单机环境连通。
 - 本机 PostgreSQL 17 为当前用户目录下的开发实例，仅允许本机应用连接；它不是已安装和受运维管理的正式 Windows Service。
-- **Production Integration Pending**：IIS Application Pool 与 Worker Windows Service、正式服务账户、Machine 环境变量保护、HTTPS/TLS、DNS、Windows Firewall、NAS 备份/恢复演练及正式 PostgreSQL Ownership 仍待在目标 Windows Server 上验收。
+- **Production Integration Pending**：IIS Application Pool 与 Worker Windows Service、正式服务账户、Machine 环境变量保护、HTTPS/TLS、DNS、Windows Firewall、NAS 备份/恢复演练及正式 PostgreSQL Ownership 仍待在目标 Windows 部署主机上验收。
 - 因此 Step 1C 可作为本地功能基础进入 Step 2/3，但不能标记为生产部署验收完成。
 
 ## Step 2 — Foundation
@@ -1951,18 +1951,18 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 10C 复核补强：2026-08-31 再次以用户态 PostgreSQL 17 的 `pg_dump.exe` 执行 Online backup smoke，验证 custom dump、文件复制、manifest 与 SHA-256 校验。发现 `C:\Program Files\PostgreSQL\17\bin\postgres.exe` 在本机异常退出，而同版本用户态运行时可正常启动数据目录；运维脚本继续允许显式 `PgDumpCommand`，正式服务必须在目标 Windows Server 以其受管理的 PostgreSQL Windows Service 验收，不能把本机用户态路径当作生产结论。
 - 10C 恢复前置复核：2026-08-31 对 `restore.ps1 -WhatIf` 使用临时数据库/文件目录执行预检；脚本在 `Assert-Administrator` 正确停止，当前非提升权限会话未执行 Restore、Drop Database、IIS 或 Worker 操作。完整恢复演练仍需在提升权限且具备 IIS/正式安装目录的目标 Windows Server 完成。
 - 10D 发布包复核：2026-08-31 以 `ops/windows/publish.ps1 -Version 0.1.0-rehearsal` 生成 Windows `win-x64` 发布包；`release-manifest.json` 记录 77 个文件，包含 Host、Worker 与 SPA `wwwroot`。发布目录中的 Host 已对本机 PostgreSQL 17 成功执行 `--migrate`；IIS 安装和 Windows Service 注册仍待目标服务器验收。
-- 10D 发布就绪复核：2026-08-31 通过根目录离线 `NuGet.Config` 对 `win-x64` 资产执行真实 restore，使用 `publish.ps1 -Version 0.1.0-production-readiness.20260831 -SkipRestore -SkipFrontendBuild` 生成 77 文件的 Host/Worker/SPA 发布包；manifest 文件存在性校验及发布目录 Host 的真实 `--migrate` 均通过。当前主机只读预检仍明确失败于非提升权限、Windows 11 而非 Windows Server、缺少 IIS/Hosting Bundle/正式 PostgreSQL Windows Service、服务账户、TLS 与 NAS 备份根目录；这些继续属于 Production Integration Pending，不能以本机发布包替代。
+- 10D 发布就绪复核：2026-08-31 通过根目录离线 `NuGet.Config` 对 `win-x64` 资产执行真实 restore，使用 `publish.ps1 -Version 0.1.0-production-readiness.20260831 -SkipRestore -SkipFrontendBuild` 生成 77 文件的 Host/Worker/SPA 发布包；manifest 文件存在性校验及发布目录 Host 的真实 `--migrate` 均通过。当前主机只读预检仍明确失败于非提升权限、缺少 IIS/Hosting Bundle/正式 PostgreSQL Windows Service、服务账户、TLS 与 NAS 备份根目录；Windows 11 现按 ADR-017 作为支持的部署主机，不再是失败原因。这些继续属于 Production Integration Pending，不能以本机发布包替代。
 - 10D 本机启动复核：2026-08-31 实际运行 `start-local.ps1 -Port 5082 -SkipFrontendBuild`，确认 Host 监听 `0.0.0.0:5082`，SPA 根路径、`/health/live` 与 `/health/ready` 均返回 HTTP 200；脚本会输出当前 LAN URL。该结果只证明开发机可运行，不替代 IIS、Windows Service、TLS 与防火墙的目标服务器验收。
 - 10D 预检补强：`tests/integration/windows-operations-preflight.ps1` 固化发布、安装、启动、停止、健康检查、备份、恢复、升级与诊断脚本的 PowerShell 7.4 语法预检；该自动化检查不模拟或宣称完成 IIS/Windows Service 的目标服务器操作。
-- 10D 目标服务器准备补强：新增只读 `ops/windows/preflight.ps1`，在目标机可执行检查提升权限、Windows Server、IIS、.NET 10 Hosting Bundle、PostgreSQL Service/客户端、受保护机器环境变量、DNS、TLS 证书、NAS 备份根目录，以及安装后的 Worker/HTTPS readiness；失败默认非零退出，`-ReportOnly` 仅用于记录未完成环境。该脚本经过本机实跑修正 PowerShell 参数表达式，并输出可导出 JSON/CSV 的结构化检查结果；`windows-operations-preflight.ps1` 还会执行其 ReportOnly 契约并验证结构化结果，为 Production Integration Pending 提供可执行验收证据，但不替代目标服务器实际通过。
-- 10D 严格内网代理补强已交付：`publish.ps1` 将 NuGet restore、npm install/build 与无网络 publish 显式分离，并按发布 Runtime 还原资产；构建机可传入公司 NuGet config 和 npm registry，已预热对应 Runtime 缓存的隔离构建机可用 `-SkipRestore -SkipFrontendBuild` 打包，脚本会预先拒绝缺少 `win-x64` 运行时资产的伪离线发布并给出预热命令。目标 Windows Server 只接收 release package，不运行 restore/npm 或依赖公网；`ops/windows/nuget.config.example` 与运维文档说明内网镜像及 .NET Hosting Bundle 的内部软件分发要求。
+- 10D 目标部署主机准备补强：新增只读 `ops/windows/preflight.ps1`，在 Windows 11 Pro/Enterprise 或 Windows Server 目标机可执行检查提升权限、IIS、.NET 10 Hosting Bundle、PostgreSQL Service/客户端、受保护机器环境变量、DNS、TLS 证书、NAS 备份根目录，以及安装后的 Worker/HTTPS readiness；Windows 11 使用 Optional Feature API 检查 IIS。失败默认非零退出，`-ReportOnly` 仅用于记录未完成环境。该脚本经过本机实跑修正 PowerShell 参数表达式，并输出可导出 JSON/CSV 的结构化检查结果；`windows-operations-preflight.ps1` 还会执行其 ReportOnly 契约并验证结构化结果，为 Production Integration Pending 提供可执行验收证据，但不替代目标主机实际通过。
+- 10D 严格内网代理补强已交付：`publish.ps1` 将 NuGet restore、npm install/build 与无网络 publish 显式分离，并按发布 Runtime 还原资产；构建机可传入公司 NuGet config 和 npm registry，已预热对应 Runtime 缓存的隔离构建机可用 `-SkipRestore -SkipFrontendBuild` 打包，脚本会预先拒绝缺少 `win-x64` 运行时资产的伪离线发布并给出预热命令。目标 Windows 部署主机只接收 release package，不运行 restore/npm 或依赖公网；`ops/windows/nuget.config.example` 与运维文档说明内网镜像及 .NET Hosting Bundle 的内部软件分发要求。
 - 10D 严格代理本地启动补强已交付：根目录的 `NuGet.Config` 默认指向 `.confighub\offline-nuget`，使所有在仓库内执行的 `dotnet restore/build/run` 自动使用本地源，不再隐式回落到 `api.nuget.org`。`start-local.ps1` 也会在存在 `.confighub\NuGet.Config` 时自动选择该离线源，并保留 `-NuGetConfigFile` 以覆盖为公司镜像；后续 Host/Migration 一律 `--no-restore`。本地启动连接串优先读取 `%LOCALAPPDATA%\ConfigHub\appsettings.local.json`，首次输入真实连接串会自动持久化，后续无需重复输入；脚本会拒绝 `$env:ConnectionStrings__...`、`你的密码`、`...` 等被当成字面量的错误值，避免 Npgsql 初始化崩溃并回退提示真实连接串。`export-offline-nuget-source.ps1` 从已还原资产精确导出依赖闭包、RuntimeIdentifier 对应的 .NET/ASP.NET Core/WindowsDesktop 运行时包、离线 `NuGet.Config` 与 SHA-256 manifest，受限机器可在 `.confighub` 中使用该源启动。全新包目录已对该本地源成功 restore，导出脚本也纳入 Windows 运维预检；前端同时支持指定 `-NpmRegistry` 或复用已构建 SPA。为让严格内网可从 GitHub 获得已验证包，`artifacts/ConfigHub-offline-nuget-win-x64-*.zip` 作为唯一例外通过 Git LFS 版本化；克隆后必须执行 `git lfs pull` 再解压至项目根目录。
 - 10D 已交付（本地可用性）：新增根目录 `start-local.ps1` 与 `start-local.cmd` 一键启动脚本，支持前端构建、数据库迁移、Bootstrap Admin 初始化/重置、局域网 `0.0.0.0:5080` 监听和可用 LAN URL 输出；修复前端将登录成功的 HTTP 204 响应误判为失败的问题。
 
 ## Step 11 — Internal Pilot
 
 - 一个真实 Project、20–50 台 Machine、现有 Excel 数据和真实工程师验收。
-- 11A 试点准备已交付：`docs/operations/internal-pilot.md` 固化生产集成前置、试点范围、逐项验收场景、退出门槛和不含秘密的证据留存规则；目标 Windows Server PostInstall preflight 通过后即可执行，不以本机开发环境代替试点结论。
+- 11A 试点准备已交付：`docs/operations/internal-pilot.md` 固化生产集成前置、试点范围、逐项验收场景、退出门槛和不含秘密的证据留存规则；目标 Windows 部署主机 PostInstall preflight 通过后即可执行，不以本机开发环境代替试点结论。
 
 ---
 
@@ -1970,7 +1970,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 
 以下不会改变核心 Domain Model，但 Step 1 前必须落实：
 
-1. Windows Server 2022 或 2025 的正式版本。
+1. Windows 11 Pro/Enterprise 或 Windows Server 2022/2025 的正式部署主机。
 2. 正式 DNS，例如 `https://config-server/`。
 3. HTTPS 证书来源和更新责任。
 4. IIS/Worker/PostgreSQL Service Account 模型。

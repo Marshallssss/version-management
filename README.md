@@ -8,7 +8,7 @@
 - Step 0 — Decision Lock 已完成。
 - Step 1 — Windows Production Skeleton 已完成本地功能验收。
 - 当前本机使用用户态 PostgreSQL 17 开发实例，Host、Migration、Worker 和后台任务已验证可用。
-- **Production Integration Pending**：IIS/Windows Service、正式服务账户、TLS、DNS、Firewall、NAS 备份恢复和正式 PostgreSQL 管理仍需在目标 Windows Server 上完成验收；计划的 PostgreSQL 18 Native Windows Service 也尚未在目标环境验证。
+- **Production Integration Pending**：IIS/Windows Service、正式服务账户、TLS、DNS、Firewall、NAS 备份恢复和正式 PostgreSQL 管理仍需在目标 Windows 部署主机上完成验收；支持 Windows 11 Pro/Enterprise 或 Windows Server，计划的 PostgreSQL 18 Native Windows Service 也尚未在目标环境验证。
 - Step 2 Foundation 已交付：本地 Identity/Cookie、全局角色与项目成员范围授权、Audit、Correlation、Idempotency，以及中文用户和项目成员管理界面。
 - 本地身份体验已补强：登录使用用户名而非必须邮箱；密码规则为 6 位以上；Bootstrap Admin 支持本地一键启动脚本初始化和密码重置。
 - Step 3 已交付：Project、Component Tree、opaque Version Sequence、独立 Lifecycle、Project Clone、中文版本详情与自动化验收。

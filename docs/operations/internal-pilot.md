@@ -1,6 +1,6 @@
 # Step 11 内部试点执行单
 
-本执行单用于 Core V1 在目标 Windows Server 完成生产集成验收后开展首个内部试点。试点不替代 Production Integration Pending 的 IIS、Worker、TLS、DNS、Firewall、PostgreSQL Service 和 NAS 恢复验收；这些前提必须先通过 `ops/windows/preflight.ps1 -Stage PostInstall`。
+本执行单用于 Core V1 在目标 Windows 部署主机完成生产集成验收后开展首个内部试点。支持 Windows 11 Pro/Enterprise 或 Windows Server；试点不替代 Production Integration Pending 的 IIS、Worker、TLS、DNS、Firewall、PostgreSQL Service 和 NAS 恢复验收；这些前提必须先通过 `ops/windows/preflight.ps1 -Stage PostInstall`。
 
 ## 试点边界
 

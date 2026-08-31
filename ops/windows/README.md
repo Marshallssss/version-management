@@ -17,7 +17,7 @@ Managed File Store           NAS / Network Share Backups
 
 ## Prerequisites
 
-- Windows Server 2022 or newer
+- Windows 11 Pro/Enterprise 或 Windows Server 2022 及更高版本
 - IIS with Web Server role
 - .NET 10 Hosting Bundle
 - PostgreSQL supported release with `pg_dump`, `pg_restore`, `createdb` and `dropdb`

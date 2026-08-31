@@ -20,3 +20,4 @@
 | 014 | Filesystem attachment store and two backup modes |
 | 015 | Unified import pipeline and persistent idempotency |
 | 016 | Observation integrity and installation-time provenance |
+| 017 | Windows 11 or Windows Server IIS deployment host |
