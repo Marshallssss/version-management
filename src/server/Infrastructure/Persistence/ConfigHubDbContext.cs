@@ -46,6 +46,9 @@ public sealed class ConfigHubDbContext(DbContextOptions<ConfigHubDbContext> opti
     public DbSet<BulkOperationItem> BulkOperationItems => Set<BulkOperationItem>();
     public DbSet<ImportBatch> ImportBatches => Set<ImportBatch>();
     public DbSet<ImportRow> ImportRows => Set<ImportRow>();
+    public DbSet<VersionExposureSnapshot> VersionExposureSnapshots => Set<VersionExposureSnapshot>();
+    public DbSet<VersionExposureMachine> VersionExposureMachines => Set<VersionExposureMachine>();
+    public DbSet<VersionExposureBaseline> VersionExposureBaselines => Set<VersionExposureBaseline>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {

@@ -47,6 +47,7 @@ public static class CatalogEndpoints
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/compare-history", CompareMachineCurrentToHistoryAsync).RequireAuthorization();
         endpoints.MapGet("/api/v1/baselines/{leftBaselineId:guid}/compare/{rightBaselineId:guid}", CompareBaselinesAsync).RequireAuthorization();
         endpoints.MapGet("/api/v1/component-versions/{versionId:guid}/impact", GetVersionImpactAsync).RequireAuthorization();
+        endpoints.MapGet("/api/v1/component-versions/{versionId:guid}/exposures", GetVersionExposureSnapshotsAsync).RequireAuthorization();
         endpoints.MapGet("/api/v1/component-versions/{versionId:guid}", GetVersionDetailAsync).RequireAuthorization();
         endpoints.MapGet("/api/v1/search", SearchAsync).RequireAuthorization();
         endpoints.MapGet("/api/v1/dashboard", GetDashboardAsync).RequireAuthorization();
@@ -495,6 +496,16 @@ public static class CatalogEndpoints
         var historicalMachineIds = await db.DeploymentItems.Where(item => item.NewComponentVersionId == versionId).Join(db.DeploymentBatches, item => item.DeploymentBatchId, batch => batch.Id, (item, batch) => batch.MachineId).Distinct().ToArrayAsync(cancellationToken);
         var recentFacts = await db.DeploymentItems.Where(item => item.NewComponentVersionId == versionId).Join(db.DeploymentBatches, item => item.DeploymentBatchId, batch => batch.Id, (item, batch) => new { machineId = batch.MachineId, operationType = batch.OperationType.ToString(), effectiveAt = batch.EffectiveAt }).OrderByDescending(item => item.effectiveAt).Take(20).ToListAsync(cancellationToken);
         return TypedResults.Ok(new { versionId, usedBaselineIds = baselineIds, currentMachineIds, targetMachineIds, historicalMachineIds, recentFacts });
+    }
+
+    private static async Task<IResult> GetVersionExposureSnapshotsAsync(Guid versionId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var snapshots = await db.VersionExposureSnapshots.AsNoTracking().Where(item => item.ComponentVersionId == versionId).OrderByDescending(item => item.BlockedAt).Select(item => new { id = item.Id, blockedAt = item.BlockedAt, blockedBy = item.BlockedBy, reason = item.Reason }).ToListAsync(cancellationToken);
+        var ids = snapshots.Select(item => item.id).ToArray();
+        var machines = await db.VersionExposureMachines.AsNoTracking().Where(item => ids.Contains(item.VersionExposureSnapshotId)).GroupBy(item => item.VersionExposureSnapshotId).Select(group => new { snapshotId = group.Key, current = group.Count(item => item.Role == VersionExposureMachineRole.Current), target = group.Count(item => item.Role == VersionExposureMachineRole.Target), historical = group.Count(item => item.Role == VersionExposureMachineRole.Historical) }).ToListAsync(cancellationToken);
+        var baselines = await db.VersionExposureBaselines.AsNoTracking().Where(item => ids.Contains(item.VersionExposureSnapshotId)).GroupBy(item => item.VersionExposureSnapshotId).Select(group => new { snapshotId = group.Key, count = group.Count() }).ToListAsync(cancellationToken);
+        return TypedResults.Ok(snapshots.Select(snapshot => new { snapshot.id, snapshot.blockedAt, snapshot.blockedBy, snapshot.reason, currentMachineCount = machines.SingleOrDefault(item => item.snapshotId == snapshot.id)?.current ?? 0, targetMachineCount = machines.SingleOrDefault(item => item.snapshotId == snapshot.id)?.target ?? 0, historicalMachineCount = machines.SingleOrDefault(item => item.snapshotId == snapshot.id)?.historical ?? 0, baselineCount = baselines.SingleOrDefault(item => item.snapshotId == snapshot.id)?.count ?? 0 }));
     }
 
     private static async Task<IResult> GetVersionDetailAsync(Guid versionId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
@@ -1321,6 +1332,17 @@ public static class CatalogEndpoints
         {
             var active = await database.VersionRecommendations.SingleOrDefaultAsync(item => item.ComponentVersionId == version.Id && item.RevokedAt == null, cancellationToken);
             if (active is not null) { active.RevokedAt = DateTimeOffset.UtcNow; active.RevokedBy = actor; active.RevokeReason = "版本已被阻断。"; }
+            var snapshot = new VersionExposureSnapshot { Id = Guid.NewGuid(), ComponentVersionId = version.Id, BlockedAt = now, BlockedBy = actor, Reason = request.Reason.Trim() };
+            database.VersionExposureSnapshots.Add(snapshot);
+            var baselineIds = await database.BaselineItems.Where(item => item.ComponentVersionId == version.Id).Select(item => item.ConfigurationBaselineId).Distinct().ToArrayAsync(cancellationToken);
+            foreach (var baselineId in baselineIds) database.VersionExposureBaselines.Add(new VersionExposureBaseline { Id = Guid.NewGuid(), VersionExposureSnapshotId = snapshot.Id, ConfigurationBaselineId = baselineId });
+            var currentIds = await database.MachineCurrentConfigurations.Where(item => item.ComponentVersionId == version.Id && item.State == CurrentConfigurationState.Present).Select(item => item.MachineId).Distinct().ToArrayAsync(cancellationToken);
+            var targetIds = await database.MachineTargetAssignments.Where(item => item.ValidTo == null && baselineIds.Contains(item.ConfigurationBaselineId)).Select(item => item.MachineId).Distinct().ToArrayAsync(cancellationToken);
+            var historicalIds = await database.DeploymentItems.Where(item => item.NewComponentVersionId == version.Id).Join(database.DeploymentBatches, item => item.DeploymentBatchId, batch => batch.Id, (item, batch) => batch.MachineId).Distinct().ToArrayAsync(cancellationToken);
+            foreach (var machineId in currentIds) database.VersionExposureMachines.Add(new VersionExposureMachine { Id = Guid.NewGuid(), VersionExposureSnapshotId = snapshot.Id, MachineId = machineId, Role = VersionExposureMachineRole.Current });
+            foreach (var machineId in targetIds) database.VersionExposureMachines.Add(new VersionExposureMachine { Id = Guid.NewGuid(), VersionExposureSnapshotId = snapshot.Id, MachineId = machineId, Role = VersionExposureMachineRole.Target });
+            foreach (var machineId in historicalIds) database.VersionExposureMachines.Add(new VersionExposureMachine { Id = Guid.NewGuid(), VersionExposureSnapshotId = snapshot.Id, MachineId = machineId, Role = VersionExposureMachineRole.Historical });
+            AddAuditEvent(database, context, "VersionExposureSnapshotCaptured", "VersionExposureSnapshot", snapshot.Id, new { versionId = version.Id, currentMachineCount = currentIds.Length, targetMachineCount = targetIds.Length, historicalMachineCount = historicalIds.Length, baselineCount = baselineIds.Length, reason = snapshot.Reason });
         }
         AddAuditEvent(database, context, "VersionSafetyChanged", "ComponentVersion", version.Id, new { from = previous.ToString(), to = next.ToString(), reason = request.Reason.Trim() });
         await database.SaveChangesAsync(cancellationToken);

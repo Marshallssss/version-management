@@ -376,5 +376,23 @@ internal static class ConfigHubModel
             entity.ToTable("import_rows"); entity.HasKey(item => item.Id);
             entity.Property(item => item.Id).HasColumnName("id"); entity.Property(item => item.ImportBatchId).HasColumnName("import_batch_id"); entity.Property(item => item.RowNumber).HasColumnName("row_number"); entity.Property(item => item.Payload).HasColumnName("payload").HasColumnType("jsonb"); entity.Property(item => item.ValidationError).HasColumnName("validation_error").HasMaxLength(2000); entity.HasIndex(item => new { item.ImportBatchId, item.RowNumber }).IsUnique().HasDatabaseName("ux_import_rows_batch_row"); entity.HasOne<ImportBatch>().WithMany().HasForeignKey(item => item.ImportBatchId).OnDelete(DeleteBehavior.Restrict);
         });
+        modelBuilder.Entity<VersionExposureSnapshot>(entity =>
+        {
+            entity.ToTable("version_exposure_snapshots"); entity.HasKey(item => item.Id);
+            entity.Property(item => item.Id).HasColumnName("id"); entity.Property(item => item.ComponentVersionId).HasColumnName("component_version_id"); entity.Property(item => item.BlockedAt).HasColumnName("blocked_at"); entity.Property(item => item.BlockedBy).HasColumnName("blocked_by").HasMaxLength(160); entity.Property(item => item.Reason).HasColumnName("reason").HasMaxLength(500);
+            entity.HasIndex(item => new { item.ComponentVersionId, item.BlockedAt }).HasDatabaseName("ix_version_exposure_snapshots_version_blocked_at"); entity.HasOne<ComponentVersion>().WithMany().HasForeignKey(item => item.ComponentVersionId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<VersionExposureMachine>(entity =>
+        {
+            entity.ToTable("version_exposure_machines"); entity.HasKey(item => item.Id);
+            entity.Property(item => item.Id).HasColumnName("id"); entity.Property(item => item.VersionExposureSnapshotId).HasColumnName("version_exposure_snapshot_id"); entity.Property(item => item.MachineId).HasColumnName("machine_id"); entity.Property(item => item.Role).HasColumnName("role").HasMaxLength(32).HasConversion<string>();
+            entity.HasIndex(item => new { item.VersionExposureSnapshotId, item.MachineId, item.Role }).IsUnique().HasDatabaseName("ux_version_exposure_machines_snapshot_machine_role"); entity.HasOne<VersionExposureSnapshot>().WithMany().HasForeignKey(item => item.VersionExposureSnapshotId).OnDelete(DeleteBehavior.Restrict); entity.HasOne<Machine>().WithMany().HasForeignKey(item => item.MachineId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<VersionExposureBaseline>(entity =>
+        {
+            entity.ToTable("version_exposure_baselines"); entity.HasKey(item => item.Id);
+            entity.Property(item => item.Id).HasColumnName("id"); entity.Property(item => item.VersionExposureSnapshotId).HasColumnName("version_exposure_snapshot_id"); entity.Property(item => item.ConfigurationBaselineId).HasColumnName("configuration_baseline_id");
+            entity.HasIndex(item => new { item.VersionExposureSnapshotId, item.ConfigurationBaselineId }).IsUnique().HasDatabaseName("ux_version_exposure_baselines_snapshot_baseline"); entity.HasOne<VersionExposureSnapshot>().WithMany().HasForeignKey(item => item.VersionExposureSnapshotId).OnDelete(DeleteBehavior.Restrict); entity.HasOne<ConfigurationBaseline>().WithMany().HasForeignKey(item => item.ConfigurationBaselineId).OnDelete(DeleteBehavior.Restrict);
+        });
     }
 }
