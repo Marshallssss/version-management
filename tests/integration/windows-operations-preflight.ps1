@@ -10,6 +10,7 @@ $ErrorActionPreference = 'Stop'
 $requiredScripts = @(
     'Common.ps1',
     'preflight.ps1',
+    'export-offline-nuget-source.ps1',
     'publish.ps1',
     'install.ps1',
     'start.ps1',

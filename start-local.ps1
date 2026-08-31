@@ -7,7 +7,9 @@ param(
     [switch]$BootstrapAdminOnly,
     [string]$BootstrapAdminUserName,
     [string]$BootstrapAdminEmail,
-    [string]$BootstrapAdminPassword
+    [string]$BootstrapAdminPassword,
+    [string]$NuGetConfigFile,
+    [string]$NpmRegistry
 )
 
 $ErrorActionPreference = 'Stop'
@@ -185,6 +187,22 @@ Set-Location $repoRoot
 Assert-CommandAvailable -Command 'dotnet' -DisplayName '.NET SDK'
 Assert-CommandAvailable -Command 'npm' -DisplayName 'Node.js/npm'
 
+$restoreArguments = @('restore', $hostProject)
+if (-not [string]::IsNullOrWhiteSpace($NuGetConfigFile)) {
+    $resolvedNuGetConfig = Resolve-Path $NuGetConfigFile -ErrorAction SilentlyContinue
+    if ($null -eq $resolvedNuGetConfig) {
+        throw "NuGet config file was not found: $NuGetConfigFile"
+    }
+    $restoreArguments += @('--configfile', $resolvedNuGetConfig.Path)
+    Write-Host "Restoring .NET packages from the configured package source..."
+} else {
+    Write-Host "Restoring .NET packages from the default configured package sources..."
+}
+& dotnet @restoreArguments
+if ($LASTEXITCODE -ne 0) {
+    throw 'NuGet restore failed. For a strict proxy, use -NuGetConfigFile with the company mirror or a local offline source.'
+}
+
 Ensure-ConnectionString -Name 'ConfigHub'
 if ($RunMigrations) {
     Ensure-ConnectionString -Name 'ConfigHubMigration'
@@ -194,7 +212,11 @@ Ensure-BootstrapAdmin -UserName $BootstrapAdminUserName -Email $BootstrapAdminEm
 if (-not $SkipFrontendBuild) {
     Write-Host ""
     Write-Host "Installing/checking frontend dependencies..."
-    npm --prefix $webRoot ci --no-audit --no-fund
+    $npmInstallArguments = @('--prefix', $webRoot, 'ci', '--no-audit', '--no-fund')
+    if (-not [string]::IsNullOrWhiteSpace($NpmRegistry)) {
+        $npmInstallArguments += "--registry=$NpmRegistry"
+    }
+    npm @npmInstallArguments
 
     Write-Host ""
     Write-Host "Building frontend..."
@@ -204,13 +226,13 @@ if (-not $SkipFrontendBuild) {
 if ($RunMigrations) {
     Write-Host ""
     Write-Host "Applying database migrations..."
-    dotnet run --project $hostProject -- --migrate
+    dotnet run --no-restore --project $hostProject -- --migrate
 }
 
 if ($BootstrapAdminOnly) {
     Write-Host ""
     Write-Host "Creating/verifying bootstrap admin..."
-    dotnet run --project $hostProject -- --bootstrap-admin-only
+    dotnet run --no-restore --project $hostProject -- --bootstrap-admin-only
     return
 }
 
@@ -228,4 +250,4 @@ Write-Host ""
 Write-Host "Keep this window open while using the app. Press Ctrl+C to stop."
 Write-Host ""
 
-dotnet run --project $hostProject -- --urls $url
+dotnet run --no-restore --project $hostProject -- --urls $url

@@ -53,6 +53,24 @@ start-local.cmd
 .\start-local.cmd -BootstrapAdminUserName admin -BootstrapAdminPassword 123456 -ResetBootstrapAdminPassword
 ```
 
+## 严格代理或离线本地运行
+
+默认的 `dotnet restore` 会使用当前 NuGet 配置；若公司代理拦截 `api.nuget.org`，请使用公司 NuGet 镜像，或从已成功还原的构建机导出离线包源。离线源和 `NuGet.Config` 位于 `.confighub`，不会提交到 Git。
+
+在具备已还原 NuGet 缓存的构建机执行：
+
+```powershell
+.\ops\windows\export-offline-nuget-source.ps1 -Runtime win-x64
+```
+
+将生成的 `.confighub` 目录连同源码复制到受限机器后，本地启动使用：
+
+```powershell
+.\start-local.ps1 -NuGetConfigFile .\.confighub\NuGet.Config
+```
+
+公司镜像也可以直接作为 `-NuGetConfigFile` 传入；前端若同样受限，附加 `-NpmRegistry https://npm.company.example/`，或带上已构建的 `src\server\Host\wwwroot` 并使用 `-SkipFrontendBuild`。
+
 手工验证命令：
 
 ```powershell
