@@ -18,6 +18,13 @@ try {
     if ($_.Exception.Message -match 'unexpectedly succeeded') { throw }
     if ($_.Exception.Response.StatusCode.value__ -ne 401) { throw }
 }
+try {
+    Invoke-WebRequest -UseBasicParsing -Uri ([uri]::new($BaseUri, '/api/v1/projects')) -ErrorAction Stop | Out-Null
+    throw 'Unauthenticated catalog read unexpectedly succeeded.'
+} catch {
+    if ($_.Exception.Message -match 'unexpectedly succeeded') { throw }
+    if ($_.Exception.Response.StatusCode.value__ -ne 401) { throw }
+}
 
 $loginBody = @{ email = $Email; password = $Password } | ConvertTo-Json
 $login = Invoke-WebRequest -UseBasicParsing -SessionVariable session -Method Post -Uri ([uri]::new($BaseUri, '/api/v1/auth/login')) -ContentType 'application/json' -Body $loginBody

@@ -1855,6 +1855,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 2D 授权补强进行中：项目克隆、机台创建、机台目标、部署事实、导入暂存/提交均要求项目成员写权限；Baseline 创建、发布和项目标准均要求项目内 SeniorEngineer Membership。
 - 2D 验收补强进行中：自动化拒绝场景覆盖无项目成员的 Baseline Create、Project Clone、Machine Create、Import Stage，以及普通项目 Engineer 的 Baseline Release 和 Project Standard Assignment。
 - 2D 授权补强进行中：Cookie 认证对 `/api/*` 的未登录/拒绝访问固定返回 HTTP 401/403，不再重定向到 SPA fallback 而误报 HTTP 404；导入预览的项目范围拒绝已纳入验收。
+- 10A 授权补强进行中：Catalog 的项目、基线、机台、漂移、追溯、搜索、仪表盘和审计读取端点均要求认证；Read/Search/Compare 权限仅授予已登录角色，不再默认匿名公开，自动验收覆盖匿名 Catalog Read 的 HTTP 401。
 - 已交付：中文用户管理、角色管理，以及 Component/Version 与后续写命令的原因/幂等协议；完整授权矩阵留在 Step 10 的安全加固验收。
 
 ## Step 3 — Project → Component → Version

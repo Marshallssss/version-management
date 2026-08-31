@@ -11,7 +11,7 @@ public static class CatalogEndpoints
 {
     public static IEndpointRouteBuilder MapCatalogEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        var projects = endpoints.MapGroup("/api/v1/projects");
+        var projects = endpoints.MapGroup("/api/v1/projects").RequireAuthorization();
         projects.MapGet("", ListProjectsAsync);
         projects.MapPost("", CreateProjectAsync).RequireAuthorization("Engineer");
         projects.MapGet("/{projectId:guid}", GetProjectAsync);
@@ -25,22 +25,22 @@ public static class CatalogEndpoints
         projects.MapGet("/{projectId:guid}/standard", GetProjectStandardAsync);
         projects.MapPost("/{projectId:guid}/standard", AssignProjectStandardAsync).RequireAuthorization("SeniorEngineer");
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/release", ReleaseBaselineAsync).RequireAuthorization("SeniorEngineer");
-        endpoints.MapGet("/api/v1/baselines/{baselineId:guid}", GetBaselineDetailAsync);
+        endpoints.MapGet("/api/v1/baselines/{baselineId:guid}", GetBaselineDetailAsync).RequireAuthorization();
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/items/{itemId:guid}/requirement", SetBaselineItemRequirementAsync).RequireAuthorization("SeniorEngineer");
-        endpoints.MapGet("/api/v1/machines", ListMachinesAsync);
+        endpoints.MapGet("/api/v1/machines", ListMachinesAsync).RequireAuthorization();
         endpoints.MapPost("/api/v1/machines", CreateMachineAsync).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/machines/{machineId:guid}/target", AssignMachineTargetAsync).RequireAuthorization("SeniorEngineer");
-        endpoints.MapGet("/api/v1/machines/{machineId:guid}/target", GetMachineTargetAsync);
+        endpoints.MapGet("/api/v1/machines/{machineId:guid}/target", GetMachineTargetAsync).RequireAuthorization();
         endpoints.MapPost("/api/v1/machines/{machineId:guid}/facts", RecordFactsAsync).RequireAuthorization("Engineer");
-        endpoints.MapGet("/api/v1/machines/{machineId:guid}/configuration", GetMachineConfigurationAsync);
-        endpoints.MapGet("/api/v1/machines/{machineId:guid}/facts", ListMachineFactsAsync);
-        endpoints.MapGet("/api/v1/machines/{machineId:guid}/drift", GetMachineDriftAsync);
-        endpoints.MapGet("/api/v1/machines/{machineId:guid}/drift-summary", GetMachineDriftSummaryAsync);
-        endpoints.MapGet("/api/v1/baselines/{leftBaselineId:guid}/compare/{rightBaselineId:guid}", CompareBaselinesAsync);
-        endpoints.MapGet("/api/v1/component-versions/{versionId:guid}/impact", GetVersionImpactAsync);
-        endpoints.MapGet("/api/v1/component-versions/{versionId:guid}", GetVersionDetailAsync);
-        endpoints.MapGet("/api/v1/search", SearchAsync);
-        endpoints.MapGet("/api/v1/dashboard", GetDashboardAsync);
+        endpoints.MapGet("/api/v1/machines/{machineId:guid}/configuration", GetMachineConfigurationAsync).RequireAuthorization();
+        endpoints.MapGet("/api/v1/machines/{machineId:guid}/facts", ListMachineFactsAsync).RequireAuthorization();
+        endpoints.MapGet("/api/v1/machines/{machineId:guid}/drift", GetMachineDriftAsync).RequireAuthorization();
+        endpoints.MapGet("/api/v1/machines/{machineId:guid}/drift-summary", GetMachineDriftSummaryAsync).RequireAuthorization();
+        endpoints.MapGet("/api/v1/baselines/{leftBaselineId:guid}/compare/{rightBaselineId:guid}", CompareBaselinesAsync).RequireAuthorization();
+        endpoints.MapGet("/api/v1/component-versions/{versionId:guid}/impact", GetVersionImpactAsync).RequireAuthorization();
+        endpoints.MapGet("/api/v1/component-versions/{versionId:guid}", GetVersionDetailAsync).RequireAuthorization();
+        endpoints.MapGet("/api/v1/search", SearchAsync).RequireAuthorization();
+        endpoints.MapGet("/api/v1/dashboard", GetDashboardAsync).RequireAuthorization();
         endpoints.MapPost("/api/v1/admin/drift-summaries/rebuild", RebuildMachineDriftSummariesAsync)
             .RequireAuthorization(policy => policy.RequireRole("Admin"));
         endpoints.MapPost("/api/v1/imports", StageImportAsync).RequireAuthorization("Engineer");
@@ -51,7 +51,7 @@ public static class CatalogEndpoints
         endpoints.MapPost("/api/v1/component-versions/{versionId:guid}/maturity", ChangeMaturityAsync).RequireAuthorization("SeniorEngineer");
         endpoints.MapPost("/api/v1/component-versions/{versionId:guid}/safety", ChangeSafetyAsync).RequireAuthorization("SeniorEngineer");
         endpoints.MapPost("/api/v1/component-versions/{versionId:guid}/recommend", RecommendAsync).RequireAuthorization("SeniorEngineer");
-        endpoints.MapGet("/api/v1/audit", ListAuditEventsAsync);
+        endpoints.MapGet("/api/v1/audit", ListAuditEventsAsync).RequireAuthorization();
         return endpoints;
     }
 
