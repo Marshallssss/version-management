@@ -36,6 +36,11 @@ foreach ($scriptName in $requiredScripts) {
     }
 }
 
+$upgradeParameters = (Get-Command (Join-Path $OperationsPath 'upgrade.ps1')).Parameters.Keys
+if ($upgradeParameters -notcontains 'PgDumpCommand') {
+    throw 'Windows upgrade script must allow an explicit pg_dump command path.'
+}
+
 $readinessReport = & (Join-Path $OperationsPath 'preflight.ps1') -Stage PreInstall -HostName localhost -BackupRoot $env:TEMP -ReportOnly
 if ($readinessReport.Count -lt 10 -or @($readinessReport | Where-Object { $_.Check -eq 'Windows 部署主机' }).Count -ne 1 -or @($readinessReport | Where-Object { $_.Check -eq 'PostgreSQL 客户端工具' }).Count -ne 1 -or @($readinessReport | Where-Object { $_.Check -eq 'TLS 证书' }).Count -ne 1) {
     throw 'Windows production preflight must emit its structured readiness report in ReportOnly mode.'

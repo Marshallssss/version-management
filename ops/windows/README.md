@@ -31,6 +31,8 @@ The application and migration connection strings are never stored in these scrip
 
 `preflight.ps1` 会自动识别 `%LOCALAPPDATA%\ConfigHub\PostgreSQL17\bin` 和常见的 Program Files 安装目录；若 PostgreSQL 位于其他位置，传入 `-PostgreSqlBinDirectory <bin目录>`。客户端工具可用不等于 PostgreSQL Windows Service 已完成验收，两项会分别报告。
 
+`upgrade.ps1` 的 `-PgDumpCommand` 可传入 `pg_dump.exe` 的绝对路径；当 PostgreSQL 客户端没有加入 `PATH` 时必须指定它。
+
 ## Release and initial install
 
 Run from the repository root on a build machine:

@@ -11,7 +11,8 @@ param(
     [string]$FileStoreRoot = 'D:\ConfigHubData\files',
     [string]$SiteName = 'ConfigHub',
     [string]$AppPoolName = 'ConfigHub',
-    [string]$WorkerServiceName = 'ConfigHub.Worker'
+    [string]$WorkerServiceName = 'ConfigHub.Worker',
+    [string]$PgDumpCommand = 'pg_dump'
 )
 
 Set-StrictMode -Version Latest
@@ -57,6 +58,7 @@ try {
         -DatabaseName $DatabaseName `
         -DatabaseUser $DatabaseUser `
         -DatabasePort $DatabasePort `
+        -PgDumpCommand $PgDumpCommand `
         -Mode Quiesced
 
     New-Item -ItemType Directory -Path (Join-Path $rollbackPath 'host'), (Join-Path $rollbackPath 'worker') -Force | Out-Null
