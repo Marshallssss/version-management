@@ -43,6 +43,7 @@ public static class CatalogEndpoints
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/facts", ListMachineFactsAsync).RequireAuthorization();
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/drift", GetMachineDriftAsync).RequireAuthorization();
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/drift-summary", GetMachineDriftSummaryAsync).RequireAuthorization();
+        endpoints.MapGet("/api/v1/machines/{leftMachineId:guid}/compare/{rightMachineId:guid}", CompareMachinesAsync).RequireAuthorization();
         endpoints.MapGet("/api/v1/baselines/{leftBaselineId:guid}/compare/{rightBaselineId:guid}", CompareBaselinesAsync).RequireAuthorization();
         endpoints.MapGet("/api/v1/component-versions/{versionId:guid}/impact", GetVersionImpactAsync).RequireAuthorization();
         endpoints.MapGet("/api/v1/component-versions/{versionId:guid}", GetVersionDetailAsync).RequireAuthorization();
@@ -387,6 +388,31 @@ public static class CatalogEndpoints
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         var summary = await db.MachineDriftSummaries.AsNoTracking().SingleOrDefaultAsync(item => item.MachineId == machineId, cancellationToken);
         return summary is null ? Results.NotFound() : TypedResults.Ok(new { matchStatus = summary.MatchStatus.ToString(), riskSeverity = summary.RiskSeverity.ToString(), calculatedAt = summary.CalculatedAt });
+    }
+
+    private static async Task<IResult> CompareMachinesAsync(Guid leftMachineId, Guid rightMachineId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        if (leftMachineId == rightMachineId) return Results.ValidationProblem(new Dictionary<string, string[]> { ["machine"] = ["请选择两台不同的机台进行比对。"] });
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var machines = await db.Machines.AsNoTracking().Where(machine => machine.Id == leftMachineId || machine.Id == rightMachineId).Select(machine => new { machine.Id, machine.ProjectId }).ToArrayAsync(cancellationToken);
+        if (machines.Length != 2) return Results.NotFound();
+        if (machines[0].ProjectId != machines[1].ProjectId) return Results.ValidationProblem(new Dictionary<string, string[]> { ["machine"] = ["仅支持同一项目内的机台比对。"] });
+        var states = await db.MachineCurrentConfigurations.AsNoTracking().Where(state => state.MachineId == leftMachineId || state.MachineId == rightMachineId).ToArrayAsync(cancellationToken);
+        var left = states.Where(state => state.MachineId == leftMachineId).ToDictionary(state => state.ConfigurationComponentId);
+        var right = states.Where(state => state.MachineId == rightMachineId).ToDictionary(state => state.ConfigurationComponentId);
+        var versionIds = states.Where(state => state.ComponentVersionId is not null).Select(state => state.ComponentVersionId!.Value).Distinct().ToArray();
+        var blocked = await db.ComponentVersions.AsNoTracking().Where(version => versionIds.Contains(version.Id) && version.Safety == VersionSafety.Blocked).Select(version => version.Id).ToArrayAsync(cancellationToken);
+        var items = left.Keys.Union(right.Keys).OrderBy(componentId => componentId).Select(componentId =>
+        {
+            left.TryGetValue(componentId, out var before); right.TryGetValue(componentId, out var after);
+            var leftVersion = before?.State == CurrentConfigurationState.Present ? before.ComponentVersionId : null;
+            var rightVersion = after?.State == CurrentConfigurationState.Present ? after.ComponentVersionId : null;
+            var status = leftVersion == rightVersion ? "Matched" : leftVersion is null ? "RightOnly" : rightVersion is null ? "LeftOnly" : "Mismatch";
+            return new { componentId, status, leftVersionId = leftVersion, rightVersionId = rightVersion };
+        }).ToArray();
+        var matchStatus = items.All(item => item.status == "Matched") ? "Matched" : "Mismatch";
+        var riskSeverity = items.Any(item => (item.leftVersionId is not null && blocked.Contains(item.leftVersionId.Value)) || (item.rightVersionId is not null && blocked.Contains(item.rightVersionId.Value))) ? "Critical" : "None";
+        return TypedResults.Ok(new { leftMachineId, rightMachineId, matchStatus, riskSeverity, items });
     }
 
     private static async Task<IResult> CompareBaselinesAsync(Guid leftBaselineId, Guid rightBaselineId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
