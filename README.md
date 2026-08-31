@@ -14,6 +14,7 @@
 - Step 3 已交付：Project、Component Tree、opaque Version Sequence、独立 Lifecycle、Project Clone、中文版本详情与自动化验收。
 - Step 4 至 Step 9 Core V1 已交付：不可变 Baseline、显式 Machine Target、FULL/PARTIAL Facts 投影、Drift/Risk/Compare、Trace/Search/Dashboard，以及只经 Domain Command 提交的导入。
 - 所有重要写入均要求 actor、reason、correlation id 和 Idempotency-Key，并写入审计事件；进入下一阶段前持续执行 Release build、真实 Migration 与集成验收。
+- Step 11 试点执行单见 `docs/operations/internal-pilot.md`；它在生产集成通过后引导真实 Project、20–50 台 Machine、现有版本清单和工程师验收。
 
 ## Repository layout
 

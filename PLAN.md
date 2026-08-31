@@ -1958,6 +1958,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 ## Step 11 — Internal Pilot
 
 - 一个真实 Project、20–50 台 Machine、现有 Excel 数据和真实工程师验收。
+- 11A 试点准备已交付：`docs/operations/internal-pilot.md` 固化生产集成前置、试点范围、逐项验收场景、退出门槛和不含秘密的证据留存规则；目标 Windows Server PostInstall preflight 通过后即可执行，不以本机开发环境代替试点结论。
 
 ---
 
