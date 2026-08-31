@@ -353,6 +353,18 @@ internal static class ConfigHubModel
             entity.Property(item => item.CalculatedAt).HasColumnName("calculated_at");
             entity.HasOne<Machine>().WithMany().HasForeignKey(item => item.MachineId).OnDelete(DeleteBehavior.Restrict);
         });
+        modelBuilder.Entity<BulkOperation>(entity =>
+        {
+            entity.ToTable("bulk_operations"); entity.HasKey(item => item.Id);
+            entity.Property(item => item.Id).HasColumnName("id"); entity.Property(item => item.ProjectId).HasColumnName("project_id"); entity.Property(item => item.OperationType).HasColumnName("operation_type").HasMaxLength(64).HasConversion<string>(); entity.Property(item => item.Status).HasColumnName("status").HasMaxLength(32).HasConversion<string>(); entity.Property(item => item.RequestedBy).HasColumnName("requested_by").HasMaxLength(160); entity.Property(item => item.Reason).HasColumnName("reason").HasMaxLength(500); entity.Property(item => item.RequestedAt).HasColumnName("requested_at"); entity.Property(item => item.CompletedAt).HasColumnName("completed_at");
+            entity.HasIndex(item => new { item.ProjectId, item.RequestedAt }).HasDatabaseName("ix_bulk_operations_project_requested_at"); entity.HasOne<Project>().WithMany().HasForeignKey(item => item.ProjectId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<BulkOperationItem>(entity =>
+        {
+            entity.ToTable("bulk_operation_items"); entity.HasKey(item => item.Id);
+            entity.Property(item => item.Id).HasColumnName("id"); entity.Property(item => item.BulkOperationId).HasColumnName("bulk_operation_id"); entity.Property(item => item.MachineId).HasColumnName("machine_id"); entity.Property(item => item.Status).HasColumnName("status").HasMaxLength(32).HasConversion<string>(); entity.Property(item => item.Detail).HasColumnName("detail").HasMaxLength(500);
+            entity.HasIndex(item => new { item.BulkOperationId, item.MachineId }).IsUnique().HasDatabaseName("ux_bulk_operation_items_operation_machine"); entity.HasOne<BulkOperation>().WithMany().HasForeignKey(item => item.BulkOperationId).OnDelete(DeleteBehavior.Restrict); entity.HasOne<Machine>().WithMany().HasForeignKey(item => item.MachineId).OnDelete(DeleteBehavior.Restrict);
+        });
         modelBuilder.Entity<ImportBatch>(entity =>
         {
             entity.ToTable("import_batches"); entity.HasKey(item => item.Id);
