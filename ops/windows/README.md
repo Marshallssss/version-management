@@ -33,6 +33,8 @@ The application and migration connection strings are never stored in these scrip
 
 `upgrade.ps1` 的 `-PgDumpCommand` 可传入 `pg_dump.exe` 的绝对路径；当 PostgreSQL 客户端没有加入 `PATH` 时必须指定它。
 
+升级的完整中文操作手册、参数说明、`-WhatIf` 预演、成功证据和失败处置见 [Windows 升级手册](../../docs/operations/windows-upgrade.md)。
+
 ## Release and initial install
 
 Run from the repository root on a build machine:
@@ -116,6 +118,8 @@ pwsh .\ops\windows\upgrade.ps1 `
   -DatabaseName config_hub `
   -DatabaseUser config_hub_backup
 ```
+
+先在提升权限的 PowerShell 中使用相同参数追加 `-WhatIf`，完成清单、路径、环境变量和权限的预演；确认无误后再移除 `-WhatIf` 执行实际升级。发布包必须先完整解压，`-ReleasePath` 指向包含 `release-manifest.json`、`host` 和 `worker` 的目录，而不是 ZIP 文件。
 
 ## Routine commands
 

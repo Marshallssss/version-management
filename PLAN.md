@@ -1674,6 +1674,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 冻结回归已完成：`catalog-acceptance.ps1` 覆盖登录 → Project → Component → Version → Baseline → Machine → Target → Initial Snapshot/Observation → Drift → Compare → Search；`background-job-acceptance.ps1` 覆盖真实 Host/Worker/PostgreSQL 的成功与重试状态机；Windows 运维脚本预检、Web `crypto.randomUUID` 兼容检查、EF Pending Model Changes 和 Release build（0 warning / 0 error）均通过。
 - 发布验收已完成：离线 `win-x64` 发布目录以 `0.2.0-pilot.1` 生成，发布目录 Host 的真实 PostgreSQL 17 Migration 返回数据库已最新，`release-manifest.json` 的 77 个文件逐项 SHA-256 校验通过，发布版 SPA 根路径、`/health/live`、`/health/ready` 均为 HTTP 200。
 - Pilot UX Sweep 已完成：机台实际配置、机台比对和历史比对不再向用户显示组件/版本 GUID；内部枚举改为中文可读文本；关键写操作提供成功反馈；明确区分 Project Standard（推荐）和 Machine Target（显式实际目标）、FULL/PARTIAL 观察语义、Observation 与安装/升级的时间/业务含义，以及 Match 与 Risk 可同时存在；全局搜索结果可直接打开项目、基线、版本或机台。
+- Windows 一键升级可用性补强：`upgrade.ps1` 现在在 manifest 校验、维护/停机、静默备份、二进制回退副本、发布复制和 Migration 各阶段输出明确进度；维护页创建与清理被纳入 `try/finally`，停机阶段异常不会遗留 `app_offline.htm`。新增 `docs/operations/windows-upgrade.md` 中文手册，明确每个参数来源、`-WhatIf` 预演、升级后健康检查、二进制回退与数据库不可反向回退的边界。
 - **Production Integration Pending 仍然成立**：本机 PostgreSQL 17 与发布目录验证不等于正式部署。IIS、Windows Service、TLS、DNS、防火墙、服务账户、NAS 备份恢复及目标服务器受管 PostgreSQL Service 仍须在目标 Windows 11 Pro/Enterprise 或 Windows Server 环境完成验收。
 
 - Baseline Review Workflow。
