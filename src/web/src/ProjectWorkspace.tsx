@@ -32,17 +32,6 @@ export function ProjectWorkspace({ detail, onSuccess }: { detail: ProjectDetail;
     for (const entries of map.values()) entries.sort((left, right) => left.sortOrder - right.sortOrder || left.code.localeCompare(right.code))
     return map
   }, [detail.components])
-  const componentsById = useMemo(() => new Map(detail.components.map(component => [component.id, component])), [detail.components])
-  const levels = useMemo(() => {
-    const result: ConfigurationComponent[][] = []
-    const visit = (component: ConfigurationComponent, depth: number) => {
-      if (!result[depth]) result[depth] = []
-      result[depth].push(component)
-      children.get(component.id)?.forEach(child => visit(child, depth + 1))
-    }
-    children.get(null)?.forEach(component => visit(component, 0))
-    return result
-  }, [children])
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: ['project', detail.project.id] })
     await queryClient.invalidateQueries({ queryKey: ['projects'] })
@@ -91,14 +80,14 @@ export function ProjectWorkspace({ detail, onSuccess }: { detail: ProjectDetail;
     if (dragged?.parentComponentId === parentComponentId) { setDraggingId(null); return }
     move.mutate({ componentId: draggingId, parentComponentId })
   }
-  const renderNode = (component: ConfigurationComponent, depth: number) => {
-    const parent = component.parentComponentId ? componentsById.get(component.parentComponentId) : null
-    return <button type="button" draggable className={`tree-node ${component.id === selectedId ? 'selected' : ''}`} onClick={() => setSelectedId(component.id)} onDragStart={(event) => { event.dataTransfer.effectAllowed = 'move'; setDraggingId(component.id) }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); onDrop(component.id) }}>
-      <span className="tree-node-level">{depth === 0 ? '根组件' : `上级 · ${parent?.code ?? '—'}`}</span>
+  const renderBranchNode = (component: ConfigurationComponent, depth: number) => <div className="branch-node" key={component.id} style={{ paddingLeft: `${depth * 12}px` }}>
+    <button type="button" draggable className={`tree-node ${component.id === selectedId ? 'selected' : ''}`} onClick={() => setSelectedId(component.id)} onDragStart={(event) => { event.dataTransfer.effectAllowed = 'move'; setDraggingId(component.id) }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); onDrop(component.id) }}>
+      <span className="tree-node-level">{depth === 0 ? '子组件' : `第 ${depth + 2} 层组件`}</span>
       <span className="tree-node-copy"><strong>{component.code}</strong><small>{component.name}</small></span>
       <span className="tree-node-count">{component.versions.length}</span>
     </button>
-  }
+    {children.get(component.id)?.length ? <div className="branch-children">{children.get(component.id)!.map(child => renderBranchNode(child, depth + 1))}</div> : null}
+  </div>
 
   return <section className="project-workspace">
     <div className="workspace-heading"><div><span className="section-index">{detail.project.code}</span><h2>{detail.project.name}</h2><p>{detail.project.description || '在左侧组件树中选择节点，再添加子组件、登记版本或调整层级。'}</p></div><button className="primary-action" type="button" onClick={() => startCreate('create-root')}>新增根组件</button></div>
@@ -106,7 +95,7 @@ export function ProjectWorkspace({ detail, onSuccess }: { detail: ProjectDetail;
       <aside className="component-tree-panel">
         <div className="tree-toolbar"><strong>组件结构</strong><small>拖拽节点到另一节点可改变父级</small></div>
         <button type="button" className="tree-root-drop" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); onDrop(null) }}>拖到这里：设为根组件</button>
-        {detail.components.length ? <div className="component-tree-board">{levels.map((level, depth) => <section className="tree-level" key={depth}><div className="tree-level-heading"><strong>{depth === 0 ? '第一层 · 根组件' : `第 ${depth + 1} 层 · 子组件`}</strong><small>{level.length} 个节点</small></div><div className="tree-level-nodes">{level.map(component => renderNode(component, depth))}</div></section>)}</div> : <p className="empty-state">尚无组件。先新增根组件，再从树上逐层添加零部件。</p>}
+        {detail.components.length ? <div className="component-columns">{children.get(null)?.map(root => <section className="root-component-column" key={root.id}><button type="button" draggable className={`root-node ${root.id === selectedId ? 'selected' : ''}`} onClick={() => setSelectedId(root.id)} onDragStart={(event) => { event.dataTransfer.effectAllowed = 'move'; setDraggingId(root.id) }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); onDrop(root.id) }}><span><small>根组件</small><strong>{root.code}</strong><em>{root.name}</em></span><span className="tree-node-count">{root.versions.length}</span></button><div className="root-column-body">{children.get(root.id)?.length ? children.get(root.id)!.map(child => renderBranchNode(child, 0)) : <p className="empty-state">暂无子组件。</p>}<button type="button" className="add-child-node" onClick={() => { setSelectedId(root.id); startCreate('create-child') }}>新增 {root.code} 子组件</button></div></section>)}<button type="button" className="add-root-column" onClick={() => startCreate('create-root')}>新增根组件</button></div> : <p className="empty-state">尚无组件。先新增根组件，再从树上逐层添加零部件。</p>}
       </aside>
       <section className="component-inspector">
         {formMode === 'create-root' ? <><div className="inspector-heading"><div><span className="section-index">创建组件</span><h3>新增根组件</h3><p className="form-hint">根组件与当前选中的“{selected?.code ?? '组件'}”并列，不会成为它的子组件。</p></div><div className="inspector-actions"><button type="button" onClick={reset}>取消</button></div></div><form className="workspace-form" onSubmit={(event) => { event.preventDefault(); create.mutate() }}><label>组件编码<input value={code} maxLength={80} onChange={(event) => setCode(event.target.value)} required /></label><label>组件名称<input value={name} maxLength={200} onChange={(event) => setName(event.target.value)} required /></label><label className="wide-field">创建原因<input value={reason} maxLength={500} onChange={(event) => setReason(event.target.value)} required /></label><div className="form-actions"><button type="button" onClick={reset}>取消</button><button className="primary-action" type="submit" disabled={create.isPending}>{create.isPending ? '正在新增' : '新增根组件'}</button></div>{create.isError && <p className="error-strip wide-field">{create.error.message}</p>}</form></> : selected ? <><div className="inspector-heading"><div><span className="section-index">已选组件</span><h3>{selected.code} · {selected.name}</h3></div><div className="inspector-actions"><button type="button" onClick={() => startCreate('create-child')}>新增子组件</button><button type="button" onClick={startEdit}>编辑</button><button type="button" className="danger-action" onClick={() => { setFormMode('delete'); setReason('') }}>删除</button></div></div>
