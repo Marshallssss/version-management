@@ -476,6 +476,20 @@ h1 {
   grid-column: span 2;
 }
 
+.list-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.project-list-panel .panel-heading {
+  margin-bottom: 12px;
+}
+
+.project-list-panel .form-hint {
+  margin: 0;
+}
+
 .catalog-form,
 .inline-form {
   display: grid;

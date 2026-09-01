@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { assignMachineTarget, assignProjectMember, assignProjectStandard, changeUserRole, changeVersionMaturity, changeVersionSafety, cloneProject, commitImport, compareBaselines, createBaseline, createComponent, createComponentVersion, createMachine, createProject, createUser, decideBaselineReview, getBaselineDetail, getBaselines, getCurrentUser, getDashboard, getImportPreview, getMachineConfiguration, getMachineDrift, getMachineFacts, getMachineTarget, getMachineTargetHistory, getMachines, getProject, getProjectMembers, getProjectStandard, getProjects, getUsers, getVersionDetail, getVersionExposureSnapshots, getVersionImpact, login, logout, moveComponent, recommendVersion, recordMachineFacts, releaseBaseline, requestBaselineReview, searchCatalog, setBaselineItemRequirement, stageImport } from './catalog-api'
 import { enqueueNoopJob, getSystemStatus, getSystemVersion, type BackgroundJobStatus } from './system-api'
@@ -56,6 +56,7 @@ function App() {
   const [projectDescription, setProjectDescription] = useState('')
   const [projectReason, setProjectReason] = useState('')
   const [cloneSourceProjectId, setCloneSourceProjectId] = useState('')
+  const [projectListCollapsed, setProjectListCollapsed] = useState(false)
   const [userName, setUserName] = useState('')
   const [password, setPassword] = useState('')
   const [componentCode, setComponentCode] = useState('')
@@ -169,6 +170,7 @@ function App() {
       setProjectReason('')
       setCloneSourceProjectId('')
       setSelectedProjectId(id)
+      setProjectListCollapsed(true)
       setSuccessMessage('项目已创建。')
       await queryClient.invalidateQueries({ queryKey: ['projects'] })
     },
@@ -229,6 +231,10 @@ function App() {
   const visibleNavigation = navigation.filter((item) => !item.adminOnly || isAdmin)
   const selectedNavigation = visibleNavigation.find((item) => item.id === activePage) ?? navigation[0]
   const queueCount = (jobStatus: BackgroundJobStatus) => status.data?.queue.find((item) => item.status === jobStatus)?.count ?? 0
+
+  useEffect(() => {
+    if (selectedProjectId) setProjectListCollapsed(true)
+  }, [selectedProjectId])
 
   return (
     <div className="app-shell">
@@ -317,9 +323,9 @@ function App() {
                 </form>
                 {addProject.isError && <p className="error-strip">{addProject.error.message}</p>}
               </section>
-              <section className="status-panel catalog-panel">
-                <div className="panel-heading"><div><span className="section-index">已建项目</span><h3>项目列表</h3></div><span className="count">{projects.data?.length ?? 0}</span></div>
-                <div className="catalog-list">{projects.data?.map((project) => <button key={project.id} type="button" className={project.id === selectedProjectId ? 'project-row selected' : 'project-row'} onClick={() => { setSelectedProjectId(project.id); setVersionComponentId('') }}><span><strong>{project.code}</strong><small>{project.name}</small></span><em>{project.componentCount} 个组件</em></button>) ?? <p className="empty-state">正在读取项目。</p>}</div>
+              <section className="status-panel catalog-panel project-list-panel">
+                <div className="panel-heading"><div><span className="section-index">已建项目</span><h3>项目列表</h3></div><div className="list-heading-actions"><span className="count">{projects.data?.length ?? 0}</span><button type="button" onClick={() => setProjectListCollapsed(!projectListCollapsed)}>{projectListCollapsed ? '展开列表' : '收起列表'}</button></div></div>
+                {projectListCollapsed ? <p className="form-hint">项目列表已收起。展开后可切换项目。</p> : <div className="catalog-list">{projects.data?.map((project) => <button key={project.id} type="button" className={project.id === selectedProjectId ? 'project-row selected' : 'project-row'} onClick={() => { setSelectedProjectId(project.id); setVersionComponentId('') }}><span><strong>{project.code}</strong><small>{project.name}</small></span><em>{project.componentCount} 个组件</em></button>) ?? <p className="empty-state">正在读取项目。</p>}</div>}
               </section>
               {projectDetail.data && <div hidden><section className="status-panel catalog-detail">
                 <div className="panel-heading"><div><span className="section-index">{projectDetail.data.project.code}</span><h3>{projectDetail.data.project.name}</h3></div></div>
