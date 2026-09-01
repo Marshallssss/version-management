@@ -4,6 +4,7 @@ using System.Text;
 using ConfigHub.Infrastructure.Persistence;
 using ConfigHub.Infrastructure.Persistence.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Mvc;
 
 namespace ConfigHub.Host.Catalog;
 
@@ -16,6 +17,10 @@ public static class CatalogEndpoints
         projects.MapPost("", CreateProjectAsync).RequireAuthorization("Engineer");
         projects.MapGet("/{projectId:guid}", GetProjectAsync);
         projects.MapPost("/{projectId:guid}/components", CreateComponentAsync).RequireAuthorization("Engineer");
+        endpoints.MapPut("/api/v1/components/{componentId:guid}", async (Guid componentId, [FromBody] UpdateComponentRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken) =>
+            await UpdateComponentAsync(componentId, request, context, factory, cancellationToken)).RequireAuthorization("Engineer");
+        endpoints.MapDelete("/api/v1/components/{componentId:guid}", async (Guid componentId, [FromBody] DeleteComponentRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken) =>
+            await DeleteComponentAsync(componentId, request, context, factory, cancellationToken)).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/components/{componentId:guid}/move", MoveComponentAsync).RequireAuthorization("Engineer");
         projects.MapPost("/{projectId:guid}/clone", CloneAsync).RequireAuthorization("Engineer");
         projects.MapGet("/{projectId:guid}/baselines", ListBaselinesAsync);
@@ -1279,6 +1284,47 @@ public static class CatalogEndpoints
         return TypedResults.Created($"/api/v1/components/{componentId}/versions/{version.Id}", new { id = version.Id, sequenceNo = version.SequenceNo });
     }
 
+    private static async Task<IResult> UpdateComponentAsync(Guid componentId, UpdateComponentRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        var validation = ValidateIdentifier(request.Code, "组件编码", 80) ?? ValidateRequired(request.Name, "组件名称", 200) ?? ValidateRequired(request.Reason, "修改原因", 500);
+        if (validation is not null) return Results.ValidationProblem(validation);
+        var key = context.Request.Headers["Idempotency-Key"].FirstOrDefault(); if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["编辑组件必须提供不超过 200 个字符的 Idempotency-Key。"] });
+        await using var database = await factory.CreateDbContextAsync(cancellationToken);
+        var scope = $"components.update:{componentId}"; var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request)))); var replay = await database.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
+        if (replay is not null) { if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (replay.Result is not null) return TypedResults.Ok(replay.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
+        var component = await database.ConfigurationComponents.SingleOrDefaultAsync(item => item.Id == componentId, cancellationToken);
+        if (component is null) return Results.NotFound();
+        if (!await HasProjectWriteAccessAsync(database, context, component.ProjectId, cancellationToken)) return Results.Forbid();
+        var normalizedCode = Normalize(request.Code!);
+        if (await database.ConfigurationComponents.AnyAsync(item => item.ProjectId == component.ProjectId && item.NormalizedComponentCode == normalizedCode && item.Id != componentId, cancellationToken)) return Results.Conflict(new { message = "该项目中组件编码已存在。" });
+        var now = DateTimeOffset.UtcNow; await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken); database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) });
+        var oldLineage = component.LineageKey; var newLineage = component.ParentComponentId is null ? normalizedCode : $"{(await database.ConfigurationComponents.SingleAsync(item => item.Id == component.ParentComponentId, cancellationToken)).LineageKey}/{normalizedCode}";
+        var descendants = await database.ConfigurationComponents.Where(item => item.ProjectId == component.ProjectId && (item.LineageKey == oldLineage || item.LineageKey.StartsWith(oldLineage + "/"))).ToListAsync(cancellationToken);
+        component.ComponentCode = request.Code!.Trim(); component.NormalizedComponentCode = normalizedCode; component.Name = request.Name!.Trim();
+        foreach (var descendant in descendants) descendant.LineageKey = newLineage + descendant.LineageKey[oldLineage.Length..];
+        AddAuditEvent(database, context, "ComponentUpdated", "ConfigurationComponent", component.Id, new { oldLineage, newLineage, component.ComponentCode, component.Name, reason = request.Reason!.Trim() });
+        await database.SaveChangesAsync(cancellationToken); var record = await database.IdempotencyRecords.SingleAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken); record.Status = IdempotencyRecordStatus.Completed; record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = component.Id, lineageKey = component.LineageKey })); await database.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
+        return TypedResults.Ok(new { id = component.Id, lineageKey = component.LineageKey });
+    }
+
+    private static async Task<IResult> DeleteComponentAsync(Guid componentId, DeleteComponentRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Reason)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["reason"] = ["必须提供删除原因。"] });
+        var key = context.Request.Headers["Idempotency-Key"].FirstOrDefault(); if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["删除组件必须提供不超过 200 个字符的 Idempotency-Key。"] });
+        await using var database = await factory.CreateDbContextAsync(cancellationToken);
+        var scope = $"components.delete:{componentId}"; var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request)))); var replay = await database.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
+        if (replay is not null) { if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (replay.Result is not null) return TypedResults.Ok(replay.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
+        var component = await database.ConfigurationComponents.SingleOrDefaultAsync(item => item.Id == componentId, cancellationToken);
+        if (component is null) return Results.NotFound();
+        if (!await HasProjectWriteAccessAsync(database, context, component.ProjectId, cancellationToken)) return Results.Forbid();
+        if (await database.ConfigurationComponents.AnyAsync(item => item.ParentComponentId == componentId, cancellationToken)) return Results.Conflict(new { message = "请先移动或删除子组件后再删除该组件。" });
+        if (await database.ComponentVersions.AnyAsync(item => item.ComponentId == componentId, cancellationToken)) return Results.Conflict(new { message = "已有软件版本的组件不能删除，以保留版本、基线和事实历史。" });
+        var now = DateTimeOffset.UtcNow; await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken); database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }); database.ConfigurationComponents.Remove(component);
+        AddAuditEvent(database, context, "ComponentDeleted", "ConfigurationComponent", component.Id, new { component.ProjectId, component.ComponentCode, component.Name, reason = request.Reason.Trim() });
+        await database.SaveChangesAsync(cancellationToken); var record = await database.IdempotencyRecords.SingleAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken); record.Status = IdempotencyRecordStatus.Completed; record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = componentId, deleted = true })); await database.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
+        return TypedResults.Ok(new { id = componentId, deleted = true });
+    }
+
     private static async Task<VersionCommandResult> CreateComponentVersionCommandAsync(ConfigHubDbContext database, Guid componentId, string versionNumber, string reason, HttpContext context, CancellationToken cancellationToken)
     {
         var component = await database.ConfigurationComponents.SingleOrDefaultAsync(candidate => candidate.Id == componentId, cancellationToken);
@@ -1457,6 +1503,8 @@ public static class CatalogEndpoints
 
 public sealed record CreateProjectRequest(string? Code, string? Name, string? Description, string? Reason);
 public sealed record CreateComponentRequest(string? Code, string? Name, Guid? ParentComponentId, string? Reason);
+public sealed record UpdateComponentRequest(string? Code, string? Name, string? Reason);
+public sealed record DeleteComponentRequest(string? Reason);
 public sealed record CreateComponentVersionRequest(string? VersionNumber, string? Reason);
 public sealed record LifecycleRequest(string? State, string? Reason);
 public sealed record CloneProjectRequest(string? Code, string? Name, string? Reason);

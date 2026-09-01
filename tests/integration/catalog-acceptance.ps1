@@ -116,6 +116,26 @@ $componentBody = @{ code = 'CONTROL'; name = 'Control'; parentComponentId = $nul
 $component = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/components")) -Headers $componentHeaders -ContentType 'application/json' -Body $componentBody
 $componentReplay = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/components")) -Headers $componentHeaders -ContentType 'application/json' -Body $componentBody
 if ($component.id -ne $componentReplay.id) { throw 'Expected idempotent component creation.' }
+$editable = Invoke-JsonPost "/api/v1/projects/$($project.id)/components" @{ code = 'EDITABLE'; name = 'Editable'; parentComponentId = $null; reason = '自动化组件编辑删除验收' }
+$editableChild = Invoke-JsonPost "/api/v1/projects/$($project.id)/components" @{ code = 'EDIT-CHILD'; name = 'Editable child'; parentComponentId = $editable.id; reason = '自动化子组件编辑删除验收' }
+$updateHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() }
+$updateBody = @{ code = 'EDITED'; name = 'Edited component'; reason = '自动化组件编辑验收' } | ConvertTo-Json
+$updated = Invoke-RestMethod -WebSession $session -Method Put -Uri ([uri]::new($BaseUri, "/api/v1/components/$($editable.id)")) -Headers $updateHeaders -ContentType 'application/json' -Body $updateBody
+$updatedReplay = Invoke-RestMethod -WebSession $session -Method Put -Uri ([uri]::new($BaseUri, "/api/v1/components/$($editable.id)")) -Headers $updateHeaders -ContentType 'application/json' -Body $updateBody
+if ($updated.lineageKey -ne 'EDITED' -or $updatedReplay.lineageKey -ne 'EDITED') { throw 'Expected idempotent component update and lineage update.' }
+try {
+    Invoke-RestMethod -WebSession $session -Method Delete -Uri ([uri]::new($BaseUri, "/api/v1/components/$($editable.id)")) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() } -ContentType 'application/json' -Body (@{ reason = '自动化非叶节点删除拒绝' } | ConvertTo-Json) | Out-Null
+    throw 'Deleting a component with children unexpectedly succeeded.'
+} catch {
+    if ($_.Exception.Message -match 'unexpectedly succeeded') { throw }
+    if ($_.Exception.Response.StatusCode.value__ -ne 409) { throw }
+}
+$deleteChildHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() }
+$deleteChildBody = @{ reason = '自动化空叶节点删除' } | ConvertTo-Json
+$deletedChild = Invoke-RestMethod -WebSession $session -Method Delete -Uri ([uri]::new($BaseUri, "/api/v1/components/$($editableChild.id)")) -Headers $deleteChildHeaders -ContentType 'application/json' -Body $deleteChildBody
+$deletedChildReplay = Invoke-RestMethod -WebSession $session -Method Delete -Uri ([uri]::new($BaseUri, "/api/v1/components/$($editableChild.id)")) -Headers $deleteChildHeaders -ContentType 'application/json' -Body $deleteChildBody
+if (-not $deletedChild.deleted -or -not $deletedChildReplay.deleted) { throw 'Expected idempotent empty leaf component deletion.' }
+Invoke-RestMethod -WebSession $session -Method Delete -Uri ([uri]::new($BaseUri, "/api/v1/components/$($editable.id)")) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() } -ContentType 'application/json' -Body (@{ reason = '自动化空根组件删除' } | ConvertTo-Json) | Out-Null
 $child = Invoke-JsonPost "/api/v1/projects/$($project.id)/components" @{ code = 'CHILD'; name = 'Child'; parentComponentId = $component.id; reason = '自动化子组件创建' }
 try {
     Invoke-JsonPost "/api/v1/components/$($component.id)/move" @{ parentComponentId = $child.id; reason = '自动化环检测' } | Out-Null

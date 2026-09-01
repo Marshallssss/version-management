@@ -1909,7 +1909,8 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 生命周期切片已交付：独立 Maturity/Safety Transition History 与 Recommendation History 已落库；API/UI/自动测试覆盖 Draft→Testing→Released、推荐、Block 自动撤销推荐以及 Unblock 不自动恢复。
 - Clone 切片已交付：中文 Preview/Commit 表单只复制 Project 与 Component Tree，不复制 ComponentVersion、Baseline、Machine 或运行历史；自动验收断言新项目组件存在且版本为空。
 - 3G 已交付：版本详情 API/中文界面显示组件归属、opaque sequence、Maturity/Safety、Recommendation 与生命周期轨迹；`catalog-acceptance.ps1` 已验证版本身份与生命周期记录，Release、真实 Migration 与完整集成验收均已通过。
-- 3C 中文界面补强已交付：软件版本页直接提供“项目 → 组件 → 版本号 → 创建原因”登记流程，并在同页保留版本影响追溯；不改变 Version 必须属于 Component 的领域模型，避免用户必须先发现项目详情中的隐藏表单。
+- 3C 中文界面补强已交付：版本登记始终遵循“项目 → 组件 → 版本号 → 创建原因”；后续 3H 已将该入口和版本影响摘要收敛到项目工作台，不改变 Version 必须属于 Component 的领域模型。
+- 3H 项目工作台体验切片已交付：项目页将组件操作收敛为可选择、可拖拽的树形工作台；版本登记与版本影响摘要移入选中组件，导航不再暴露重复的“软件版本”入口。新增 Component 编辑与受保护的空叶节点删除命令，均保留 Project RBAC、Audit、reason、Idempotency 与 lineage 更新；项目克隆改为创建项目时的显式选择，只复制组件树。真实 Host/Migration、前后端 Release build 和 `catalog-acceptance.ps1` 已通过。
 - 已交付：组件树移动、版本详情/影响查询，以及基于资源范围的 Project RBAC；完整授权矩阵继续在 Step 10 加固。
 
 ## Step 4 — Baseline
@@ -1961,7 +1962,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 ## Step 8 — Trace/Impact/Search
 
 - Bidirectional Trace、Version Impact、Global Search、Dashboard。
-- 8A 已交付：Version Impact 以 PostgreSQL 实时 JOIN 返回 Used Baselines、Current/Target/Historical Machines 与 Recent Facts；不引入图数据库或 Elasticsearch。中文“软件版本”页面可选择已加载项目版本查看汇总与近期事实，`catalog-acceptance.ps1` 已覆盖追溯结果。
+- 8A 已交付：Version Impact 以 PostgreSQL 实时 JOIN 返回 Used Baselines、Current/Target/Historical Machines 与 Recent Facts；不引入图数据库或 Elasticsearch。版本影响摘要现显示在项目工作台的已选版本内，`catalog-acceptance.ps1` 已覆盖追溯结果。
 - 8B 已交付：限制范围的 PostgreSQL `ILIKE` 搜索覆盖 Project、Component、Version、Baseline 与 Machine；最少两字符，不提前扩展为万能搜索。中文“搜索”页面已接入，`catalog-acceptance.ps1` 已验证项目、基线和机台搜索命中。
 - 8C 已交付：Dashboard 只聚合既有 `machine_drift_summaries` 与 Machine Registry，分别展示总数、Matched、Mismatch、Unknown 和 Critical Risk；不为界面新增领域指针或缓存。中文“运行总览”已接入，`catalog-acceptance.ps1` 覆盖持久化摘要的仪表盘聚合结果。
 
