@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { assignMachineTarget, assignProjectMember, assignProjectStandard, changeUserRole, changeVersionMaturity, changeVersionSafety, cloneProject, commitImport, compareBaselines, createBaseline, createComponent, createComponentVersion, createMachine, createProject, createUser, decideBaselineReview, getBaselineDetail, getBaselines, getCurrentUser, getDashboard, getImportPreview, getMachineConfiguration, getMachineDrift, getMachineFacts, getMachineTarget, getMachineTargetHistory, getMachines, getProject, getProjectMembers, getProjectStandard, getProjects, getUsers, getVersionDetail, getVersionExposureSnapshots, getVersionImpact, login, logout, moveComponent, recommendVersion, recordMachineFacts, releaseBaseline, requestBaselineReview, searchCatalog, setBaselineItemRequirement, stageImport } from './catalog-api'
 import { enqueueNoopJob, getSystemStatus, getSystemVersion, type BackgroundJobStatus } from './system-api'
@@ -56,7 +56,6 @@ function App() {
   const [projectDescription, setProjectDescription] = useState('')
   const [projectReason, setProjectReason] = useState('')
   const [cloneSourceProjectId, setCloneSourceProjectId] = useState('')
-  const [projectCatalogCollapsed, setProjectCatalogCollapsed] = useState(false)
   const [userName, setUserName] = useState('')
   const [password, setPassword] = useState('')
   const [componentCode, setComponentCode] = useState('')
@@ -170,7 +169,6 @@ function App() {
       setProjectReason('')
       setCloneSourceProjectId('')
       setSelectedProjectId(id)
-      setProjectCatalogCollapsed(true)
       setSuccessMessage('项目已创建。')
       await queryClient.invalidateQueries({ queryKey: ['projects'] })
     },
@@ -231,10 +229,6 @@ function App() {
   const visibleNavigation = navigation.filter((item) => !item.adminOnly || isAdmin)
   const selectedNavigation = visibleNavigation.find((item) => item.id === activePage) ?? navigation[0]
   const queueCount = (jobStatus: BackgroundJobStatus) => status.data?.queue.find((item) => item.status === jobStatus)?.count ?? 0
-
-  useEffect(() => {
-    if (selectedProjectId) setProjectCatalogCollapsed(true)
-  }, [selectedProjectId])
 
   return (
     <div className="app-shell">
@@ -311,11 +305,6 @@ function App() {
             {activePage === 'projects' && <>
               {!currentUser.data && <section className="status-panel catalog-detail"><div className="panel-heading"><div><span className="section-index">身份验证</span><h3>登录后管理项目</h3></div></div><form className="catalog-form" onSubmit={(event) => { event.preventDefault(); signIn.mutate({ userName, password }) }}><label>用户名<input value={userName} onChange={(event) => setUserName(event.target.value)} required /></label><label>密码<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label><button className="primary-action" type="submit" disabled={signIn.isPending}>{signIn.isPending ? '正在登录' : '登录'}</button></form>{signIn.isError && <p className="error-strip">登录失败，请检查凭据。</p>}</section>}
               {currentUser.data && <section className="status-panel catalog-detail"><div className="panel-heading"><div><span className="section-index">当前身份</span><h3>{currentUser.data.name}</h3></div><button type="button" onClick={() => signOut.mutate()} disabled={signOut.isPending}>退出登录</button></div></section>}
-              <section className="status-panel project-catalog-summary">
-                <div className="panel-heading"><div><span className="section-index">项目目录</span><h3>{projectCatalogCollapsed ? '当前项目工作台' : '项目管理'}</h3></div><button type="button" onClick={() => setProjectCatalogCollapsed(!projectCatalogCollapsed)}>{projectCatalogCollapsed ? '展开目录' : '收起目录'}</button></div>
-                {projectCatalogCollapsed && <p className="form-hint">{projectDetail.data ? `${projectDetail.data.project.code} · ${projectDetail.data.project.name}` : '已收起项目目录；展开后可切换、新建或克隆项目。'}</p>}
-              </section>
-              {!projectCatalogCollapsed && <>
               <section className="status-panel catalog-panel">
                 <div className="panel-heading"><div><span className="section-index">项目目录</span><h3>创建项目</h3></div></div>
                 <form className="catalog-form" onSubmit={(event) => { event.preventDefault(); addProject.mutate({ code: projectCode, name: projectName, description: projectDescription, reason: projectReason }) }}>
@@ -330,9 +319,8 @@ function App() {
               </section>
               <section className="status-panel catalog-panel">
                 <div className="panel-heading"><div><span className="section-index">已建项目</span><h3>项目列表</h3></div><span className="count">{projects.data?.length ?? 0}</span></div>
-                <div className="catalog-list">{projects.data?.map((project) => <button key={project.id} type="button" className={project.id === selectedProjectId ? 'project-row selected' : 'project-row'} onClick={() => { setSelectedProjectId(project.id); setVersionComponentId(''); setProjectCatalogCollapsed(true) }}><span><strong>{project.code}</strong><small>{project.name}</small></span><em>{project.componentCount} 个组件</em></button>) ?? <p className="empty-state">正在读取项目。</p>}</div>
+                <div className="catalog-list">{projects.data?.map((project) => <button key={project.id} type="button" className={project.id === selectedProjectId ? 'project-row selected' : 'project-row'} onClick={() => { setSelectedProjectId(project.id); setVersionComponentId('') }}><span><strong>{project.code}</strong><small>{project.name}</small></span><em>{project.componentCount} 个组件</em></button>) ?? <p className="empty-state">正在读取项目。</p>}</div>
               </section>
-              </>}
               {projectDetail.data && <div hidden><section className="status-panel catalog-detail">
                 <div className="panel-heading"><div><span className="section-index">{projectDetail.data.project.code}</span><h3>{projectDetail.data.project.name}</h3></div></div>
                 <div className="catalog-actions">
