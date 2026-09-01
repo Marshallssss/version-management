@@ -963,6 +963,13 @@ select option { color: #213231; background: #fff; }
 .add-child-node, .add-root-column { min-height: 44px; border: 1px dashed #88aaa2; color: #42615b; background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
 .add-child-node:hover, .add-root-column:hover { border-color: #bd563f; color: #984232; }
 .add-root-column { display: grid; place-items: center; min-height: 76px; }
+.component-create-panel { display: grid; gap: 12px; margin-top: 20px; padding-top: 18px; border-top: 1px solid #c8d9d5; }
+.tree-create-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.tree-create-heading h3 { margin: 5px 0 0; font-size: 18px; }
+.component-create-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.component-create-actions button { padding: 8px 10px; border: 1px solid #9bb8b1; color: #294a47; background: #fff; font: inherit; font-size: 12px; cursor: pointer; }
+.component-create-actions button:hover { border-color: #bd563f; color: #8e3d2e; }
+.component-create-panel .workspace-form { margin-top: 0; }
 .component-inspector { min-width: 0; padding: 24px; }
 .inspector-heading, .subsection-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .inspector-heading h3, .subsection-heading h3 { margin: 6px 0 0; font-size: 22px; }
@@ -1002,6 +1009,7 @@ select option { color: #213231; background: #fff; }
   .component-tree-panel { max-height: none; border-right: 0; border-bottom: 1px solid #d6e2df; }
   .workspace-form, .lifecycle-form { grid-template-columns: 1fr; }
   .form-actions { grid-column: auto; }
+  .tree-create-heading { flex-direction: column; }
   .version-impact { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .version-impact div:nth-child(2) { border-right: 0; }
   .version-impact div:nth-child(-n + 2) { border-bottom: 1px solid #d6e2df; }
