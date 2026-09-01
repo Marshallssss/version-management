@@ -476,6 +476,19 @@ h1 {
   grid-column: span 2;
 }
 
+.project-catalog-summary {
+  grid-column: span 2;
+  padding: 16px 24px;
+}
+
+.project-catalog-summary .panel-heading {
+  margin-bottom: 0;
+}
+
+.project-catalog-summary .form-hint {
+  margin-top: 8px;
+}
+
 .catalog-form,
 .inline-form {
   display: grid;
@@ -780,7 +793,8 @@ h1 {
 
   .job-submit-panel,
   .jobs-panel,
-  .catalog-detail {
+  .catalog-detail,
+  .project-catalog-summary {
     grid-column: auto;
   }
 

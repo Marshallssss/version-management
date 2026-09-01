@@ -1911,6 +1911,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 3G 已交付：版本详情 API/中文界面显示组件归属、opaque sequence、Maturity/Safety、Recommendation 与生命周期轨迹；`catalog-acceptance.ps1` 已验证版本身份与生命周期记录，Release、真实 Migration 与完整集成验收均已通过。
 - 3C 中文界面补强已交付：版本登记始终遵循“项目 → 组件 → 版本号 → 创建原因”；后续 3H 已将该入口和版本影响摘要收敛到项目工作台，不改变 Version 必须属于 Component 的领域模型。
 - 3H 项目工作台体验切片已交付：项目页将组件操作收敛为可选择、可拖拽的树形工作台；版本登记与版本影响摘要移入选中组件，导航不再暴露重复的“软件版本”入口。新增 Component 编辑与受保护的空叶节点删除命令，均保留 Project RBAC、Audit、reason、Idempotency 与 lineage 更新；项目克隆改为创建项目时的显式选择，只复制组件树。真实 Host/Migration、前后端 Release build 和 `catalog-acceptance.ps1` 已通过。
+- 3H 可用性补强已交付：项目目录可折叠；未选择项目时保持展开，选择或新建项目后自动收起，将组件树和编辑工作台保持在近处。目录条仍显示当前项目，并可随时展开来切换、新建或克隆。
 - 已交付：组件树移动、版本详情/影响查询，以及基于资源范围的 Project RBAC；完整授权矩阵继续在 Step 10 加固。
 
 ## Step 4 — Baseline
