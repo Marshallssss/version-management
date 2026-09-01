@@ -933,14 +933,14 @@ select option { color: #213231; background: #fff; }
 .workspace-heading h2 { margin: 6px 0; font-size: 28px; }
 .workspace-heading p { margin: 0; color: #526a66; font-size: 13px; line-height: 1.6; }
 .workspace-heading .primary-action { margin-top: 0; white-space: nowrap; }
-.workspace-layout { display: grid; grid-template-columns: minmax(270px, .72fr) minmax(0, 1.28fr); min-height: 520px; }
-.component-tree-panel { min-width: 0; max-height: calc(100vh - 170px); padding: 20px; overflow: auto; border-right: 1px solid #d6e2df; background: #f5f9f7; }
+.workspace-layout { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 520px; }
+.component-tree-panel { min-width: 0; padding: 24px; overflow: visible; border-bottom: 1px solid #d6e2df; background: #f5f9f7; }
 .tree-toolbar { display: grid; gap: 4px; margin-bottom: 14px; }
 .tree-toolbar strong { font-family: Bahnschrift, "Microsoft YaHei UI", sans-serif; font-size: 17px; }
 .tree-toolbar small { color: #657d78; font-size: 11px; }
 .tree-root-drop { width: 100%; padding: 9px; border: 1px dashed #88aaa2; color: #42615b; background: #fff; cursor: pointer; font-size: 12px; }
 .tree-root-drop:hover { border-color: #bd563f; color: #984232; }
-.component-columns { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(228px, 292px); align-items: start; gap: 16px; margin-top: 14px; overflow-x: auto; padding-bottom: 8px; }
+.component-columns { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(250px, 330px); align-items: start; gap: 16px; margin-top: 14px; overflow-x: auto; padding-bottom: 8px; }
 .root-component-column { display: grid; gap: 10px; min-width: 0; padding-top: 10px; border-top: 3px solid #5d8d80; }
 .root-node { display: grid; grid-template-columns: minmax(0, 1fr) 24px; gap: 8px; min-height: 76px; padding: 11px; border: 0; color: #294a47; background: #e8f2ee; text-align: left; cursor: grab; }
 .root-node span:first-child { display: grid; gap: 3px; min-width: 0; }
@@ -1006,7 +1006,7 @@ select option { color: #213231; background: #fff; }
 @media (max-width: 720px) {
   .workspace-heading, .inspector-heading { flex-direction: column; }
   .workspace-layout { grid-template-columns: 1fr; }
-  .component-tree-panel { max-height: none; border-right: 0; border-bottom: 1px solid #d6e2df; }
+  .component-tree-panel { border-right: 0; }
   .workspace-form, .lifecycle-form { grid-template-columns: 1fr; }
   .form-actions { grid-column: auto; }
   .tree-create-heading { flex-direction: column; }
