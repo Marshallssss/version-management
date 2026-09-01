@@ -103,4 +103,3 @@ pwsh .\ops\windows\preflight.ps1 `
 | 找不到 `pg_dump` | 使用 `-PgDumpCommand` 传入 `pg_dump.exe` 的绝对路径，并确认升级账号的 `pgpass.conf` 可用。|
 | Migration 失败 | 二进制会自动恢复，但数据库不会自动倒退；保留日志与备份，按受控恢复流程处理。|
 | Worker 未启动 | 运行 `Get-Service ConfigHub.Worker` 和 `collect-logs.ps1`；确认服务账号仍可读取机器级连接串与写入日志目录。|
-
