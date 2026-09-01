@@ -19,6 +19,8 @@ public sealed class ConfigHubDbContext(DbContextOptions<ConfigHubDbContext> opti
 
     public DbSet<ComponentVersion> ComponentVersions => Set<ComponentVersion>();
 
+    public DbSet<VersionPatch> VersionPatches => Set<VersionPatch>();
+
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
 
     public DbSet<VersionLifecycleTransition> VersionLifecycleTransitions => Set<VersionLifecycleTransition>();

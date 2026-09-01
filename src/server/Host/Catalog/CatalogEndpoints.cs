@@ -55,6 +55,7 @@ public static class CatalogEndpoints
         endpoints.MapPost("/api/v1/component-versions/{versionId:guid}/impact/export", ExportVersionImpactCsvAsync).RequireAuthorization("Engineer");
         endpoints.MapGet("/api/v1/component-versions/{versionId:guid}/exposures", GetVersionExposureSnapshotsAsync).RequireAuthorization();
         endpoints.MapGet("/api/v1/component-versions/{versionId:guid}", GetVersionDetailAsync).RequireAuthorization();
+        endpoints.MapPost("/api/v1/component-versions/{versionId:guid}/patches", CreateVersionPatchAsync).RequireAuthorization("Engineer");
         endpoints.MapGet("/api/v1/search", SearchAsync).RequireAuthorization();
         endpoints.MapGet("/api/v1/dashboard", GetDashboardAsync).RequireAuthorization();
         endpoints.MapPost("/api/v1/admin/drift-summaries/rebuild", RebuildMachineDriftSummariesAsync)
@@ -544,7 +545,8 @@ public static class CatalogEndpoints
         if (version is null) return Results.NotFound();
         var transitions = await db.VersionLifecycleTransitions.AsNoTracking().Where(item => item.ComponentVersionId == versionId).OrderByDescending(item => item.OccurredAt).Select(item => new { axis = item.Axis.ToString(), fromState = item.FromState, toState = item.ToState, reason = item.Reason, actor = item.Actor, occurredAt = item.OccurredAt }).ToListAsync(cancellationToken);
         var recommended = await db.VersionRecommendations.AsNoTracking().AnyAsync(item => item.ComponentVersionId == versionId && item.RevokedAt == null, cancellationToken);
-        return TypedResults.Ok(new { version, recommended, transitions });
+        var patches = await db.VersionPatches.AsNoTracking().Where(item => item.ComponentVersionId == versionId).OrderByDescending(item => item.RecordedAt).Select(item => new { id = item.Id, patchCode = item.PatchCode, title = item.Title, issueDescription = item.IssueDescription, resolutionDescription = item.ResolutionDescription, status = item.Status.ToString(), recordedBy = item.RecordedBy, recordedAt = item.RecordedAt }).ToListAsync(cancellationToken);
+        return TypedResults.Ok(new { version, recommended, transitions, patches });
     }
 
     private static async Task<IResult> SearchAsync(string? query, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
@@ -553,12 +555,13 @@ public static class CatalogEndpoints
         if (string.IsNullOrWhiteSpace(term) || term.Length < 2) return Results.ValidationProblem(new Dictionary<string, string[]> { ["query"] = ["搜索词至少需要两个字符。"] });
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         var pattern = $"%{term}%";
-        var projects = await db.Projects.AsNoTracking().Where(item => EF.Functions.ILike(item.Code, pattern) || EF.Functions.ILike(item.Name, pattern)).Select(item => new { type = "Project", id = item.Id, projectId = item.Id, label = item.Code + " · " + item.Name }).Take(20).ToListAsync(cancellationToken);
-        var components = await db.ConfigurationComponents.AsNoTracking().Where(item => EF.Functions.ILike(item.ComponentCode, pattern) || EF.Functions.ILike(item.Name, pattern)).Select(item => new { type = "Component", id = item.Id, projectId = item.ProjectId, label = item.ComponentCode + " · " + item.Name }).Take(20).ToListAsync(cancellationToken);
-        var versions = await db.ComponentVersions.AsNoTracking().Where(item => EF.Functions.ILike(item.VersionNumber, pattern)).Join(db.ConfigurationComponents.AsNoTracking(), version => version.ComponentId, component => component.Id, (version, component) => new { type = "Version", id = version.Id, projectId = component.ProjectId, label = version.VersionNumber }).Take(20).ToListAsync(cancellationToken);
-        var baselines = await db.ConfigurationBaselines.AsNoTracking().Where(item => EF.Functions.ILike(item.BaselineCode, pattern)).Select(item => new { type = "Baseline", id = item.Id, projectId = item.ProjectId, label = item.BaselineCode }).Take(20).ToListAsync(cancellationToken);
-        var machines = await db.Machines.AsNoTracking().Where(item => EF.Functions.ILike(item.SerialNumber, pattern) || EF.Functions.ILike(item.Name, pattern)).Select(item => new { type = "Machine", id = item.Id, projectId = item.ProjectId, label = item.SerialNumber + " · " + item.Name }).Take(20).ToListAsync(cancellationToken);
-        return TypedResults.Ok(projects.Cast<object>().Concat(components).Concat(versions).Concat(baselines).Concat(machines));
+        var projects = await db.Projects.AsNoTracking().Where(item => EF.Functions.ILike(item.Code, pattern) || EF.Functions.ILike(item.Name, pattern)).OrderBy(item => item.Code).Select(item => new { type = "Project", id = item.Id, projectId = item.Id, label = item.Code + " · " + item.Name }).Take(20).ToListAsync(cancellationToken);
+        var components = await db.ConfigurationComponents.AsNoTracking().Where(item => EF.Functions.ILike(item.ComponentCode, pattern) || EF.Functions.ILike(item.Name, pattern)).OrderBy(item => item.ComponentCode).Select(item => new { type = "Component", id = item.Id, projectId = item.ProjectId, label = item.ComponentCode + " · " + item.Name }).Take(20).ToListAsync(cancellationToken);
+        var versions = await db.ComponentVersions.AsNoTracking().Where(item => EF.Functions.ILike(item.VersionNumber, pattern)).Join(db.ConfigurationComponents.AsNoTracking(), version => version.ComponentId, component => component.Id, (version, component) => new { version, component }).OrderBy(item => item.version.VersionNumber).Select(item => new { type = "Version", id = item.version.Id, projectId = item.component.ProjectId, label = item.version.VersionNumber }).Take(20).ToListAsync(cancellationToken);
+        var patches = await db.VersionPatches.AsNoTracking().Where(item => EF.Functions.ILike(item.PatchCode, pattern) || EF.Functions.ILike(item.Title, pattern) || EF.Functions.ILike(item.IssueDescription, pattern) || EF.Functions.ILike(item.ResolutionDescription, pattern)).Join(db.ComponentVersions.AsNoTracking(), patch => patch.ComponentVersionId, version => version.Id, (patch, version) => new { patch, version }).Join(db.ConfigurationComponents.AsNoTracking(), value => value.version.ComponentId, component => component.Id, (value, component) => new { value.patch, value.version, component }).OrderByDescending(item => item.patch.RecordedAt).Select(item => new { type = "Patch", id = item.patch.Id, projectId = item.component.ProjectId, versionId = item.version.Id, label = item.patch.PatchCode + " · " + item.version.VersionNumber + " · " + item.patch.Title }).Take(20).ToListAsync(cancellationToken);
+        var baselines = await db.ConfigurationBaselines.AsNoTracking().Where(item => EF.Functions.ILike(item.BaselineCode, pattern)).OrderBy(item => item.BaselineCode).Select(item => new { type = "Baseline", id = item.Id, projectId = item.ProjectId, label = item.BaselineCode }).Take(20).ToListAsync(cancellationToken);
+        var machines = await db.Machines.AsNoTracking().Where(item => EF.Functions.ILike(item.SerialNumber, pattern) || EF.Functions.ILike(item.Name, pattern)).OrderBy(item => item.SerialNumber).Select(item => new { type = "Machine", id = item.Id, projectId = item.ProjectId, label = item.SerialNumber + " · " + item.Name }).Take(20).ToListAsync(cancellationToken);
+        return TypedResults.Ok(projects.Cast<object>().Concat(components).Concat(versions).Concat(patches).Concat(baselines).Concat(machines));
     }
 
     private static async Task<IResult> GetDashboardAsync(IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
@@ -1284,6 +1287,71 @@ public static class CatalogEndpoints
         return TypedResults.Created($"/api/v1/components/{componentId}/versions/{version.Id}", new { id = version.Id, sequenceNo = version.SequenceNo });
     }
 
+    private static async Task<IResult> CreateVersionPatchAsync(
+        Guid versionId,
+        CreateVersionPatchRequest request,
+        HttpContext httpContext,
+        IDbContextFactory<ConfigHubDbContext> contextFactory,
+        CancellationToken cancellationToken)
+    {
+        var validationError = ValidateIdentifier(request.PatchCode, "补丁编号", 80)
+            ?? ValidateRequired(request.Title, "补丁标题", 200)
+            ?? ValidateRequired(request.IssueDescription, "问题说明", 2000)
+            ?? ValidateRequired(request.ResolutionDescription, "修复说明", 2000);
+        if (validationError is not null) return Results.ValidationProblem(validationError);
+        if (!Enum.TryParse<VersionPatchStatus>(request.Status, ignoreCase: true, out var status))
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["status"] = ["补丁状态必须为 Draft、Released 或 Withdrawn。"] });
+
+        var key = httpContext.Request.Headers["Idempotency-Key"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(key) || key.Length > 200)
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["登记补丁必须提供不超过 200 个字符的 Idempotency-Key。"] });
+
+        await using var database = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var scope = $"version-patches.create:{versionId}";
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request))));
+        var replay = await database.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
+        if (replay is not null)
+        {
+            if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" });
+            if (replay.Result is not null) return TypedResults.Ok(replay.Result.RootElement.Clone());
+            return Results.Conflict(new { message = "该请求仍在处理。" });
+        }
+
+        var version = await database.ComponentVersions.Join(database.ConfigurationComponents, item => item.ComponentId, component => component.Id, (item, component) => new { item, component.ProjectId }).SingleOrDefaultAsync(item => item.item.Id == versionId, cancellationToken);
+        if (version is null) return Results.NotFound();
+        if (!await HasProjectWriteAccessAsync(database, httpContext, version.ProjectId, cancellationToken)) return Results.Forbid();
+        var normalizedPatchCode = Normalize(request.PatchCode!);
+        if (await database.VersionPatches.AnyAsync(item => item.ComponentVersionId == versionId && item.NormalizedPatchCode == normalizedPatchCode, cancellationToken))
+            return Results.Conflict(new { message = "该版本下的补丁编号已存在。" });
+
+        var now = DateTimeOffset.UtcNow;
+        var actor = httpContext.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required.");
+        await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
+        database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) });
+        var patch = new VersionPatch
+        {
+            Id = Guid.NewGuid(),
+            ComponentVersionId = versionId,
+            PatchCode = request.PatchCode!.Trim(),
+            NormalizedPatchCode = normalizedPatchCode,
+            Title = request.Title!.Trim(),
+            IssueDescription = request.IssueDescription!.Trim(),
+            ResolutionDescription = request.ResolutionDescription!.Trim(),
+            Status = status,
+            RecordedBy = actor[..Math.Min(actor.Length, 160)],
+            RecordedAt = now
+        };
+        database.VersionPatches.Add(patch);
+        AddAuditEvent(database, httpContext, "VersionPatchRecorded", "VersionPatch", patch.Id, new { patch.ComponentVersionId, patch.PatchCode, patch.Title, status = patch.Status.ToString() });
+        await database.SaveChangesAsync(cancellationToken);
+        var record = await database.IdempotencyRecords.SingleAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
+        record.Status = IdempotencyRecordStatus.Completed;
+        record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = patch.Id, status = patch.Status.ToString(), recordedAt = patch.RecordedAt }));
+        await database.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return TypedResults.Created($"/api/v1/component-versions/{versionId}/patches/{patch.Id}", new { id = patch.Id, status = patch.Status.ToString(), recordedAt = patch.RecordedAt });
+    }
+
     private static async Task<IResult> UpdateComponentAsync(Guid componentId, UpdateComponentRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
     {
         var validation = ValidateIdentifier(request.Code, "组件编码", 80) ?? ValidateRequired(request.Name, "组件名称", 200) ?? ValidateRequired(request.Reason, "修改原因", 500);
@@ -1506,6 +1574,7 @@ public sealed record CreateComponentRequest(string? Code, string? Name, Guid? Pa
 public sealed record UpdateComponentRequest(string? Code, string? Name, string? Reason);
 public sealed record DeleteComponentRequest(string? Reason);
 public sealed record CreateComponentVersionRequest(string? VersionNumber, string? Reason);
+public sealed record CreateVersionPatchRequest(string? PatchCode, string? Title, string? IssueDescription, string? ResolutionDescription, string? Status);
 public sealed record LifecycleRequest(string? State, string? Reason);
 public sealed record CloneProjectRequest(string? Code, string? Name, string? Reason);
 public sealed record MoveComponentRequest(Guid? ParentComponentId, string? Reason);

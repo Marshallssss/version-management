@@ -137,6 +137,26 @@ internal static class ConfigHubModel
             entity.HasOne<ConfigurationComponent>().WithMany().HasForeignKey(version => version.ComponentId).OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<VersionPatch>(entity =>
+        {
+            entity.ToTable("version_patches");
+            entity.HasKey(patch => patch.Id);
+            entity.Property(patch => patch.Id).HasColumnName("id");
+            entity.Property(patch => patch.ComponentVersionId).HasColumnName("component_version_id");
+            entity.Property(patch => patch.PatchCode).HasColumnName("patch_code").HasMaxLength(80);
+            entity.Property(patch => patch.NormalizedPatchCode).HasColumnName("normalized_patch_code").HasMaxLength(80);
+            entity.Property(patch => patch.Title).HasColumnName("title").HasMaxLength(200);
+            entity.Property(patch => patch.IssueDescription).HasColumnName("issue_description").HasMaxLength(2000);
+            entity.Property(patch => patch.ResolutionDescription).HasColumnName("resolution_description").HasMaxLength(2000);
+            entity.Property(patch => patch.Status).HasColumnName("status").HasMaxLength(32).HasConversion<string>();
+            entity.Property(patch => patch.RecordedBy).HasColumnName("recorded_by").HasMaxLength(160);
+            entity.Property(patch => patch.RecordedAt).HasColumnName("recorded_at");
+            entity.HasIndex(patch => new { patch.ComponentVersionId, patch.NormalizedPatchCode }).IsUnique().HasDatabaseName("ux_version_patches_version_code");
+            entity.HasIndex(patch => patch.NormalizedPatchCode).HasDatabaseName("ix_version_patches_code");
+            entity.HasIndex(patch => new { patch.ComponentVersionId, patch.RecordedAt }).HasDatabaseName("ix_version_patches_version_recorded_at");
+            entity.HasOne<ComponentVersion>().WithMany().HasForeignKey(patch => patch.ComponentVersionId).OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<AuditEvent>(entity =>
         {
             entity.ToTable("audit_events");

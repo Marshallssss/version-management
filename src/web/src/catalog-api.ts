@@ -19,6 +19,17 @@ export interface ComponentVersion {
   createdAt: string
 }
 
+export interface VersionPatch {
+  id: string
+  patchCode: string
+  title: string
+  issueDescription: string
+  resolutionDescription: string
+  status: string
+  recordedBy: string
+  recordedAt: string
+}
+
 export interface ConfigurationComponent {
   id: string
   parentComponentId: string | null
@@ -80,6 +91,8 @@ export const deleteComponent = (componentId: string, reason: string) =>
 export const assignProjectMember = (projectId: string, input: { userId: string; role: string; reason: string }) => request<{ id: string }>(`/api/v1/projects/${projectId}/members`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': createIdempotencyKey() }, body: JSON.stringify(input) })
 export const createComponentVersion = (componentId: string, input: { versionNumber: string; reason: string }) =>
   request<{ id: string; sequenceNo: number }>(`/api/v1/components/${componentId}/versions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': createIdempotencyKey() }, body: JSON.stringify(input) })
+export const createVersionPatch = (versionId: string, input: { patchCode: string; title: string; issueDescription: string; resolutionDescription: string; status: string }) =>
+  request<{ id: string; status: string; recordedAt: string }>(`/api/v1/component-versions/${versionId}/patches`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': createIdempotencyKey() }, body: JSON.stringify(input) })
 export const changeVersionMaturity = (versionId: string, state: string, reason: string) =>
   request<{ maturity: string; safety: string }>(`/api/v1/component-versions/${versionId}/maturity`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': createIdempotencyKey() }, body: JSON.stringify({ state, reason }) })
 export const changeVersionSafety = (versionId: string, state: string, reason: string) =>
@@ -116,8 +129,8 @@ export const compareMachines = (leftMachineId: string, rightMachineId: string) =
 export const compareMachineCurrentToHistory = (machineId: string, at: string) => request<{ matchStatus: string; riskSeverity: string; items: Array<{ componentId: string; componentCode: string; componentName: string; status: string; currentVersionId: string | null; currentVersionNumber: string | null; historicalVersionId: string | null; historicalVersionNumber: string | null }> }>(`/api/v1/machines/${machineId}/compare-history?at=${encodeURIComponent(at)}`)
 export const getVersionImpact = (versionId: string) => request<{ usedBaselineIds: string[]; currentMachineIds: string[]; targetMachineIds: string[]; historicalMachineIds: string[]; recentFacts: Array<{ machineId: string; operationType: string; effectiveAt: string }> }>(`/api/v1/component-versions/${versionId}/impact`)
 export const getVersionExposureSnapshots = (versionId: string) => request<Array<{ id: string; blockedAt: string; blockedBy: string; reason: string; currentMachineCount: number; targetMachineCount: number; historicalMachineCount: number; baselineCount: number }>>(`/api/v1/component-versions/${versionId}/exposures`)
-export const getVersionDetail = (versionId: string) => request<{ version: { componentCode: string; componentName: string; versionNumber: string; sequenceNo: number; maturity: string; safety: string; createdAt: string }; recommended: boolean; transitions: Array<{ axis: string; fromState: string; toState: string; reason: string; actor: string; occurredAt: string }> }>(`/api/v1/component-versions/${versionId}`)
-export const searchCatalog = (query: string) => request<Array<{ type: string; id: string; projectId: string; label: string }>>(`/api/v1/search?query=${encodeURIComponent(query)}`)
+export const getVersionDetail = (versionId: string) => request<{ version: { componentCode: string; componentName: string; versionNumber: string; sequenceNo: number; maturity: string; safety: string; createdAt: string }; recommended: boolean; transitions: Array<{ axis: string; fromState: string; toState: string; reason: string; actor: string; occurredAt: string }>; patches: VersionPatch[] }>(`/api/v1/component-versions/${versionId}`)
+export const searchCatalog = (query: string) => request<Array<{ type: string; id: string; projectId: string; versionId?: string; label: string }>>(`/api/v1/search?query=${encodeURIComponent(query)}`)
 export const getDashboard = () => request<{ machineCount: number; matchedCount: number; mismatchCount: number; unknownCount: number; criticalRiskCount: number }>('/api/v1/dashboard')
 export const stageImport = (input: { projectId: string; sourceFileName: string; reason: string; rows: Array<{ componentCode: string; versionNumber: string }> }) => request<{ id: string; status: string; rowCount: number; errorCount: number }>('/api/v1/imports', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': createIdempotencyKey() }, body: JSON.stringify(input) })
 export const getImportPreview = (batchId: string) => request<{ status: string; sourceFileName: string; rows: Array<{ rowNumber: number; payload: { componentCode: string; versionNumber: string }; validationError: string | null }> }>(`/api/v1/imports/${batchId}`)

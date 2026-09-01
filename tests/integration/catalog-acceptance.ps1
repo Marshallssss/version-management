@@ -153,6 +153,13 @@ if ($firstVersion.id -ne $firstVersionReplay.id -or $firstVersion.sequenceNo -ne
 $secondVersion = Invoke-JsonPost "/api/v1/components/$($component.id)/versions" @{ versionNumber = 'opaque-b'; reason = '自动化版本创建' }
 $childVersion = Invoke-JsonPost "/api/v1/components/$($child.id)/versions" @{ versionNumber = 'opaque-child'; reason = '自动化版本创建' }
 if ($firstVersion.sequenceNo -ne 10 -or $secondVersion.sequenceNo -ne 20) { throw 'Expected version sequence 10/20.' }
+$patchHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString(); 'X-Correlation-ID' = "patch-$suffix" }
+$patchBody = @{ patchCode = "HF-$suffix"; title = '控制模块热修复'; issueDescription = '已发布版本在特定工况下会遗漏一次状态刷新。'; resolutionDescription = '部署独立热修复包以补齐状态刷新逻辑，软件版本号保持不变。'; status = 'Released' } | ConvertTo-Json
+$patch = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/component-versions/$($secondVersion.id)/patches")) -Headers $patchHeaders -ContentType 'application/json' -Body $patchBody
+$patchReplay = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/component-versions/$($secondVersion.id)/patches")) -Headers $patchHeaders -ContentType 'application/json' -Body $patchBody
+$patchDetail = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/component-versions/$($secondVersion.id)"))
+$patchAudit = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/audit?entityId=$($patch.id)"))
+if ($patch.id -ne $patchReplay.id -or $patch.status -ne 'Released' -or @($patchDetail.patches | Where-Object { $_.id -eq $patch.id -and $_.patchCode -eq "HF-$suffix" -and $_.status -eq 'Released' }).Count -ne 1 -or @($patchAudit | Where-Object { $_.action -eq 'VersionPatchRecorded' -and $_.actor -eq $Email -and $_.correlationId -eq "patch-$suffix" }).Count -ne 1) { throw 'Version patch registration must be idempotent, traceable and must not require a replacement version.' }
 
 function Invoke-Lifecycle([string]$Path, [string]$State, [string]$Reason) {
     Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, $Path)) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() } -ContentType 'application/json' -Body (@{ state = $State; reason = $Reason } | ConvertTo-Json)
@@ -323,7 +330,8 @@ $search = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/ap
 if (@($search | Where-Object { $_.type -eq 'Project' -and $_.id -eq $project.id }).Count -ne 1) { throw 'Catalog search must find the created project.' }
 $machineSearch = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/search?query=SN-$suffix"))
 $baselineSearch = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/search?query=BL-$suffix"))
-if (@($machineSearch | Where-Object { $_.type -eq 'Machine' -and $_.id -eq $machine.id }).Count -ne 1 -or @($baselineSearch | Where-Object { $_.type -eq 'Baseline' -and $_.id -eq $baseline.id }).Count -ne 1) { throw 'Catalog search must find the created machine and baseline.' }
+$patchSearch = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/search?query=HF-$suffix"))
+if (@($machineSearch | Where-Object { $_.type -eq 'Machine' -and $_.id -eq $machine.id }).Count -ne 1 -or @($baselineSearch | Where-Object { $_.type -eq 'Baseline' -and $_.id -eq $baseline.id }).Count -ne 1 -or @($patchSearch | Where-Object { $_.type -eq 'Patch' -and $_.id -eq $patch.id -and $_.versionId -eq $secondVersion.id }).Count -ne 1) { throw 'Catalog search must find the created machine, baseline and version patch.' }
 $importHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() }
 $importBody = @{ projectId = $project.id; sourceFileName = 'acceptance.csv'; reason = '自动化导入预览'; rows = @(@{ componentCode = 'CONTROL'; versionNumber = 'import-preview' }, @{ componentCode = 'CONTROL'; versionNumber = 'opaque-b' }) } | ConvertTo-Json -Depth 5
 $import = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, '/api/v1/imports')) -Headers $importHeaders -ContentType 'application/json' -Body $importBody

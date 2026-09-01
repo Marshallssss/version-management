@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { changeVersionMaturity, changeVersionSafety, createComponent, createComponentVersion, deleteComponent, getVersionImpact, moveComponent, recommendVersion, updateComponent, type ConfigurationComponent, type ProjectDetail } from './catalog-api'
+import { changeVersionMaturity, changeVersionSafety, createComponent, createComponentVersion, createVersionPatch, deleteComponent, getVersionDetail, getVersionImpact, moveComponent, recommendVersion, updateComponent, type ConfigurationComponent, type ProjectDetail } from './catalog-api'
 
 type FormMode = 'idle' | 'create-root' | 'create-child' | 'edit' | 'delete'
 
@@ -12,7 +12,15 @@ function safetyText(value: string) {
   return ({ Clear: '正常', Blocked: '已阻断' } as Record<string, string>)[value] ?? value
 }
 
-export function ProjectWorkspace({ detail, onSuccess }: { detail: ProjectDetail; onSuccess: (message: string) => void }) {
+function patchStatusText(value: string) {
+  return ({ Draft: '草稿', Released: '已发布', Withdrawn: '已撤回' } as Record<string, string>)[value] ?? value
+}
+
+function formatTime(value: string) {
+  return new Date(value).toLocaleString('zh-CN', { hour12: false })
+}
+
+export function ProjectWorkspace({ detail, focusedVersionId, onSuccess }: { detail: ProjectDetail; focusedVersionId?: string; onSuccess: (message: string) => void }) {
   const queryClient = useQueryClient()
   const [selectedId, setSelectedId] = useState<string | null>(detail.components[0]?.id ?? null)
   const [draggingId, setDraggingId] = useState<string | null>(null)
@@ -25,6 +33,11 @@ export function ProjectWorkspace({ detail, onSuccess }: { detail: ProjectDetail;
   const [selectedVersionId, setSelectedVersionId] = useState('')
   const [lifecycleAction, setLifecycleAction] = useState('Testing')
   const [lifecycleReason, setLifecycleReason] = useState('')
+  const [patchCode, setPatchCode] = useState('')
+  const [patchTitle, setPatchTitle] = useState('')
+  const [patchIssue, setPatchIssue] = useState('')
+  const [patchResolution, setPatchResolution] = useState('')
+  const [patchStatus, setPatchStatus] = useState('Released')
   const selected = detail.components.find(component => component.id === selectedId) ?? null
   const children = useMemo(() => {
     const map = new Map<string | null, ConfigurationComponent[]>()
@@ -41,6 +54,14 @@ export function ProjectWorkspace({ detail, onSuccess }: { detail: ProjectDetail;
     setSelectedId(detail.components[0]?.id ?? null)
     setFormMode('idle')
   }, [detail.project.id])
+  useEffect(() => {
+    if (!focusedVersionId) return
+    const component = detail.components.find(candidate => candidate.versions.some(version => version.id === focusedVersionId))
+    if (component) {
+      setSelectedId(component.id)
+      setSelectedVersionId(focusedVersionId)
+    }
+  }, [detail.components, focusedVersionId])
   const startCreate = (mode: 'create-root' | 'create-child') => { setFormMode(mode); setCode(''); setName(''); setReason('') }
   const startEdit = () => { if (!selected) return; setFormMode('edit'); setCode(selected.code); setName(selected.name); setReason('') }
   const create = useMutation({
@@ -74,6 +95,19 @@ export function ProjectWorkspace({ detail, onSuccess }: { detail: ProjectDetail;
     onSuccess: async () => { setLifecycleReason(''); onSuccess('版本状态已更新。'); await refresh() },
   })
   const versionImpact = useQuery({ queryKey: ['project-version-impact', selectedVersionId], queryFn: () => getVersionImpact(selectedVersionId), enabled: selectedVersionId !== '' })
+  const versionDetail = useQuery({ queryKey: ['project-version-detail', selectedVersionId], queryFn: () => getVersionDetail(selectedVersionId), enabled: selectedVersionId !== '' })
+  const addPatch = useMutation({
+    mutationFn: () => createVersionPatch(selectedVersionId, { patchCode, title: patchTitle, issueDescription: patchIssue, resolutionDescription: patchResolution, status: patchStatus }),
+    onSuccess: async () => {
+      setPatchCode('')
+      setPatchTitle('')
+      setPatchIssue('')
+      setPatchResolution('')
+      setPatchStatus('Released')
+      onSuccess('版本补丁已登记，软件版本号保持不变。')
+      await queryClient.invalidateQueries({ queryKey: ['project-version-detail', selectedVersionId] })
+    },
+  })
   const onDrop = (parentComponentId: string | null) => {
     if (!draggingId || draggingId === parentComponentId) return
     const dragged = detail.components.find(component => component.id === draggingId)
@@ -110,7 +144,7 @@ export function ProjectWorkspace({ detail, onSuccess }: { detail: ProjectDetail;
           </form>}
           <section className="version-workbench"><div className="subsection-heading"><div><span className="section-index">软件版本</span><h3>登记与状态</h3></div></div><form className="workspace-form" onSubmit={(event) => { event.preventDefault(); addVersion.mutate() }}><label>版本号<input value={versionNumber} placeholder="例如：2026.09.01" maxLength={160} onChange={(event) => setVersionNumber(event.target.value)} required /></label><label>登记原因<input value={versionReason} maxLength={500} onChange={(event) => setVersionReason(event.target.value)} required /></label><div className="form-actions wide-field"><button className="primary-action" type="submit" disabled={addVersion.isPending}>{addVersion.isPending ? '正在登记' : '登记版本'}</button></div>{addVersion.isError && <p className="error-strip wide-field">{addVersion.error.message}</p>}</form>
             {selected.versions.length ? <div className="version-list">{selected.versions.map(version => <button type="button" key={version.id} className={version.id === selectedVersionId ? 'version-item selected' : 'version-item'} onClick={() => setSelectedVersionId(version.id)}><span><strong>{version.versionNumber}</strong><small>序列 {version.sequenceNo} · {maturityText(version.maturity)} · {safetyText(version.safety)}</small></span></button>)}</div> : <p className="empty-state">尚未登记软件版本。</p>}
-            {selectedVersionId && <><form className="workspace-form lifecycle-form" onSubmit={(event) => { event.preventDefault(); lifecycle.mutate() }}><label>状态操作<select value={lifecycleAction} onChange={(event) => setLifecycleAction(event.target.value)}><option value="Testing">提交测试</option><option value="Released">发布</option><option value="Maintenance">进入维护</option><option value="Deprecated">废弃</option><option value="Blocked">阻断</option><option value="Clear">解除阻断</option><option value="Recommended">设为推荐</option></select></label><label>操作原因<input value={lifecycleReason} maxLength={500} onChange={(event) => setLifecycleReason(event.target.value)} required /></label><div className="form-actions wide-field"><button type="submit" disabled={lifecycle.isPending}>{lifecycle.isPending ? '正在更新' : '更新状态'}</button></div>{lifecycle.isError && <p className="error-strip wide-field">{lifecycle.error.message}</p>}</form><dl className="version-impact"><div><dt>已使用基线</dt><dd>{versionImpact.data?.usedBaselineIds.length ?? '—'}</dd></div><div><dt>当前机台</dt><dd>{versionImpact.data?.currentMachineIds.length ?? '—'}</dd></div><div><dt>目标机台</dt><dd>{versionImpact.data?.targetMachineIds.length ?? '—'}</dd></div><div><dt>历史机台</dt><dd>{versionImpact.data?.historicalMachineIds.length ?? '—'}</dd></div></dl></>}
+            {selectedVersionId && <><form className="workspace-form lifecycle-form" onSubmit={(event) => { event.preventDefault(); lifecycle.mutate() }}><label>状态操作<select value={lifecycleAction} onChange={(event) => setLifecycleAction(event.target.value)}><option value="Testing">提交测试</option><option value="Released">发布</option><option value="Maintenance">进入维护</option><option value="Deprecated">废弃</option><option value="Blocked">阻断</option><option value="Clear">解除阻断</option><option value="Recommended">设为推荐</option></select></label><label>操作原因<input value={lifecycleReason} maxLength={500} onChange={(event) => setLifecycleReason(event.target.value)} required /></label><div className="form-actions wide-field"><button type="submit" disabled={lifecycle.isPending}>{lifecycle.isPending ? '正在更新' : '更新状态'}</button></div>{lifecycle.isError && <p className="error-strip wide-field">{lifecycle.error.message}</p>}</form><dl className="version-impact"><div><dt>已使用基线</dt><dd>{versionImpact.data?.usedBaselineIds.length ?? '—'}</dd></div><div><dt>当前机台</dt><dd>{versionImpact.data?.currentMachineIds.length ?? '—'}</dd></div><div><dt>目标机台</dt><dd>{versionImpact.data?.targetMachineIds.length ?? '—'}</dd></div><div><dt>历史机台</dt><dd>{versionImpact.data?.historicalMachineIds.length ?? '—'}</dd></div></dl><section className="version-patch-workbench"><div className="subsection-heading"><div><span className="section-index">版本补丁</span><h3>问题与修复记录</h3><p className="form-hint">补丁不会改变软件版本号，也不表示机台已经安装；机台补丁实际情况会单独记录。</p></div></div><form className="workspace-form" onSubmit={(event) => { event.preventDefault(); addPatch.mutate() }}><label>补丁编号<input value={patchCode} placeholder="例如：HF-001" maxLength={80} onChange={(event) => setPatchCode(event.target.value)} required /></label><label>补丁状态<select value={patchStatus} onChange={(event) => setPatchStatus(event.target.value)}><option value="Draft">草稿</option><option value="Released">已发布</option><option value="Withdrawn">已撤回</option></select></label><label className="wide-field">补丁标题<input value={patchTitle} maxLength={200} onChange={(event) => setPatchTitle(event.target.value)} required /></label><label>问题说明<textarea value={patchIssue} maxLength={2000} onChange={(event) => setPatchIssue(event.target.value)} required /></label><label>修复说明<textarea value={patchResolution} maxLength={2000} onChange={(event) => setPatchResolution(event.target.value)} required /></label><div className="form-actions wide-field"><button type="submit" disabled={addPatch.isPending}>{addPatch.isPending ? '正在登记' : '登记补丁'}</button></div>{addPatch.isError && <p className="error-strip wide-field">{addPatch.error.message}</p>}</form>{versionDetail.data?.patches.length ? <div className="patch-list">{versionDetail.data.patches.map(patch => <article className="patch-item" key={patch.id}><div><span className={`patch-status ${patch.status.toLowerCase()}`}>{patchStatusText(patch.status)}</span><strong>{patch.patchCode} · {patch.title}</strong><p><b>问题：</b>{patch.issueDescription}</p><p><b>修复：</b>{patch.resolutionDescription}</p></div><small>{patch.recordedBy}<br />{formatTime(patch.recordedAt)}</small></article>)}</div> : <p className="empty-state">尚未登记补丁。</p>}</section></>}
           </section>
         </> : <p className="empty-state">从左侧选择组件，或先创建根组件。</p>}
       </section>

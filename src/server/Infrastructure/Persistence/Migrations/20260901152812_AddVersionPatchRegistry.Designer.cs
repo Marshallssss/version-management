@@ -4,6 +4,7 @@ using System.Text.Json;
 using ConfigHub.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace ConfigHub.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(ConfigHubDbContext))]
-    partial class ConfigHubDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260901152812_AddVersionPatchRegistry")]
+    partial class AddVersionPatchRegistry
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
