@@ -107,7 +107,7 @@ jobs:
       - name: Verify release inputs
         shell: pwsh
         run: |
-          if (-not ${{ inputs.offline_build }}) {
+          if ('${{ inputs.offline_build }}' -ne 'true') {
             dotnet build .\src\server\ConfigHub.slnx --configuration Release --no-restore -p:SkipClientBuild=true -warnaserror
             npm --prefix .\src\web run build
             pwsh .\tests\integration\web-compatibility.ps1
