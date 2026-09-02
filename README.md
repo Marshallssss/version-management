@@ -89,6 +89,16 @@ Expand-Archive .\artifacts\ConfigHub-offline-nuget-win-x64-*.zip -DestinationPat
 
 升级前请阅读 [Windows 一键升级手册](docs/operations/windows-upgrade.md)：其中列出了参数来源、`-WhatIf` 预演、升级阶段、备份/二进制回退边界和升级后健康检查。
 
+## 生成 Windows EXE 发布包
+
+ConfigHub 发布为一套 Windows 服务程序：`ConfigHub.Host.exe`、`ConfigHub.Worker.exe` 与前端静态文件一同放入可验证的 ZIP 包中。构建机运行：
+
+```powershell
+pwsh .\ops\windows\package-release.ps1 -Version 0.2.0-pilot.2
+```
+
+它会生成 `artifacts\release\<version>`、`ConfigHub-release-<version>-win-x64.zip` 和对应 SHA-256 文件。仓库还提供手动触发的 GitHub Actions 发布流程，构建、校验、上传构建产物并创建 GitHub Release；完整操作、公司内网镜像和离线自托管 Runner 的配置见 [GitHub Windows 发布](docs/operations/github-release.md)。
+
 手工验证命令：
 
 ```powershell

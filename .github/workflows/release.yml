@@ -1,0 +1,161 @@
+name: Windows Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version, for example 0.2.0-pilot.2
+        required: true
+        type: string
+      prerelease:
+        description: Mark the GitHub Release as a prerelease
+        required: true
+        default: true
+        type: boolean
+      offline_build:
+        description: Use already restored NuGet assets and an already built SPA on a self-hosted runner
+        required: true
+        default: false
+        type: boolean
+      runner:
+        description: Build environment
+        required: true
+        default: windows-latest
+        type: choice
+        options:
+          - windows-latest
+          - self-hosted
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  package-and-release:
+    name: Package and publish Windows release
+    runs-on: ${{ inputs.runner }}
+    env:
+      CONFIGHUB_NUGET_SOURCE: ${{ vars.CONFIGHUB_NUGET_SOURCE || 'https://api.nuget.org/v3/index.json' }}
+      CONFIGHUB_NPM_REGISTRY: ${{ vars.CONFIGHUB_NPM_REGISTRY || 'https://registry.npmjs.org/' }}
+      NUGET_AUTH_TOKEN: ${{ secrets.NUGET_AUTH_TOKEN }}
+      NUGET_AUTH_USERNAME: ${{ vars.CONFIGHUB_NUGET_USERNAME || 'token' }}
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+          registry-url: ${{ env.CONFIGHUB_NPM_REGISTRY }}
+
+      - name: Create CI NuGet configuration
+        if: ${{ !inputs.offline_build }}
+        shell: pwsh
+        run: |
+          $configPath = Join-Path $env:RUNNER_TEMP 'ConfigHub.CI.NuGet.Config'
+          $packageSource = [Security.SecurityElement]::Escape($env:CONFIGHUB_NUGET_SOURCE)
+          $credentials = ''
+          if (-not [string]::IsNullOrWhiteSpace($env:NUGET_AUTH_TOKEN)) {
+            $username = [Security.SecurityElement]::Escape($env:NUGET_AUTH_USERNAME)
+            $password = [Security.SecurityElement]::Escape($env:NUGET_AUTH_TOKEN)
+            $credentials = @"
+            <packageSourceCredentials>
+              <ConfigHubReleaseSource>
+                <add key="Username" value="$username" />
+                <add key="ClearTextPassword" value="$password" />
+              </ConfigHubReleaseSource>
+            </packageSourceCredentials>
+            "@
+          }
+          @"
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="ConfigHubReleaseSource" value="$packageSource" />
+            </packageSources>
+            $credentials
+          </configuration>
+          "@ | Set-Content -Path $configPath -Encoding UTF8
+          "CONFIGHUB_CI_NUGET_CONFIG=$configPath" | Add-Content -Path $env:GITHUB_ENV
+
+      - name: Validate release mode
+        shell: pwsh
+        run: |
+          if (${{ inputs.offline_build }} -and '${{ inputs.runner }}' -ne 'self-hosted') {
+            throw 'Offline build mode requires a pre-warmed self-hosted Windows runner.'
+          }
+
+      - name: Restore dependencies
+        if: ${{ !inputs.offline_build }}
+        shell: pwsh
+        run: |
+          dotnet restore .\src\server\ConfigHub.slnx --runtime win-x64 --configfile $env:CONFIGHUB_CI_NUGET_CONFIG
+          npm --prefix .\src\web ci --no-audit --no-fund --registry $env:CONFIGHUB_NPM_REGISTRY
+
+      - name: Verify release inputs
+        shell: pwsh
+        run: |
+          if (-not ${{ inputs.offline_build }}) {
+            dotnet build .\src\server\ConfigHub.slnx --configuration Release --no-restore -p:SkipClientBuild=true -warnaserror
+            npm --prefix .\src\web run build
+            pwsh .\tests\integration\web-compatibility.ps1
+            pwsh .\tests\integration\windows-operations-preflight.ps1
+            dotnet tool install dotnet-ef --version 10.0.11 --tool-path .\artifacts\ci-tools --configfile $env:CONFIGHUB_CI_NUGET_CONFIG
+            & .\artifacts\ci-tools\dotnet-ef.exe migrations has-pending-model-changes --project .\src\server\Infrastructure\ConfigHub.Infrastructure.csproj --startup-project .\src\server\Host\ConfigHub.Host.csproj --configuration Release --no-build
+          }
+
+      - name: Build verified release package
+        shell: pwsh
+        run: |
+          $arguments = @{
+            Version = '${{ inputs.version }}'
+            Runtime = 'win-x64'
+          }
+          if (${{ inputs.offline_build }}) {
+            $arguments.SkipRestore = $true
+            $arguments.SkipFrontendBuild = $true
+          } else {
+            $arguments.NuGetConfigFile = $env:CONFIGHUB_CI_NUGET_CONFIG
+            $arguments.NpmRegistry = $env:CONFIGHUB_NPM_REGISTRY
+            $arguments.SkipFrontendBuild = $true
+          }
+          pwsh .\ops\windows\package-release.ps1 @arguments
+
+      - name: Upload release package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ConfigHub-${{ inputs.version }}-win-x64
+          path: |
+            artifacts/release/${{ inputs.version }}/
+            artifacts/ConfigHub-release-${{ inputs.version }}-win-x64.zip
+            artifacts/ConfigHub-release-${{ inputs.version }}-win-x64.zip.sha256
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IS_PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          $releaseArguments = @(
+            'release', 'create', 'v${{ inputs.version }}',
+            '.\artifacts\ConfigHub-release-${{ inputs.version }}-win-x64.zip',
+            '.\artifacts\ConfigHub-release-${{ inputs.version }}-win-x64.zip.sha256',
+            '--title', 'ConfigHub ${{ inputs.version }}',
+            '--generate-notes'
+          )
+          if ($env:IS_PRERELEASE -eq 'true') { $releaseArguments += '--prerelease' }
+          gh @releaseArguments

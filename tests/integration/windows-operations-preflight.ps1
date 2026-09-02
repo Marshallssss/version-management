@@ -12,6 +12,7 @@ $requiredScripts = @(
     'preflight.ps1',
     'export-offline-nuget-source.ps1',
     'publish.ps1',
+    'package-release.ps1',
     'install.ps1',
     'start.ps1',
     'stop.ps1',
