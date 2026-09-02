@@ -102,4 +102,5 @@ pwsh .\ops\windows\preflight.ps1 `
 | `Release checksum mismatch` | 删除当前解压目录，从可信发布 ZIP 重新解压；不要修改发布包内容。|
 | 找不到 `pg_dump` | 使用 `-PgDumpCommand` 传入 `pg_dump.exe` 的绝对路径，并确认升级账号的 `pgpass.conf` 可用。|
 | Migration 失败 | 二进制会自动恢复，但数据库不会自动倒退；保留日志与备份，按受控恢复流程处理。|
+| 日志提示 `background_jobs.last_attempt_at` 不存在 | 这是新版程序已部署、但 `20260831125022_NormalizeBackgroundJobStateNames` 尚未执行的信号。进入维护窗口，停止 Worker 与 IIS 应用程序池后，以 `ConnectionStrings__ConfigHubMigration` 指向的 Migration 账号运行 `ConfigHub.Host.exe --migrate`；成功后再启动应用程序池和 Worker。不要手工 `ALTER TABLE` 或修改 `__EFMigrationsHistory`。|
 | Worker 未启动 | 运行 `Get-Service ConfigHub.Worker` 和 `collect-logs.ps1`；确认服务账号仍可读取机器级连接串与写入日志目录。|

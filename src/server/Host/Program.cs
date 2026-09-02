@@ -115,6 +115,18 @@ if (migrateRequested)
     return;
 }
 
+await using (var scope = app.Services.CreateAsyncScope())
+{
+    var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<ConfigHubDbContext>>();
+    await using var database = await factory.CreateDbContextAsync();
+    var pendingMigrations = (await database.Database.GetPendingMigrationsAsync()).ToArray();
+    if (pendingMigrations.Length > 0)
+    {
+        throw new InvalidOperationException(
+            $"数据库结构尚未升级，不能启动 ConfigHub。请使用 Migration 连接串执行 ConfigHub.Host.exe --migrate。待应用 Migration：{string.Join(", ", pendingMigrations)}。");
+    }
+}
+
 if (bootstrapOnlyRequested)
 {
     await BootstrapIdentity.EnsureAsync(app.Services, app.Configuration, writeStatus: true);
