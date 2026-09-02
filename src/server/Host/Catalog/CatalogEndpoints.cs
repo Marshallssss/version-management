@@ -308,13 +308,20 @@ public static class CatalogEndpoints
         if (externalEventId is not null && await db.DeploymentBatches.AnyAsync(item => item.SourceType == sourceType && item.ExternalEventId == externalEventId, cancellationToken)) return Results.Conflict(new { message = "该来源的外部事件已记录。" });
         var now = DateTimeOffset.UtcNow; await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken); db.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }); var batch = new DeploymentBatch { Id = Guid.NewGuid(), MachineId = machineId, OperationType = operation, Coverage = coverage, SourceType = sourceType, ExternalEventId = externalEventId, CorrectsDeploymentBatchId = correctedBatch?.Id, RecordedAt = now, EffectiveAt = correctedBatch?.EffectiveAt ?? request.EffectiveAt ?? now }; db.DeploymentBatches.Add(batch);
         var componentIds = request.Items.Select(x => x.ComponentId).Distinct().ToArray(); var components = await db.ConfigurationComponents.Where(x => x.ProjectId == machine.ProjectId && componentIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, cancellationToken); if (components.Count != componentIds.Length) return Results.ValidationProblem(new Dictionary<string, string[]> { ["items"] = ["存在不属于机台项目的组件。"] });
+        var versionedComponentIds = await db.ComponentVersions.Where(version => componentIds.Contains(version.ComponentId)).Select(version => version.ComponentId).Distinct().ToArrayAsync(cancellationToken);
+        if (componentIds.Except(versionedComponentIds).Any()) return Results.ValidationProblem(new Dictionary<string, string[]> { ["items"] = ["结构分类节点没有软件版本，不能记录为机台实际配置。"] });
         var versionIds = request.Items.Where(x => !x.Absent && x.VersionId is not null).Select(x => x.VersionId!.Value).Distinct().ToArray();
         var versions = await db.ComponentVersions.Where(x => versionIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, cancellationToken);
         if (versions.Count != versionIds.Length || request.Items.Any(x => !x.Absent && (x.VersionId is null || versions[x.VersionId.Value].ComponentId != x.ComponentId))) return Results.ValidationProblem(new Dictionary<string, string[]> { ["items"] = ["事实版本必须属于对应组件。"] });
         foreach (var input in request.Items) { var item = new DeploymentItem { Id = Guid.NewGuid(), DeploymentBatchId = batch.Id, ConfigurationComponentId = input.ComponentId, NewComponentVersionId = input.VersionId, Result = input.Absent ? DeploymentItemResult.Absent : DeploymentItemResult.Succeeded, KnownInstalledAt = input.KnownInstalledAt }; db.DeploymentItems.Add(item); await UpsertCurrentAsync(db, machineId, input.ComponentId, input.Absent ? null : input.VersionId, input.Absent, batch.EffectiveAt, input.KnownInstalledAt, item.Id, cancellationToken); }
         if (coverage == ObservationCoverage.Full)
         {
-            var allComponentIds = await db.ConfigurationComponents.Where(x => x.ProjectId == machine.ProjectId).Select(x => x.Id).ToListAsync(cancellationToken);
+            var allComponentIds = await db.ComponentVersions
+                .Join(db.ConfigurationComponents, version => version.ComponentId, component => component.Id, (version, component) => new { version.ComponentId, component.ProjectId })
+                .Where(item => item.ProjectId == machine.ProjectId)
+                .Select(item => item.ComponentId)
+                .Distinct()
+                .ToListAsync(cancellationToken);
             foreach (var componentId in allComponentIds.Except(componentIds)) { var item = new DeploymentItem { Id = Guid.NewGuid(), DeploymentBatchId = batch.Id, ConfigurationComponentId = componentId, Result = DeploymentItemResult.Absent }; db.DeploymentItems.Add(item); await UpsertCurrentAsync(db, machineId, componentId, null, true, batch.EffectiveAt, null, item.Id, cancellationToken); }
         }
         AddAuditEvent(db, context, "DeploymentFactsRecorded", "DeploymentBatch", batch.Id, new { machineId, batch.OperationType, batch.Coverage, correctsDeploymentBatchId = batch.CorrectsDeploymentBatchId, reason = request.Reason.Trim() }); await db.SaveChangesAsync(cancellationToken); await RefreshMachineDriftSummaryAsync(db, machineId, cancellationToken); var record = await db.IdempotencyRecords.SingleAsync(x => x.Scope == scope && x.IdempotencyKey == key, cancellationToken); record.Status = IdempotencyRecordStatus.Completed; record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = batch.Id })); await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken); return TypedResults.Created($"/api/v1/deployment-batches/{batch.Id}", new { id = batch.Id });
@@ -326,9 +333,9 @@ public static class CatalogEndpoints
         var items = await db.MachineCurrentConfigurations.AsNoTracking().Where(x => x.MachineId == machineId).OrderBy(x => x.ConfigurationComponentId).ToListAsync(cancellationToken);
         var componentIds = items.Select(item => item.ConfigurationComponentId).ToArray();
         var versionIds = items.Where(item => item.ComponentVersionId is not null).Select(item => item.ComponentVersionId!.Value).ToArray();
-        var components = await db.ConfigurationComponents.AsNoTracking().Where(item => componentIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, item => new { item.ComponentCode, item.Name }, cancellationToken);
+        var components = await db.ConfigurationComponents.AsNoTracking().Where(item => componentIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, item => item.Name, cancellationToken);
         var versions = await db.ComponentVersions.AsNoTracking().Where(item => versionIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, item => item.VersionNumber, cancellationToken);
-        return TypedResults.Ok(items.Select(item => new { componentId = item.ConfigurationComponentId, componentCode = components[item.ConfigurationComponentId].ComponentCode, componentName = components[item.ConfigurationComponentId].Name, versionId = item.ComponentVersionId, versionNumber = item.ComponentVersionId is null ? null : versions[item.ComponentVersionId.Value], state = item.State.ToString(), stateEffectiveAt = item.StateEffectiveAt, knownInstalledAt = item.KnownInstalledAt }));
+        return TypedResults.Ok(items.Select(item => new { componentId = item.ConfigurationComponentId, componentName = components[item.ConfigurationComponentId], versionId = item.ComponentVersionId, versionNumber = item.ComponentVersionId is null ? null : versions[item.ComponentVersionId.Value], state = item.State.ToString(), stateEffectiveAt = item.StateEffectiveAt, knownInstalledAt = item.KnownInstalledAt }));
     }
 
     private static async Task<IResult> GetMachineConfigurationAtAsync(Guid machineId, DateTimeOffset? at, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
@@ -357,7 +364,7 @@ public static class CatalogEndpoints
         var latestByComponent = events.GroupBy(entry => entry.componentId).Select(group => group.Last()).OrderBy(entry => entry.componentId).ToArray();
         var componentIds = latestByComponent.Select(entry => entry.componentId).ToArray();
         var versionIds = latestByComponent.Where(entry => entry.versionId is not null).Select(entry => entry.versionId!.Value).ToArray();
-        var componentNames = await db.ConfigurationComponents.AsNoTracking().Where(component => componentIds.Contains(component.Id)).ToDictionaryAsync(component => component.Id, component => new { component.ComponentCode, component.Name }, cancellationToken);
+        var componentNames = await db.ConfigurationComponents.AsNoTracking().Where(component => componentIds.Contains(component.Id)).ToDictionaryAsync(component => component.Id, component => component.Name, cancellationToken);
         var versionNumbers = await db.ComponentVersions.AsNoTracking().Where(version => versionIds.Contains(version.Id)).ToDictionaryAsync(version => version.Id, version => version.VersionNumber, cancellationToken);
 
         return TypedResults.Ok(new
@@ -366,8 +373,7 @@ public static class CatalogEndpoints
             items = latestByComponent.Select(entry => new
             {
                 entry.componentId,
-                componentCode = componentNames[entry.componentId].ComponentCode,
-                componentName = componentNames[entry.componentId].Name,
+                componentName = componentNames[entry.componentId],
                 entry.versionId,
                 versionNumber = entry.versionId is null ? null : versionNumbers[entry.versionId.Value],
                 entry.state,
@@ -390,13 +396,13 @@ public static class CatalogEndpoints
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         var target = await db.MachineTargetAssignments.AsNoTracking().Where(x => x.MachineId == machineId && x.ValidTo == null).Select(x => x.ConfigurationBaselineId).SingleOrDefaultAsync(cancellationToken);
         if (target == Guid.Empty) return TypedResults.Ok(new { matchStatus = "Unknown", riskSeverity = "High", items = Array.Empty<object>() });
-        var expected = await db.BaselineItems.AsNoTracking().Where(x => x.ConfigurationBaselineId == target).ToDictionaryAsync(x => x.ConfigurationComponentId, cancellationToken);
+        var expected = await db.BaselineItems.AsNoTracking().Where(x => x.ConfigurationBaselineId == target && x.ComponentVersionId != null).ToDictionaryAsync(x => x.ConfigurationComponentId, cancellationToken);
         var actual = await db.MachineCurrentConfigurations.AsNoTracking().Where(x => x.MachineId == machineId).ToDictionaryAsync(x => x.ConfigurationComponentId, cancellationToken);
         var ids = expected.Keys.Union(actual.Keys).ToArray(); var items = new List<object>(); var mismatch = false; var critical = false;
-        var components = await db.ConfigurationComponents.AsNoTracking().Where(component => ids.Contains(component.Id)).ToDictionaryAsync(component => component.Id, component => new { component.ComponentCode, component.Name }, cancellationToken);
-        var versionIds = expected.Values.Select(item => item.ComponentVersionId).Concat(actual.Values.Where(item => item.ComponentVersionId is not null).Select(item => item.ComponentVersionId!.Value)).Distinct().ToArray();
+        var components = await db.ConfigurationComponents.AsNoTracking().Where(component => ids.Contains(component.Id)).ToDictionaryAsync(component => component.Id, component => component.Name, cancellationToken);
+        var versionIds = expected.Values.Select(item => item.ComponentVersionId!.Value).Concat(actual.Values.Where(item => item.ComponentVersionId is not null).Select(item => item.ComponentVersionId!.Value)).Distinct().ToArray();
         var versions = await db.ComponentVersions.AsNoTracking().Where(version => versionIds.Contains(version.Id)).ToDictionaryAsync(version => version.Id, version => new { version.VersionNumber, version.Safety }, cancellationToken);
-        foreach (var componentId in ids) { expected.TryGetValue(componentId, out var wanted); actual.TryGetValue(componentId, out var found); var status = wanted is null ? "Extra" : found is null || found.State == CurrentConfigurationState.Absent ? "Missing" : wanted.ComponentVersionId == found.ComponentVersionId ? "Matched" : "Mismatch"; if (status != "Matched") mismatch = true; var versionId = found?.ComponentVersionId ?? wanted?.ComponentVersionId; if (versionId is not null && versions[versionId.Value].Safety == VersionSafety.Blocked) critical = true; items.Add(new { componentId, componentCode = components[componentId].ComponentCode, componentName = components[componentId].Name, status, expectedVersionId = wanted?.ComponentVersionId, expectedVersionNumber = wanted is null ? null : versions[wanted.ComponentVersionId].VersionNumber, actualVersionId = found?.ComponentVersionId, actualVersionNumber = found?.ComponentVersionId is null ? null : versions[found.ComponentVersionId.Value].VersionNumber }); }
+        foreach (var componentId in ids) { expected.TryGetValue(componentId, out var wanted); actual.TryGetValue(componentId, out var found); var status = wanted is null ? "Extra" : found is null || found.State == CurrentConfigurationState.Absent ? "Missing" : wanted.ComponentVersionId == found.ComponentVersionId ? "Matched" : "Mismatch"; if (status != "Matched") mismatch = true; var versionId = found?.ComponentVersionId ?? wanted?.ComponentVersionId; if (versionId is not null && versions[versionId.Value].Safety == VersionSafety.Blocked) critical = true; items.Add(new { componentId, componentName = components[componentId], status, expectedVersionId = wanted?.ComponentVersionId, expectedVersionNumber = wanted is null ? null : versions[wanted.ComponentVersionId!.Value].VersionNumber, actualVersionId = found?.ComponentVersionId, actualVersionNumber = found?.ComponentVersionId is null ? null : versions[found.ComponentVersionId.Value].VersionNumber }); }
         return TypedResults.Ok(new { matchStatus = mismatch ? "Mismatch" : "Matched", riskSeverity = critical ? "Critical" : "None", items });
     }
 
@@ -420,14 +426,14 @@ public static class CatalogEndpoints
         var versionIds = states.Where(state => state.ComponentVersionId is not null).Select(state => state.ComponentVersionId!.Value).Distinct().ToArray();
         var versions = await db.ComponentVersions.AsNoTracking().Where(version => versionIds.Contains(version.Id)).ToDictionaryAsync(version => version.Id, version => new { version.VersionNumber, version.Safety }, cancellationToken);
         var componentIds = left.Keys.Union(right.Keys).ToArray();
-        var components = await db.ConfigurationComponents.AsNoTracking().Where(component => componentIds.Contains(component.Id)).ToDictionaryAsync(component => component.Id, component => new { component.ComponentCode, component.Name }, cancellationToken);
+        var components = await db.ConfigurationComponents.AsNoTracking().Where(component => componentIds.Contains(component.Id)).ToDictionaryAsync(component => component.Id, component => component.Name, cancellationToken);
         var items = left.Keys.Union(right.Keys).OrderBy(componentId => componentId).Select(componentId =>
         {
             left.TryGetValue(componentId, out var before); right.TryGetValue(componentId, out var after);
             var leftVersion = before?.State == CurrentConfigurationState.Present ? before.ComponentVersionId : null;
             var rightVersion = after?.State == CurrentConfigurationState.Present ? after.ComponentVersionId : null;
             var status = leftVersion == rightVersion ? "Matched" : leftVersion is null ? "RightOnly" : rightVersion is null ? "LeftOnly" : "Mismatch";
-            return new { componentId, componentCode = components[componentId].ComponentCode, componentName = components[componentId].Name, status, leftVersionId = leftVersion, leftVersionNumber = leftVersion is null ? null : versions[leftVersion.Value].VersionNumber, rightVersionId = rightVersion, rightVersionNumber = rightVersion is null ? null : versions[rightVersion.Value].VersionNumber };
+            return new { componentId, componentName = components[componentId], status, leftVersionId = leftVersion, leftVersionNumber = leftVersion is null ? null : versions[leftVersion.Value].VersionNumber, rightVersionId = rightVersion, rightVersionNumber = rightVersion is null ? null : versions[rightVersion.Value].VersionNumber };
         }).ToArray();
         var matchStatus = items.All(item => item.status == "Matched") ? "Matched" : "Mismatch";
         var riskSeverity = items.Any(item => (item.leftVersionId is not null && versions[item.leftVersionId.Value].Safety == VersionSafety.Blocked) || (item.rightVersionId is not null && versions[item.rightVersionId.Value].Safety == VersionSafety.Blocked)) ? "Critical" : "None";
@@ -445,14 +451,14 @@ public static class CatalogEndpoints
         var versionIds = current.Values.Where(state => state.State == CurrentConfigurationState.Present && state.ComponentVersionId is not null).Select(state => state.ComponentVersionId!.Value).Concat(historical.Values.Where(state => !state.absent && state.versionId is not null).Select(state => state.versionId!.Value)).Distinct().ToArray();
         var versions = await db.ComponentVersions.AsNoTracking().Where(version => versionIds.Contains(version.Id)).ToDictionaryAsync(version => version.Id, version => new { version.VersionNumber, version.Safety }, cancellationToken);
         var componentIds = current.Keys.Union(historical.Keys).ToArray();
-        var components = await db.ConfigurationComponents.AsNoTracking().Where(component => componentIds.Contains(component.Id)).ToDictionaryAsync(component => component.Id, component => new { component.ComponentCode, component.Name }, cancellationToken);
+        var components = await db.ConfigurationComponents.AsNoTracking().Where(component => componentIds.Contains(component.Id)).ToDictionaryAsync(component => component.Id, component => component.Name, cancellationToken);
         var items = current.Keys.Union(historical.Keys).OrderBy(componentId => componentId).Select(componentId =>
         {
             current.TryGetValue(componentId, out var currentState); historical.TryGetValue(componentId, out var historicalState);
             var currentVersion = currentState?.State == CurrentConfigurationState.Present ? currentState.ComponentVersionId : null;
             var historicalVersion = historicalState is not null && !historicalState.absent ? historicalState.versionId : null;
             var status = currentVersion == historicalVersion ? "Matched" : currentVersion is null ? "HistoricalOnly" : historicalVersion is null ? "CurrentOnly" : "Mismatch";
-            return new { componentId, componentCode = components[componentId].ComponentCode, componentName = components[componentId].Name, status, currentVersionId = currentVersion, currentVersionNumber = currentVersion is null ? null : versions[currentVersion.Value].VersionNumber, historicalVersionId = historicalVersion, historicalVersionNumber = historicalVersion is null ? null : versions[historicalVersion.Value].VersionNumber };
+            return new { componentId, componentName = components[componentId], status, currentVersionId = currentVersion, currentVersionNumber = currentVersion is null ? null : versions[currentVersion.Value].VersionNumber, historicalVersionId = historicalVersion, historicalVersionNumber = historicalVersion is null ? null : versions[historicalVersion.Value].VersionNumber };
         }).ToArray();
         var matchStatus = items.All(item => item.status == "Matched") ? "Matched" : "Mismatch";
         var riskSeverity = items.Any(item => (item.currentVersionId is not null && versions[item.currentVersionId.Value].Safety == VersionSafety.Blocked) || (item.historicalVersionId is not null && versions[item.historicalVersionId.Value].Safety == VersionSafety.Blocked)) ? "Critical" : "None";
@@ -493,7 +499,6 @@ public static class CatalogEndpoints
             {
                 componentId,
                 status,
-                componentCode = before?.ComponentCodeSnapshot ?? after?.ComponentCodeSnapshot,
                 componentName = before?.ComponentNameSnapshot ?? after?.ComponentNameSnapshot,
                 leftVersionId = before?.ComponentVersionId,
                 leftVersionNumber = before?.VersionNumberSnapshot,
@@ -541,7 +546,7 @@ public static class CatalogEndpoints
     private static async Task<IResult> GetVersionDetailAsync(Guid versionId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var version = await db.ComponentVersions.AsNoTracking().Where(item => item.Id == versionId).Join(db.ConfigurationComponents.AsNoTracking(), item => item.ComponentId, component => component.Id, (item, component) => new { item, component }).Select(value => new { id = value.item.Id, componentId = value.item.ComponentId, componentCode = value.component.ComponentCode, componentName = value.component.Name, versionNumber = value.item.VersionNumber, sequenceNo = value.item.SequenceNo, maturity = value.item.Maturity.ToString(), safety = value.item.Safety.ToString(), createdAt = value.item.CreatedAt }).SingleOrDefaultAsync(cancellationToken);
+        var version = await db.ComponentVersions.AsNoTracking().Where(item => item.Id == versionId).Join(db.ConfigurationComponents.AsNoTracking(), item => item.ComponentId, component => component.Id, (item, component) => new { item, component }).Select(value => new { id = value.item.Id, componentId = value.item.ComponentId, componentName = value.component.Name, versionNumber = value.item.VersionNumber, sequenceNo = value.item.SequenceNo, maturity = value.item.Maturity.ToString(), safety = value.item.Safety.ToString(), createdAt = value.item.CreatedAt }).SingleOrDefaultAsync(cancellationToken);
         if (version is null) return Results.NotFound();
         var transitions = await db.VersionLifecycleTransitions.AsNoTracking().Where(item => item.ComponentVersionId == versionId).OrderByDescending(item => item.OccurredAt).Select(item => new { axis = item.Axis.ToString(), fromState = item.FromState, toState = item.ToState, reason = item.Reason, actor = item.Actor, occurredAt = item.OccurredAt }).ToListAsync(cancellationToken);
         var recommended = await db.VersionRecommendations.AsNoTracking().AnyAsync(item => item.ComponentVersionId == versionId && item.RevokedAt == null, cancellationToken);
@@ -556,7 +561,7 @@ public static class CatalogEndpoints
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         var pattern = $"%{term}%";
         var projects = await db.Projects.AsNoTracking().Where(item => EF.Functions.ILike(item.Code, pattern) || EF.Functions.ILike(item.Name, pattern)).OrderBy(item => item.Code).Select(item => new { type = "Project", id = item.Id, projectId = item.Id, label = item.Code + " · " + item.Name }).Take(20).ToListAsync(cancellationToken);
-        var components = await db.ConfigurationComponents.AsNoTracking().Where(item => EF.Functions.ILike(item.ComponentCode, pattern) || EF.Functions.ILike(item.Name, pattern)).OrderBy(item => item.ComponentCode).Select(item => new { type = "Component", id = item.Id, projectId = item.ProjectId, label = item.ComponentCode + " · " + item.Name }).Take(20).ToListAsync(cancellationToken);
+        var components = await db.ConfigurationComponents.AsNoTracking().Where(item => EF.Functions.ILike(item.Name, pattern)).OrderBy(item => item.Name).Select(item => new { type = "Component", id = item.Id, projectId = item.ProjectId, label = item.Name }).Take(20).ToListAsync(cancellationToken);
         var versions = await db.ComponentVersions.AsNoTracking().Where(item => EF.Functions.ILike(item.VersionNumber, pattern)).Join(db.ConfigurationComponents.AsNoTracking(), version => version.ComponentId, component => component.Id, (version, component) => new { version, component }).OrderBy(item => item.version.VersionNumber).Select(item => new { type = "Version", id = item.version.Id, projectId = item.component.ProjectId, label = item.version.VersionNumber }).Take(20).ToListAsync(cancellationToken);
         var patches = await db.VersionPatches.AsNoTracking().Where(item => EF.Functions.ILike(item.PatchCode, pattern) || EF.Functions.ILike(item.Title, pattern) || EF.Functions.ILike(item.IssueDescription, pattern) || EF.Functions.ILike(item.ResolutionDescription, pattern)).Join(db.ComponentVersions.AsNoTracking(), patch => patch.ComponentVersionId, version => version.Id, (patch, version) => new { patch, version }).Join(db.ConfigurationComponents.AsNoTracking(), value => value.version.ComponentId, component => component.Id, (value, component) => new { value.patch, value.version, component }).OrderByDescending(item => item.patch.RecordedAt).Select(item => new { type = "Patch", id = item.patch.Id, projectId = item.component.ProjectId, versionId = item.version.Id, label = item.patch.PatchCode + " · " + item.version.VersionNumber + " · " + item.patch.Title }).Take(20).ToListAsync(cancellationToken);
         var baselines = await db.ConfigurationBaselines.AsNoTracking().Where(item => EF.Functions.ILike(item.BaselineCode, pattern)).OrderBy(item => item.BaselineCode).Select(item => new { type = "Baseline", id = item.Id, projectId = item.ProjectId, label = item.BaselineCode }).Take(20).ToListAsync(cancellationToken);
@@ -621,18 +626,25 @@ public static class CatalogEndpoints
         if (!await db.Projects.AnyAsync(item => item.Id == request.ProjectId, cancellationToken)) return Results.NotFound();
         if (!await HasProjectWriteAccessAsync(db, context, request.ProjectId, cancellationToken)) return Results.Forbid();
         var now = DateTimeOffset.UtcNow; await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken); db.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }); var batch = new ImportBatch { Id = Guid.NewGuid(), ProjectId = request.ProjectId, SourceFileName = request.SourceFileName.Trim(), CreatedBy = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required."), Reason = request.Reason.Trim(), CreatedAt = now };
-        var componentCodes = request.Rows.Where(row => !string.IsNullOrWhiteSpace(row.ComponentCode)).Select(row => Normalize(row.ComponentCode!)).Distinct().ToArray();
-        var components = await db.ConfigurationComponents.Where(item => item.ProjectId == request.ProjectId && componentCodes.Contains(item.NormalizedComponentCode)).ToDictionaryAsync(item => item.NormalizedComponentCode, cancellationToken);
-        var existingVersions = await db.ComponentVersions.Where(item => components.Values.Select(component => component.Id).Contains(item.ComponentId)).Select(item => new { item.ComponentId, item.NormalizedVersionNumber }).ToListAsync(cancellationToken);
+        var componentsByName = (await db.ConfigurationComponents.Where(item => item.ProjectId == request.ProjectId).ToListAsync(cancellationToken))
+            .GroupBy(item => Normalize(item.Name))
+            .ToDictionary(group => group.Key, group => group.ToArray());
+        var componentIds = componentsByName.Values.Where(group => group.Length == 1).Select(group => group[0].Id).ToArray();
+        var existingVersions = await db.ComponentVersions.Where(item => componentIds.Contains(item.ComponentId)).Select(item => new { item.ComponentId, item.NormalizedVersionNumber }).ToListAsync(cancellationToken);
         var seen = new HashSet<string>();
         var errors = 0;
         foreach (var row in request.Rows.Select((value, index) => new { value, index }))
         {
             string? error = null;
-            if (string.IsNullOrWhiteSpace(row.value.ComponentCode) || string.IsNullOrWhiteSpace(row.value.VersionNumber)) error = "componentCode 和 versionNumber 为必填项。";
-            else if (!components.TryGetValue(Normalize(row.value.ComponentCode), out var component)) error = "组件不存在或不属于该项目。";
-            else if (existingVersions.Any(version => version.ComponentId == component.Id && version.NormalizedVersionNumber == Normalize(row.value.VersionNumber))) error = "版本已存在。";
-            else if (!seen.Add($"{component.Id}:{Normalize(row.value.VersionNumber)}")) error = "同一导入批次中存在重复版本。";
+            if (string.IsNullOrWhiteSpace(row.value.ComponentName) || string.IsNullOrWhiteSpace(row.value.VersionNumber)) error = "组件名称和版本号为必填项。";
+            else if (!componentsByName.TryGetValue(Normalize(row.value.ComponentName), out var candidates)) error = "组件不存在或不属于该项目。";
+            else if (candidates.Length != 1) error = "存在同名组件，请先在项目中调整为唯一名称后再导入。";
+            else
+            {
+                var component = candidates[0];
+                if (existingVersions.Any(version => version.ComponentId == component.Id && version.NormalizedVersionNumber == Normalize(row.value.VersionNumber))) error = "版本已存在。";
+                else if (!seen.Add($"{component.Id}:{Normalize(row.value.VersionNumber)}")) error = "同一导入批次中存在重复版本。";
+            }
             if (error is not null) errors++;
             db.ImportRows.Add(new ImportRow { Id = Guid.NewGuid(), ImportBatchId = batch.Id, RowNumber = row.index + 1, Payload = JsonDocument.Parse(JsonSerializer.Serialize(row.value)), ValidationError = error });
         }
@@ -668,11 +680,15 @@ public static class CatalogEndpoints
         if (batch.Status != ImportBatchStatus.Validated || rows.Any(item => item.ValidationError is not null)) return Results.Conflict(new { message = "只有完全通过校验的导入批次可以提交。" });
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         db.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = DateTimeOffset.UtcNow, ExpiresAt = DateTimeOffset.UtcNow.AddDays(7) });
-        var components = await db.ConfigurationComponents.Where(item => item.ProjectId == batch.ProjectId).ToDictionaryAsync(item => item.NormalizedComponentCode, cancellationToken);
+        var componentsByName = (await db.ConfigurationComponents.Where(item => item.ProjectId == batch.ProjectId).ToListAsync(cancellationToken))
+            .GroupBy(item => Normalize(item.Name))
+            .ToDictionary(group => group.Key, group => group.ToArray());
         foreach (var row in rows)
         {
             var value = JsonSerializer.Deserialize<StageImportRow>(row.Payload.RootElement.GetRawText())!;
-            var command = await CreateComponentVersionCommandAsync(db, components[Normalize(value.ComponentCode!)].Id, value.VersionNumber!, batch.Reason, context, cancellationToken);
+            if (!componentsByName.TryGetValue(Normalize(value.ComponentName!), out var candidates) || candidates.Length != 1)
+                return Results.Conflict(new { message = "导入预览所引用的组件已经变更或出现同名，请重新生成预览。" });
+            var command = await CreateComponentVersionCommandAsync(db, candidates[0].Id, value.VersionNumber!, batch.Reason, context, cancellationToken);
             if (command.Version is null) throw new InvalidOperationException("已验证的导入行在提交时无法创建版本。");
         }
         batch.Status = ImportBatchStatus.Committed;
@@ -689,9 +705,9 @@ public static class CatalogEndpoints
         if (target == Guid.Empty) { summary.MatchStatus = DriftMatchStatus.Unknown; summary.RiskSeverity = DriftRiskSeverity.High; }
         else
         {
-            var expected = await db.BaselineItems.Where(item => item.ConfigurationBaselineId == target).ToDictionaryAsync(item => item.ConfigurationComponentId, cancellationToken);
+            var expected = await db.BaselineItems.Where(item => item.ConfigurationBaselineId == target && item.ComponentVersionId != null).ToDictionaryAsync(item => item.ConfigurationComponentId, cancellationToken);
             var actual = await db.MachineCurrentConfigurations.Where(item => item.MachineId == machineId).ToDictionaryAsync(item => item.ConfigurationComponentId, cancellationToken);
-            var versionIds = expected.Values.Select(item => item.ComponentVersionId).Concat(actual.Values.Where(item => item.State != CurrentConfigurationState.Absent && item.ComponentVersionId is not null).Select(item => item.ComponentVersionId!.Value)).ToArray();
+            var versionIds = expected.Values.Select(item => item.ComponentVersionId!.Value).Concat(actual.Values.Where(item => item.State != CurrentConfigurationState.Absent && item.ComponentVersionId is not null).Select(item => item.ComponentVersionId!.Value)).ToArray();
             summary.MatchStatus = expected.Keys.Union(actual.Keys).All(componentId => expected.TryGetValue(componentId, out var wanted) && actual.TryGetValue(componentId, out var found) && found.State != CurrentConfigurationState.Absent && wanted.ComponentVersionId == found.ComponentVersionId) ? DriftMatchStatus.Matched : DriftMatchStatus.Mismatch;
             summary.RiskSeverity = await db.ComponentVersions.AnyAsync(item => versionIds.Contains(item.Id) && item.Safety == VersionSafety.Blocked, cancellationToken) ? DriftRiskSeverity.Critical : DriftRiskSeverity.None;
         }
@@ -733,12 +749,11 @@ public static class CatalogEndpoints
         var components = await database.ConfigurationComponents.AsNoTracking()
             .Where(component => component.ProjectId == projectId)
             .OrderBy(component => component.SortOrder)
-            .ThenBy(component => component.ComponentCode)
+            .ThenBy(component => component.Name)
             .Select(component => new
             {
                 id = component.Id,
                 parentComponentId = component.ParentComponentId,
-                code = component.ComponentCode,
                 name = component.Name,
                 sortOrder = component.SortOrder,
                 versions = database.ComponentVersions
@@ -812,7 +827,7 @@ public static class CatalogEndpoints
         await using var database = await factory.CreateDbContextAsync(cancellationToken);
         var baseline = await database.ConfigurationBaselines.AsNoTracking().Where(item => item.Id == baselineId).Select(item => new { id = item.Id, projectId = item.ProjectId, code = item.BaselineCode, seriesCode = database.BaselineSeries.Where(series => series.Id == item.BaselineSeriesId).Select(series => series.SeriesCode).Single(), revisionNo = item.RevisionNo, state = item.State.ToString(), item.Description, item.CreatedBy, item.CreatedAt, item.ReleasedBy, item.ReleasedAt, item.ApprovedBy }).SingleOrDefaultAsync(cancellationToken);
         if (baseline is null) return Results.NotFound();
-        var items = await database.BaselineItems.AsNoTracking().Where(item => item.ConfigurationBaselineId == baselineId).OrderBy(item => item.LineageKeySnapshot).Select(item => new { id = item.Id, parentItemId = item.ParentBaselineItemId, componentId = item.ConfigurationComponentId, versionId = item.ComponentVersionId, versionNumber = item.VersionNumberSnapshot, componentCode = item.ComponentCodeSnapshot, componentName = item.ComponentNameSnapshot, lineageKey = item.LineageKeySnapshot, requirement = item.Requirement.ToString(), item.SortOrder }).ToListAsync(cancellationToken);
+        var items = await database.BaselineItems.AsNoTracking().Where(item => item.ConfigurationBaselineId == baselineId).OrderBy(item => item.LineageKeySnapshot).Select(item => new { id = item.Id, parentItemId = item.ParentBaselineItemId, componentId = item.ConfigurationComponentId, versionId = item.ComponentVersionId, versionNumber = item.VersionNumberSnapshot, componentName = item.ComponentNameSnapshot, lineageKey = item.LineageKeySnapshot, requirement = item.Requirement.ToString(), item.SortOrder }).ToListAsync(cancellationToken);
         var review = await database.BaselineReviews.AsNoTracking().Where(item => item.ConfigurationBaselineId == baselineId).OrderByDescending(item => item.RequestedAt).Select(item => new { id = item.Id, status = item.Status.ToString(), item.RequestedBy, item.RequestedAt, item.RequestReason, item.DecidedBy, item.DecidedAt, item.DecisionReason }).FirstOrDefaultAsync(cancellationToken);
         return TypedResults.Ok(new { baseline, review, items });
     }
@@ -840,6 +855,7 @@ public static class CatalogEndpoints
             return Results.Conflict(new { message = "送审或已通过的基线不可修改；如需修改，请先驳回后重新送审。" });
         var item = await database.BaselineItems.SingleOrDefaultAsync(candidate => candidate.Id == itemId && candidate.ConfigurationBaselineId == baselineId, cancellationToken);
         if (item is null) return Results.NotFound();
+        if (item.ComponentVersionId is null) return Results.Conflict(new { message = "结构节点没有软件版本，不能设置必需性。" });
 
         var now = DateTimeOffset.UtcNow;
         await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
@@ -897,12 +913,10 @@ public static class CatalogEndpoints
         if (components.Count == 0) return Results.Conflict(new { message = "基线必须从至少一个组件开始创建。" });
         var componentIds = components.Select(item => item.Id).ToArray();
         var versions = await database.ComponentVersions
-            .Where(item => componentIds.Contains(item.ComponentId))
+            .Where(item => componentIds.Contains(item.ComponentId) && item.Maturity == VersionMaturity.Released)
             .OrderByDescending(item => item.SequenceNo)
             .ToListAsync(cancellationToken);
         var versionsByComponent = versions.GroupBy(item => item.ComponentId).ToDictionary(group => group.Key, group => group.First());
-        var missing = components.Where(item => !versionsByComponent.ContainsKey(item.Id)).Select(item => item.ComponentCode).ToArray();
-        if (missing.Length > 0) return Results.Conflict(new { message = $"以下组件没有可快照的版本：{string.Join("、", missing)}。" });
 
         var normalizedSeries = Normalize(request.SeriesCode!);
         var series = await database.BaselineSeries.SingleOrDefaultAsync(item => item.ProjectId == projectId && item.NormalizedSeriesCode == normalizedSeries, cancellationToken);
@@ -931,13 +945,14 @@ public static class CatalogEndpoints
         database.ConfigurationBaselines.Add(baseline);
         foreach (var component in components)
         {
+            versionsByComponent.TryGetValue(component.Id, out var version);
             database.BaselineItems.Add(new BaselineItem
             {
                 Id = baselineItemIds[component.Id],
                 ConfigurationBaselineId = baseline.Id,
                 ConfigurationComponentId = component.Id,
-                ComponentVersionId = versionsByComponent[component.Id].Id,
-                VersionNumberSnapshot = versionsByComponent[component.Id].VersionNumber,
+                ComponentVersionId = version?.Id,
+                VersionNumberSnapshot = version?.VersionNumber,
                 ParentBaselineItemId = component.ParentComponentId is null ? null : baselineItemIds[component.ParentComponentId.Value],
                 ComponentCodeSnapshot = component.ComponentCode,
                 ComponentNameSnapshot = component.Name,
@@ -988,6 +1003,7 @@ public static class CatalogEndpoints
         if (latestReview?.Status != BaselineReviewStatus.Approved) return Results.Conflict(new { message = "基线须经评审通过后才能发布。" });
         var itemCount = await database.BaselineItems.CountAsync(item => item.ConfigurationBaselineId == baselineId, cancellationToken);
         if (itemCount == 0) return Results.Conflict(new { message = "空基线不能发布。" });
+        if (!await database.BaselineItems.AnyAsync(item => item.ConfigurationBaselineId == baselineId && item.ComponentVersionId != null, cancellationToken)) return Results.Conflict(new { message = "基线至少需要一个已登记版本的实际组件。" });
         var blocked = await database.BaselineItems
             .Where(item => item.ConfigurationBaselineId == baselineId)
             .Join(database.ComponentVersions, item => item.ComponentVersionId, version => version.Id, (_, version) => version)
@@ -1202,13 +1218,12 @@ public static class CatalogEndpoints
         IDbContextFactory<ConfigHubDbContext> contextFactory,
         CancellationToken cancellationToken)
     {
-        var validationError = ValidateIdentifier(request.Code, "组件编码", 80) ?? ValidateRequired(request.Name, "组件名称", 200) ?? ValidateRequired(request.Reason, "创建原因", 500);
+        var validationError = ValidateRequired(request.Name, "组件名称", 200) ?? ValidateRequired(request.Reason, "创建原因", 500);
         if (validationError is not null)
         {
             return Results.ValidationProblem(validationError);
         }
 
-        var code = request.Code!.Trim();
         var name = request.Name!.Trim();
         var key = httpContext.Request.Headers["Idempotency-Key"].FirstOrDefault();
         if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["创建组件必须提供不超过 200 个字符的 Idempotency-Key。"] });
@@ -1229,32 +1244,24 @@ public static class CatalogEndpoints
             return Results.ValidationProblem(new Dictionary<string, string[]> { ["parentComponentId"] = ["父组件不存在或不属于该项目。"] });
         }
 
-        var normalizedCode = Normalize(code);
-        if (await database.ConfigurationComponents.AnyAsync(
-                component => component.ProjectId == projectId && component.NormalizedComponentCode == normalizedCode,
-                cancellationToken))
-        {
-            return Results.Conflict(new { message = "该项目中组件编码已存在。" });
-        }
-
         var maxSortOrder = await database.ConfigurationComponents
             .Where(component => component.ProjectId == projectId && component.ParentComponentId == request.ParentComponentId)
             .Select(component => (int?)component.SortOrder)
             .MaxAsync(cancellationToken) ?? 0;
-        var now = DateTimeOffset.UtcNow; await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken); database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }); var component = new ConfigurationComponent
+        var now = DateTimeOffset.UtcNow; var componentId = Guid.NewGuid(); var internalCode = $"NODE-{componentId:N}"; await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken); database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }); var component = new ConfigurationComponent
         {
-            Id = Guid.NewGuid(),
+            Id = componentId,
             ProjectId = projectId,
             ParentComponentId = request.ParentComponentId,
-            ComponentCode = code,
-            NormalizedComponentCode = normalizedCode,
-            LineageKey = parent is null ? normalizedCode : $"{parent.LineageKey}/{normalizedCode}",
+            ComponentCode = internalCode,
+            NormalizedComponentCode = internalCode,
+            LineageKey = parent is null ? internalCode : $"{parent.LineageKey}/{internalCode}",
             Name = name,
             SortOrder = maxSortOrder + 1,
             CreatedAt = now
         };
         database.ConfigurationComponents.Add(component);
-        AddAuditEvent(database, httpContext, "ComponentCreated", "ConfigurationComponent", component.Id, new { component.ProjectId, component.ComponentCode, component.Name, reason = request.Reason!.Trim() });
+        AddAuditEvent(database, httpContext, "ComponentCreated", "ConfigurationComponent", component.Id, new { component.ProjectId, component.Name, reason = request.Reason!.Trim() });
         await database.SaveChangesAsync(cancellationToken); var record = await database.IdempotencyRecords.SingleAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken); record.Status = IdempotencyRecordStatus.Completed; record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = component.Id })); await database.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
         return TypedResults.Created($"/api/v1/projects/{projectId}", new { id = component.Id });
     }
@@ -1271,6 +1278,9 @@ public static class CatalogEndpoints
         {
             return Results.ValidationProblem(validationError);
         }
+        var initialMaturity = string.IsNullOrWhiteSpace(request.Maturity) ? VersionMaturity.Draft : request.Maturity.Equals("Testing", StringComparison.OrdinalIgnoreCase) ? VersionMaturity.Testing : VersionMaturity.Draft;
+        if (!string.IsNullOrWhiteSpace(request.Maturity) && initialMaturity == VersionMaturity.Draft && !request.Maturity.Equals("Draft", StringComparison.OrdinalIgnoreCase))
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["maturity"] = ["登记版本时只可选择 Draft 或 Testing；发布请走评审后的状态转换。"] });
 
         await using var database = await contextFactory.CreateDbContextAsync(cancellationToken);
         var key = httpContext.Request.Headers["Idempotency-Key"].FirstOrDefault(); if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["创建版本必须提供不超过 200 个字符的 Idempotency-Key。"] });
@@ -1278,8 +1288,8 @@ public static class CatalogEndpoints
         if (replay is not null) { if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (replay.Result is not null) return TypedResults.Ok(replay.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
         var component = await database.ConfigurationComponents.SingleOrDefaultAsync(item => item.Id == componentId, cancellationToken);
         if (component is null) return Results.NotFound();
-        if (!await HasProjectWriteAccessAsync(database, httpContext, component.ProjectId, cancellationToken)) return Results.Forbid();
-        var now = DateTimeOffset.UtcNow; await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken); database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }); var result = await CreateComponentVersionCommandAsync(database, componentId, request.VersionNumber!.Trim(), request.Reason!.Trim(), httpContext, cancellationToken);
+        if (!await HasProjectWriteAccessAsync(database, httpContext, component.ProjectId, cancellationToken, requireSeniorMembership: initialMaturity == VersionMaturity.Testing)) return Results.Forbid();
+        var now = DateTimeOffset.UtcNow; await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken); database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }); var result = await CreateComponentVersionCommandAsync(database, componentId, request.VersionNumber!.Trim(), request.Reason!.Trim(), httpContext, cancellationToken, initialMaturity);
         if (result.ComponentMissing) return Results.NotFound();
         if (result.Duplicate) return Results.Conflict(new { message = "该组件版本号已存在。" });
         var version = result.Version!;
@@ -1354,7 +1364,7 @@ public static class CatalogEndpoints
 
     private static async Task<IResult> UpdateComponentAsync(Guid componentId, UpdateComponentRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
     {
-        var validation = ValidateIdentifier(request.Code, "组件编码", 80) ?? ValidateRequired(request.Name, "组件名称", 200) ?? ValidateRequired(request.Reason, "修改原因", 500);
+        var validation = ValidateRequired(request.Name, "组件名称", 200) ?? ValidateRequired(request.Reason, "修改原因", 500);
         if (validation is not null) return Results.ValidationProblem(validation);
         var key = context.Request.Headers["Idempotency-Key"].FirstOrDefault(); if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["编辑组件必须提供不超过 200 个字符的 Idempotency-Key。"] });
         await using var database = await factory.CreateDbContextAsync(cancellationToken);
@@ -1363,14 +1373,9 @@ public static class CatalogEndpoints
         var component = await database.ConfigurationComponents.SingleOrDefaultAsync(item => item.Id == componentId, cancellationToken);
         if (component is null) return Results.NotFound();
         if (!await HasProjectWriteAccessAsync(database, context, component.ProjectId, cancellationToken)) return Results.Forbid();
-        var normalizedCode = Normalize(request.Code!);
-        if (await database.ConfigurationComponents.AnyAsync(item => item.ProjectId == component.ProjectId && item.NormalizedComponentCode == normalizedCode && item.Id != componentId, cancellationToken)) return Results.Conflict(new { message = "该项目中组件编码已存在。" });
         var now = DateTimeOffset.UtcNow; await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken); database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) });
-        var oldLineage = component.LineageKey; var newLineage = component.ParentComponentId is null ? normalizedCode : $"{(await database.ConfigurationComponents.SingleAsync(item => item.Id == component.ParentComponentId, cancellationToken)).LineageKey}/{normalizedCode}";
-        var descendants = await database.ConfigurationComponents.Where(item => item.ProjectId == component.ProjectId && (item.LineageKey == oldLineage || item.LineageKey.StartsWith(oldLineage + "/"))).ToListAsync(cancellationToken);
-        component.ComponentCode = request.Code!.Trim(); component.NormalizedComponentCode = normalizedCode; component.Name = request.Name!.Trim();
-        foreach (var descendant in descendants) descendant.LineageKey = newLineage + descendant.LineageKey[oldLineage.Length..];
-        AddAuditEvent(database, context, "ComponentUpdated", "ConfigurationComponent", component.Id, new { oldLineage, newLineage, component.ComponentCode, component.Name, reason = request.Reason!.Trim() });
+        component.Name = request.Name!.Trim();
+        AddAuditEvent(database, context, "ComponentUpdated", "ConfigurationComponent", component.Id, new { component.Name, reason = request.Reason!.Trim() });
         await database.SaveChangesAsync(cancellationToken); var record = await database.IdempotencyRecords.SingleAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken); record.Status = IdempotencyRecordStatus.Completed; record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = component.Id, lineageKey = component.LineageKey })); await database.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
         return TypedResults.Ok(new { id = component.Id, lineageKey = component.LineageKey });
     }
@@ -1388,21 +1393,26 @@ public static class CatalogEndpoints
         if (await database.ConfigurationComponents.AnyAsync(item => item.ParentComponentId == componentId, cancellationToken)) return Results.Conflict(new { message = "请先移动或删除子组件后再删除该组件。" });
         if (await database.ComponentVersions.AnyAsync(item => item.ComponentId == componentId, cancellationToken)) return Results.Conflict(new { message = "已有软件版本的组件不能删除，以保留版本、基线和事实历史。" });
         var now = DateTimeOffset.UtcNow; await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken); database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }); database.ConfigurationComponents.Remove(component);
-        AddAuditEvent(database, context, "ComponentDeleted", "ConfigurationComponent", component.Id, new { component.ProjectId, component.ComponentCode, component.Name, reason = request.Reason.Trim() });
+        AddAuditEvent(database, context, "ComponentDeleted", "ConfigurationComponent", component.Id, new { component.ProjectId, component.Name, reason = request.Reason.Trim() });
         await database.SaveChangesAsync(cancellationToken); var record = await database.IdempotencyRecords.SingleAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken); record.Status = IdempotencyRecordStatus.Completed; record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = componentId, deleted = true })); await database.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
         return TypedResults.Ok(new { id = componentId, deleted = true });
     }
 
-    private static async Task<VersionCommandResult> CreateComponentVersionCommandAsync(ConfigHubDbContext database, Guid componentId, string versionNumber, string reason, HttpContext context, CancellationToken cancellationToken)
+    private static async Task<VersionCommandResult> CreateComponentVersionCommandAsync(ConfigHubDbContext database, Guid componentId, string versionNumber, string reason, HttpContext context, CancellationToken cancellationToken, VersionMaturity initialMaturity = VersionMaturity.Draft)
     {
         var component = await database.ConfigurationComponents.SingleOrDefaultAsync(candidate => candidate.Id == componentId, cancellationToken);
         if (component is null) return new VersionCommandResult(null, true, false);
         var normalizedVersion = Normalize(versionNumber);
         if (await database.ComponentVersions.AnyAsync(version => version.ComponentId == componentId && version.NormalizedVersionNumber == normalizedVersion, cancellationToken)) return new VersionCommandResult(null, false, true);
         var sequenceNo = (await database.ComponentVersions.Where(version => version.ComponentId == componentId).Select(version => (long?)version.SequenceNo).MaxAsync(cancellationToken) ?? 0) + 10;
-        var version = new ComponentVersion { Id = Guid.NewGuid(), ComponentId = componentId, VersionNumber = versionNumber, NormalizedVersionNumber = normalizedVersion, SequenceNo = sequenceNo, CreatedAt = DateTimeOffset.UtcNow };
+        var version = new ComponentVersion { Id = Guid.NewGuid(), ComponentId = componentId, VersionNumber = versionNumber, NormalizedVersionNumber = normalizedVersion, SequenceNo = sequenceNo, Maturity = initialMaturity, CreatedAt = DateTimeOffset.UtcNow };
         database.ComponentVersions.Add(version);
-        AddAuditEvent(database, context, "ComponentVersionCreated", "ComponentVersion", version.Id, new { version.ComponentId, version.VersionNumber, version.SequenceNo, reason });
+        if (initialMaturity != VersionMaturity.Draft)
+        {
+            var actor = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required.");
+            database.VersionLifecycleTransitions.Add(new VersionLifecycleTransition { Id = Guid.NewGuid(), ComponentVersionId = version.Id, Axis = LifecycleAxis.Maturity, FromState = VersionMaturity.Draft.ToString(), ToState = initialMaturity.ToString(), Reason = reason, Actor = actor, OccurredAt = DateTimeOffset.UtcNow });
+        }
+        AddAuditEvent(database, context, "ComponentVersionCreated", "ComponentVersion", version.Id, new { version.ComponentId, version.VersionNumber, version.SequenceNo, maturity = version.Maturity.ToString(), reason });
         return new VersionCommandResult(version, false, false);
     }
 
@@ -1570,10 +1580,10 @@ public static class CatalogEndpoints
 }
 
 public sealed record CreateProjectRequest(string? Code, string? Name, string? Description, string? Reason);
-public sealed record CreateComponentRequest(string? Code, string? Name, Guid? ParentComponentId, string? Reason);
-public sealed record UpdateComponentRequest(string? Code, string? Name, string? Reason);
+public sealed record CreateComponentRequest(string? Name, Guid? ParentComponentId, string? Reason);
+public sealed record UpdateComponentRequest(string? Name, string? Reason);
 public sealed record DeleteComponentRequest(string? Reason);
-public sealed record CreateComponentVersionRequest(string? VersionNumber, string? Reason);
+public sealed record CreateComponentVersionRequest(string? VersionNumber, string? Reason, string? Maturity);
 public sealed record CreateVersionPatchRequest(string? PatchCode, string? Title, string? IssueDescription, string? ResolutionDescription, string? Status);
 public sealed record LifecycleRequest(string? State, string? Reason);
 public sealed record CloneProjectRequest(string? Code, string? Name, string? Reason);
@@ -1592,5 +1602,5 @@ public sealed record ExportVersionImpactRequest(string? Reason);
 public sealed record RebuildDriftSummariesRequest(string? Reason);
 public sealed record RecordFactItem(Guid ComponentId, Guid? VersionId, bool Absent, DateTimeOffset? KnownInstalledAt);
 public sealed record StageImportRequest(Guid ProjectId, string? SourceFileName, string? Reason, List<StageImportRow>? Rows);
-public sealed record StageImportRow(string? ComponentCode, string? VersionNumber);
+public sealed record StageImportRow(string? ComponentName, string? VersionNumber);
 public sealed record VersionCommandResult(ComponentVersion? Version, bool ComponentMissing, bool Duplicate);

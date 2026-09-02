@@ -1915,6 +1915,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 3H 组件树可视化补强已交付：根据两层版本层级的实际使用方式，组件结构改为“根组件列”；每个根组件独立成列，直属子组件以可编辑卡片显示，根组件过多时整列横向滚动。领域仍允许深层节点，深层节点在所属根组件列内缩进呈现。前端 Release build、Web 兼容检查和 Host Release build 已通过。
 - 3H 组件工作台纵向布局补强已交付：组件结构（含新增根组件/子组件）横跨项目工作台完整宽度置顶；所选组件的编辑、删除、版本登记与状态位于其下，按“结构 → 创建 → 版本”的自然顺序组织。前端 Release build、Web 兼容检查和 Host Release build 已通过。
 - 3H 软件版本情况视图补强已交付：项目工作台顶部模块更名为“软件版本情况”，从 Project Current Standard 的 Baseline Item 冻结快照读取每个组件的标准基线版本，并直接显示在根组件和子组件卡片中；未设置项目标准或该标准未包含组件时明确标识，绝不以最新登记版本冒充基线版本。前端 Release build、Web 兼容检查和 Host Release build 已通过。
+- 3I 组件身份与实验室版本视图已交付：组件面向用户只使用单一“组件名称”，稳定节点键仅留在内部以保护既有 lineage 和历史；无已登记版本的节点是结构分类节点，可完整冻结在 Baseline Tree，但不能写入机台实际、必需性、漂移、风险或版本安全判断。项目工作台分为“当前基线版本”和“实验室测试版本”两块：前者仅显示项目当前标准的冻结版本，后者完整展示根节点且只自动列出 `Testing` 版本；发布后测试版本自动离开实验室视图，并成为创建新 Baseline 时可冻结的候选。登记版本可原子选择 Draft 或 Testing，Testing 保持 SeniorEngineer 权限、Audit、reason 和 Idempotency；版本发布不会隐式改写 Project Standard、Machine Target 或实际配置。导入改按组件名称匹配，发现同名即拒绝预览，避免误写版本。2026-09-02 已实际应用 `AllowStructuralBaselineItems` Migration，Host/SPA Release build 均为 0 warning/0 error，`catalog-acceptance.ps1`、Web compatibility 与 Windows operations preflight 均通过。
 - 3I 版本补丁记录切片已交付：`VersionPatch` 是附着于既有 `ComponentVersion` 的独立记录，版本号保持 opaque 且不因热修复、工作绕行或小型补丁而变化；同一版本可登记多条补丁，补丁编号在该版本内唯一，包含标题、问题说明、修复说明、状态、登记人和登记时间。登记命令具备 Project RBAC、事务、Idempotency、correlation id 与 Audit；版本详情显示补丁时间线，全局搜索覆盖补丁编号、标题、问题与修复文本，并可直接打开所属项目及版本。真实 Migration 已应用，`catalog-acceptance.ps1` 覆盖登记、重放、审计和搜索。
 - 3I 语义边界已固定：补丁“已发布”不等于任何机台“已安装”。机台补丁实际、基线补丁要求和含补丁的 Drift/Compare 将作为独立的后续 Vertical Slice，在有可审计的补丁安装事实前不得从版本补丁登记自动推断 Current Actual 或 Match。
 - 已交付：组件树移动、版本详情/影响查询，以及基于资源范围的 Project RBAC；完整授权矩阵继续在 Step 10 加固。
@@ -1925,7 +1926,8 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 4A 已交付：Series 与独立 Draft Revision 由真实 EF 模型创建；创建草稿时快照整个 Component Tree、组件身份、版本身份、排序与父子关系。命令要求 SeniorEngineer、actor、reason、correlation id、`Idempotency-Key`，并写入 Audit；中文界面支持创建与查看快照。`tests/integration/catalog-acceptance.ps1` 已覆盖完整快照、Revision 1、Draft 状态和幂等重放。Release、不可变 Trigger 与 Project Standard 留在后续独立切片，绝不以 Project 的 current_baseline_id 取代 Assignment History。
 - 4B 已交付：Release Command 只允许 Draft，拒绝空快照和包含 Blocked Version 的快照；发布会原子记录 Lifecycle、Audit、actor、reason、correlation id 与 `Idempotency-Key`。PostgreSQL Trigger 拒绝 Released/Deprecated/Archived Baseline 和 Baseline Item 的 Update/Delete，且发布时强制 Release Metadata；中文 UI 支持发布。自动验收覆盖发布与幂等重放；传入 Migration ConnectionString 时，脚本还会直连 PostgreSQL 断言 Released Item 更新被 Trigger 拒绝。
 - 4C 已交付：Project Standard 使用独立 Assignment History 而非 `projects.current_baseline_id`；仅接受同项目的 Released Baseline，并以 `[valid_from, valid_to)` 关闭上一条当前 Assignment。数据库以 partial unique index 与 GiST 排斥约束防止多个当前值和任何时间重叠；中文界面支持查看/显式设置。自动验收覆盖 Assignment 幂等重放和直连数据库的重叠区间拒绝。
-- 4A 复核补强已交付：Baseline Detail 只读 API 和中文冻结组件树视图返回独立的组件编码、名称、版本身份和树项数量，不依赖当前 Component Tree。
+- 4A 复核补强已交付：Baseline Detail 只读 API 和中文冻结组件树视图返回独立的组件名称、版本身份和树项数量，不依赖当前 Component Tree；内部节点键不作为用户界面身份展示。
+- 4A/3I 语义补强已交付：新 Baseline 只冻结 `Released` 版本；未发布版本对应组件仍以无版本结构节点进入快照，Released Baseline 至少须包含一个已发布软件版本。FULL Observation 只将存在软件版本的可配置组件投影为 Absent，绝不把结构分类节点误记为机台缺失。`catalog-acceptance.ps1` 覆盖 Testing 版本在发布前可见、结构节点的可空快照、结构节点不能设 Required/Optional，以及 FULL Observation 忽略结构节点。
 - 4A 复核补强已交付：Baseline Item 追加 `version_number_snapshot`；真实 EF Migration 将历史 Items 从其版本身份回填版本号，后续草稿创建直接保存文本快照，详情 UI/API 与自动化验收均读取该字段。
 - 4A 复核补强已交付：草稿 Baseline Item 的 Required/Optional 通过受 Project SeniorEngineer 授权的命令修改，命令要求原因、`Idempotency-Key` 并写 Audit；发布后仍由 Application 与 PostgreSQL 不可变 Trigger 双重拒绝，详情中文界面显示并仅在草稿阶段提供编辑。
 

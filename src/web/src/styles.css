@@ -971,6 +971,21 @@ select option { color: #213231; background: #fff; }
 .component-create-actions button { padding: 8px 10px; border: 1px solid #9bb8b1; color: #294a47; background: #fff; font: inherit; font-size: 12px; cursor: pointer; }
 .component-create-actions button:hover { border-color: #bd563f; color: #8e3d2e; }
 .component-create-panel .workspace-form { margin-top: 0; }
+.laboratory-tree { margin-top: 24px; padding-top: 20px; border-top: 1px solid #c8d9d5; }
+.laboratory-tree .tree-toolbar strong { color: #8a4a18; }
+.laboratory-tree .tree-toolbar small { max-width: 780px; color: #796044; line-height: 1.55; }
+.lab-root-grid { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(250px, 330px); gap: 16px; overflow-x: auto; padding-bottom: 8px; }
+.lab-root-column { min-width: 0; padding-top: 10px; border-top: 3px solid #d19a55; }
+.lab-branch-node { min-width: 0; }
+.lab-branch-node + .lab-branch-node { margin-top: 8px; }
+.lab-branch-node .lab-branch-node { margin-top: 8px; border-left: 1px solid #d6bd9d; }
+.lab-node { display: grid; grid-template-columns: minmax(0, 1fr) 24px; gap: 8px; width: 100%; min-height: 54px; padding: 9px 10px; border: 1px solid #e3c8a7; color: #66441e; background: #fffaf3; text-align: left; cursor: pointer; }
+.lab-node:hover, .lab-node.selected { border-color: #bd7637; background: #fff1dc; }
+.lab-node span:first-child { display: grid; min-width: 0; gap: 3px; }
+.lab-node strong, .lab-node small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lab-node strong { font-size: 12px; }
+.lab-node small { color: #82684a; font-size: 10px; }
+.lab-node > span:last-child { display: grid; place-items: center; width: 22px; height: 22px; color: #7c5329; background: #f5dfbd; font-family: Bahnschrift, monospace; font-size: 10px; }
 .component-inspector { min-width: 0; padding: 24px; }
 .inspector-heading, .subsection-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .inspector-heading h3, .subsection-heading h3 { margin: 6px 0 0; font-size: 22px; }
