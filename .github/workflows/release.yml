@@ -69,14 +69,14 @@ jobs:
           if (-not [string]::IsNullOrWhiteSpace($env:NUGET_AUTH_TOKEN)) {
             $username = [Security.SecurityElement]::Escape($env:NUGET_AUTH_USERNAME)
             $password = [Security.SecurityElement]::Escape($env:NUGET_AUTH_TOKEN)
-            $credentials = @"
-            <packageSourceCredentials>
-              <ConfigHubReleaseSource>
-                <add key="Username" value="$username" />
-                <add key="ClearTextPassword" value="$password" />
-              </ConfigHubReleaseSource>
-            </packageSourceCredentials>
-            "@
+            $credentials = @(
+              '  <packageSourceCredentials>'
+              '    <ConfigHubReleaseSource>'
+              ('      <add key="Username" value="{0}" />' -f $username)
+              ('      <add key="ClearTextPassword" value="{0}" />' -f $password)
+              '    </ConfigHubReleaseSource>'
+              '  </packageSourceCredentials>'
+            ) -join [Environment]::NewLine
           }
           @"
           <?xml version="1.0" encoding="utf-8"?>
