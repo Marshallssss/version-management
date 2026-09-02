@@ -1278,9 +1278,9 @@ public static class CatalogEndpoints
         {
             return Results.ValidationProblem(validationError);
         }
-        var initialMaturity = string.IsNullOrWhiteSpace(request.Maturity) ? VersionMaturity.Draft : request.Maturity.Equals("Testing", StringComparison.OrdinalIgnoreCase) ? VersionMaturity.Testing : VersionMaturity.Draft;
-        if (!string.IsNullOrWhiteSpace(request.Maturity) && initialMaturity == VersionMaturity.Draft && !request.Maturity.Equals("Draft", StringComparison.OrdinalIgnoreCase))
-            return Results.ValidationProblem(new Dictionary<string, string[]> { ["maturity"] = ["登记版本时只可选择 Draft 或 Testing；发布请走评审后的状态转换。"] });
+        var initialMaturity = VersionMaturity.Draft;
+        if (!string.IsNullOrWhiteSpace(request.Maturity) && (!Enum.TryParse<VersionMaturity>(request.Maturity, ignoreCase: true, out initialMaturity) || !Enum.IsDefined(initialMaturity)))
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["maturity"] = ["登记成熟度必须为 Draft、Testing、Released、Maintenance 或 Deprecated。"] });
 
         await using var database = await contextFactory.CreateDbContextAsync(cancellationToken);
         var key = httpContext.Request.Headers["Idempotency-Key"].FirstOrDefault(); if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["创建版本必须提供不超过 200 个字符的 Idempotency-Key。"] });
@@ -1288,7 +1288,7 @@ public static class CatalogEndpoints
         if (replay is not null) { if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (replay.Result is not null) return TypedResults.Ok(replay.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
         var component = await database.ConfigurationComponents.SingleOrDefaultAsync(item => item.Id == componentId, cancellationToken);
         if (component is null) return Results.NotFound();
-        if (!await HasProjectWriteAccessAsync(database, httpContext, component.ProjectId, cancellationToken, requireSeniorMembership: initialMaturity == VersionMaturity.Testing)) return Results.Forbid();
+        if (!await HasProjectWriteAccessAsync(database, httpContext, component.ProjectId, cancellationToken, requireSeniorMembership: initialMaturity != VersionMaturity.Draft)) return Results.Forbid();
         var now = DateTimeOffset.UtcNow; await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken); database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }); var result = await CreateComponentVersionCommandAsync(database, componentId, request.VersionNumber!.Trim(), request.Reason!.Trim(), httpContext, cancellationToken, initialMaturity);
         if (result.ComponentMissing) return Results.NotFound();
         if (result.Duplicate) return Results.Conflict(new { message = "该组件版本号已存在。" });
@@ -1407,10 +1407,12 @@ public static class CatalogEndpoints
         var sequenceNo = (await database.ComponentVersions.Where(version => version.ComponentId == componentId).Select(version => (long?)version.SequenceNo).MaxAsync(cancellationToken) ?? 0) + 10;
         var version = new ComponentVersion { Id = Guid.NewGuid(), ComponentId = componentId, VersionNumber = versionNumber, NormalizedVersionNumber = normalizedVersion, SequenceNo = sequenceNo, Maturity = initialMaturity, CreatedAt = DateTimeOffset.UtcNow };
         database.ComponentVersions.Add(version);
-        if (initialMaturity != VersionMaturity.Draft)
+        var actor = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required.");
+        var previousMaturity = VersionMaturity.Draft;
+        foreach (var nextMaturity in GetInitialMaturityPath(initialMaturity))
         {
-            var actor = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required.");
-            database.VersionLifecycleTransitions.Add(new VersionLifecycleTransition { Id = Guid.NewGuid(), ComponentVersionId = version.Id, Axis = LifecycleAxis.Maturity, FromState = VersionMaturity.Draft.ToString(), ToState = initialMaturity.ToString(), Reason = reason, Actor = actor, OccurredAt = DateTimeOffset.UtcNow });
+            database.VersionLifecycleTransitions.Add(new VersionLifecycleTransition { Id = Guid.NewGuid(), ComponentVersionId = version.Id, Axis = LifecycleAxis.Maturity, FromState = previousMaturity.ToString(), ToState = nextMaturity.ToString(), Reason = reason, Actor = actor, OccurredAt = DateTimeOffset.UtcNow });
+            previousMaturity = nextMaturity;
         }
         AddAuditEvent(database, context, "ComponentVersionCreated", "ComponentVersion", version.Id, new { version.ComponentId, version.VersionNumber, version.SequenceNo, maturity = version.Maturity.ToString(), reason });
         return new VersionCommandResult(version, false, false);
@@ -1530,6 +1532,35 @@ public static class CatalogEndpoints
             (VersionMaturity.Maintenance, VersionMaturity.Deprecated) => true,
             _ => false
         };
+
+    private static IEnumerable<VersionMaturity> GetInitialMaturityPath(VersionMaturity target)
+    {
+        switch (target)
+        {
+            case VersionMaturity.Draft:
+                yield break;
+            case VersionMaturity.Testing:
+                yield return VersionMaturity.Testing;
+                yield break;
+            case VersionMaturity.Released:
+                yield return VersionMaturity.Testing;
+                yield return VersionMaturity.Released;
+                yield break;
+            case VersionMaturity.Maintenance:
+                yield return VersionMaturity.Testing;
+                yield return VersionMaturity.Released;
+                yield return VersionMaturity.Maintenance;
+                yield break;
+            case VersionMaturity.Deprecated:
+                yield return VersionMaturity.Testing;
+                yield return VersionMaturity.Released;
+                yield return VersionMaturity.Maintenance;
+                yield return VersionMaturity.Deprecated;
+                yield break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(target), target, "Unsupported initial maturity.");
+        }
+    }
 
     private static Dictionary<string, string[]>? ValidateIdentifier(string? value, string fieldName, int maxLength)
     {

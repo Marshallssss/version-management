@@ -88,7 +88,7 @@ export const updateComponent = (componentId: string, input: { name: string; reas
 export const deleteComponent = (componentId: string, reason: string) =>
   request<{ id: string; deleted: boolean }>(`/api/v1/components/${componentId}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': createIdempotencyKey() }, body: JSON.stringify({ reason }) })
 export const assignProjectMember = (projectId: string, input: { userId: string; role: string; reason: string }) => request<{ id: string }>(`/api/v1/projects/${projectId}/members`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': createIdempotencyKey() }, body: JSON.stringify(input) })
-export const createComponentVersion = (componentId: string, input: { versionNumber: string; reason: string; maturity?: 'Draft' | 'Testing' }) =>
+export const createComponentVersion = (componentId: string, input: { versionNumber: string; reason: string; maturity?: 'Draft' | 'Testing' | 'Released' | 'Maintenance' | 'Deprecated' }) =>
   request<{ id: string; sequenceNo: number }>(`/api/v1/components/${componentId}/versions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': createIdempotencyKey() }, body: JSON.stringify(input) })
 export const createVersionPatch = (versionId: string, input: { patchCode: string; title: string; issueDescription: string; resolutionDescription: string; status: string }) =>
   request<{ id: string; status: string; recordedAt: string }>(`/api/v1/component-versions/${versionId}/patches`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': createIdempotencyKey() }, body: JSON.stringify(input) })
