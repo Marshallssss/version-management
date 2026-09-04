@@ -14,6 +14,23 @@ public static class BootstrapIdentity
 
     public static async Task EnsureAsync(IServiceProvider services, IConfiguration configuration, bool writeStatus)
     {
+        using var scope = services.CreateScope();
+        var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole<Guid>>>();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        foreach (var role in Roles)
+        {
+            if (!await roleManager.RoleExistsAsync(role))
+            {
+                var result = await roleManager.CreateAsync(new IdentityRole<Guid>(role));
+                if (!result.Succeeded) throw new InvalidOperationException(string.Join("; ", result.Errors.Select(error => error.Description)));
+            }
+        }
+
+        if (!writeStatus && (await userManager.GetUsersInRoleAsync("Admin")).Count > 0)
+        {
+            return;
+        }
+
         var userName = Environment.GetEnvironmentVariable("ConfigHub__BootstrapAdmin__UserName");
         if (string.IsNullOrWhiteSpace(userName))
         {
@@ -53,18 +70,6 @@ public static class BootstrapIdentity
         var email = normalizedUserName.Contains('@', StringComparison.Ordinal)
             ? normalizedUserName
             : null;
-
-        using var scope = services.CreateScope();
-        var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole<Guid>>>();
-        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
-        foreach (var role in Roles)
-        {
-            if (!await roleManager.RoleExistsAsync(role))
-            {
-                var result = await roleManager.CreateAsync(new IdentityRole<Guid>(role));
-                if (!result.Succeeded) throw new InvalidOperationException(string.Join("; ", result.Errors.Select(error => error.Description)));
-            }
-        }
 
         var user = await userManager.FindByNameAsync(normalizedUserName);
         if (user is null)
