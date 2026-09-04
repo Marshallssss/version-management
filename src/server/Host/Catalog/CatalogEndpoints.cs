@@ -15,7 +15,7 @@ public static class CatalogEndpoints
         var projects = endpoints.MapGroup("/api/v1/projects").RequireAuthorization();
         projects.MapGet("", ListProjectsAsync);
         projects.MapPost("", CreateProjectAsync).RequireAuthorization("Engineer");
-        projects.MapPost("/{projectId:guid}/archive", ArchiveProjectAsync).RequireAuthorization(policy => policy.RequireRole("Admin"));
+        projects.MapPost("/{projectId:guid}/archive", ArchiveProjectAsync).RequireAuthorization("Admin");
         projects.MapGet("/{projectId:guid}", GetProjectAsync);
         projects.MapPost("/{projectId:guid}/components", CreateComponentAsync).RequireAuthorization("Engineer");
         endpoints.MapPut("/api/v1/components/{componentId:guid}", async (Guid componentId, [FromBody] UpdateComponentRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken) =>
@@ -23,10 +23,11 @@ public static class CatalogEndpoints
         endpoints.MapDelete("/api/v1/components/{componentId:guid}", async (Guid componentId, [FromBody] DeleteComponentRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken) =>
             await DeleteComponentAsync(componentId, request, context, factory, cancellationToken)).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/components/{componentId:guid}/move", MoveComponentAsync).RequireAuthorization("Engineer");
+        endpoints.MapPost("/api/v1/components/{componentId:guid}/reorder", ReorderComponentAsync).RequireAuthorization("Engineer");
         projects.MapPost("/{projectId:guid}/clone", CloneAsync).RequireAuthorization("Engineer");
         projects.MapGet("/{projectId:guid}/baselines", ListBaselinesAsync);
         projects.MapGet("/{projectId:guid}/members", ListProjectMembersAsync).RequireAuthorization();
-        projects.MapPost("/{projectId:guid}/members", AssignProjectMemberAsync).RequireAuthorization(policy => policy.RequireRole("Admin"));
+        projects.MapPost("/{projectId:guid}/members", AssignProjectMemberAsync).RequireAuthorization("Admin");
         projects.MapPost("/{projectId:guid}/baselines", CreateBaselineAsync).RequireAuthorization("SeniorEngineer");
         projects.MapGet("/{projectId:guid}/standard", GetProjectStandardAsync);
         projects.MapPost("/{projectId:guid}/standard", AssignProjectStandardAsync).RequireAuthorization("SeniorEngineer");
@@ -34,11 +35,11 @@ public static class CatalogEndpoints
         projects.MapPost("/{projectId:guid}/bulk-facts", RecordBulkFactsAsync).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/release", ReleaseBaselineAsync).RequireAuthorization("SeniorEngineer");
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/review", RequestBaselineReviewAsync).RequireAuthorization("SeniorEngineer");
-        endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/review/approve", ApproveBaselineReviewAsync).RequireAuthorization(policy => policy.RequireRole("Admin"));
-        endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/review/reject", RejectBaselineReviewAsync).RequireAuthorization(policy => policy.RequireRole("Admin"));
+        endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/review/approve", ApproveBaselineReviewAsync).RequireAuthorization("Admin");
+        endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/review/reject", RejectBaselineReviewAsync).RequireAuthorization("Admin");
         endpoints.MapGet("/api/v1/baselines/{baselineId:guid}", GetBaselineDetailAsync).RequireAuthorization();
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/items/{itemId:guid}/requirement", SetBaselineItemRequirementAsync).RequireAuthorization("SeniorEngineer");
-        endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/maintenance", MaintainBaselineDraftAsync).RequireAuthorization(policy => policy.RequireRole("Admin"));
+        endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/maintenance", MaintainBaselineDraftAsync).RequireAuthorization("SuperAdmin");
         endpoints.MapGet("/api/v1/machines", ListMachinesAsync).RequireAuthorization();
         endpoints.MapPost("/api/v1/machines", CreateMachineAsync).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/machines/{machineId:guid}/target", AssignMachineTargetAsync).RequireAuthorization("SeniorEngineer");
@@ -61,7 +62,7 @@ public static class CatalogEndpoints
         endpoints.MapGet("/api/v1/search", SearchAsync).RequireAuthorization();
         endpoints.MapGet("/api/v1/dashboard", GetDashboardAsync).RequireAuthorization();
         endpoints.MapPost("/api/v1/admin/drift-summaries/rebuild", RebuildMachineDriftSummariesAsync)
-            .RequireAuthorization(policy => policy.RequireRole("Admin"));
+            .RequireAuthorization("Admin");
         endpoints.MapPost("/api/v1/imports", StageImportAsync).RequireAuthorization("Engineer");
         endpoints.MapGet("/api/v1/imports/{batchId:guid}", GetImportPreviewAsync).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/imports/{batchId:guid}/commit", CommitImportAsync).RequireAuthorization("Engineer");
@@ -917,7 +918,6 @@ public static class CatalogEndpoints
         if (replay is not null) { if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (replay.Result is not null) return TypedResults.Ok(replay.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
         var baseline = await database.ConfigurationBaselines.SingleOrDefaultAsync(item => item.Id == baselineId, cancellationToken);
         if (baseline is null) return Results.NotFound();
-        if (baseline.State != BaselineState.Draft) return Results.Conflict(new { message = "维护模式只能构造草稿基线；已发布基线永远不可编辑。" });
         var selections = request.VersionSelections?.ToArray() ?? [];
         if (selections.Any(item => item.ComponentId == Guid.Empty || item.VersionId == Guid.Empty) || selections.Select(item => item.ComponentId).Distinct().Count() != selections.Length) return Results.ValidationProblem(new Dictionary<string, string[]> { ["versionSelections"] = ["每个组件只能选择一个有效版本。"] });
         var items = await database.BaselineItems.Where(item => item.ConfigurationBaselineId == baselineId).ToListAsync(cancellationToken);
@@ -927,6 +927,7 @@ public static class CatalogEndpoints
         if (versions.Count != selectedVersionIds.Distinct().Count() || selections.Any(item => !components.Contains(item.ComponentId) || !versions.TryGetValue(item.VersionId, out var version) || version.ComponentId != item.ComponentId)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["versionSelections"] = ["维护模式只能选择该草稿组件的已发布版本。"] });
         var now = DateTimeOffset.UtcNow;
         await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
+        await database.Database.ExecuteSqlRawAsync("SET LOCAL confighub.baseline_maintenance = 'on';", cancellationToken);
         database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) });
         if (request.CreatedAt is not null) baseline.CreatedAt = request.CreatedAt.Value;
         foreach (var selection in selections)
@@ -936,7 +937,7 @@ public static class CatalogEndpoints
             item.ComponentVersionId = version.Id;
             item.VersionNumberSnapshot = version.VersionNumber;
         }
-        AddAuditEvent(database, context, "BaselineDraftMaintained", "ConfigurationBaseline", baseline.Id, new { reason = request.Reason.Trim(), createdAt = baseline.CreatedAt, versionSelectionCount = selections.Length, maintenanceMode = true });
+        AddAuditEvent(database, context, "HistoricalBaselineMaintained", "ConfigurationBaseline", baseline.Id, new { baselineState = baseline.State.ToString(), reason = request.Reason.Trim(), createdAt = baseline.CreatedAt, versionSelectionCount = selections.Length, maintenanceMode = true });
         await database.SaveChangesAsync(cancellationToken);
         var record = await database.IdempotencyRecords.SingleAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
         record.Status = IdempotencyRecordStatus.Completed;
@@ -1551,6 +1552,27 @@ public static class CatalogEndpoints
         return TypedResults.Ok(new { id = component.Id, lineageKey = component.LineageKey });
     }
 
+    private static async Task<IResult> ReorderComponentAsync(Guid componentId, ReorderComponentRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Reason) || !new[] { "Up", "Down" }.Contains(request.Direction, StringComparer.OrdinalIgnoreCase)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = ["必须提供上移或下移方向和原因。"] });
+        var key = context.Request.Headers["Idempotency-Key"].FirstOrDefault(); if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["调整组件顺序必须提供不超过 200 个字符的 Idempotency-Key。"] });
+        await using var database = await factory.CreateDbContextAsync(cancellationToken);
+        var scope = $"components.reorder:{componentId}"; var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request)))); var replay = await database.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
+        if (replay is not null) { if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (replay.Result is not null) return TypedResults.Ok(replay.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
+        var component = await database.ConfigurationComponents.SingleOrDefaultAsync(item => item.Id == componentId, cancellationToken); if (component is null) return Results.NotFound();
+        if (!await HasProjectWriteAccessAsync(database, context, component.ProjectId, cancellationToken)) return Results.Forbid();
+        var siblings = await database.ConfigurationComponents.Where(item => item.ProjectId == component.ProjectId && item.ParentComponentId == component.ParentComponentId).OrderBy(item => item.SortOrder).ThenBy(item => item.Id).ToListAsync(cancellationToken);
+        var index = siblings.FindIndex(item => item.Id == component.Id); var targetIndex = string.Equals(request.Direction, "Up", StringComparison.OrdinalIgnoreCase) ? index - 1 : index + 1;
+        if (targetIndex < 0 || targetIndex >= siblings.Count) return Results.Conflict(new { message = "该组件已经处于同级的最前或最后位置。" });
+        var neighbor = siblings[targetIndex]; var now = DateTimeOffset.UtcNow;
+        await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
+        database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) });
+        (component.SortOrder, neighbor.SortOrder) = (neighbor.SortOrder, component.SortOrder);
+        AddAuditEvent(database, context, "ComponentReordered", "ConfigurationComponent", component.Id, new { direction = request.Direction, neighborId = neighbor.Id, reason = request.Reason.Trim() });
+        await database.SaveChangesAsync(cancellationToken); var record = await database.IdempotencyRecords.SingleAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken); record.Status = IdempotencyRecordStatus.Completed; record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = component.Id, sortOrder = component.SortOrder })); await database.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
+        return TypedResults.Ok(new { id = component.Id, sortOrder = component.SortOrder });
+    }
+
     private static async Task<IResult> ChangeMaturityAsync(Guid versionId, LifecycleRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
     {
         if (!Enum.TryParse<VersionMaturity>(request.State, true, out var next) || string.IsNullOrWhiteSpace(request.Reason)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = ["必须提供有效状态和原因。"] });
@@ -1729,6 +1751,7 @@ public sealed record CreateVersionPatchRequest(string? PatchCode, string? Title,
 public sealed record LifecycleRequest(string? State, string? Reason);
 public sealed record CloneProjectRequest(string? Code, string? Name, string? Reason);
 public sealed record MoveComponentRequest(Guid? ParentComponentId, string? Reason);
+public sealed record ReorderComponentRequest(string? Direction, string? Reason);
 public sealed record CreateBaselineRequest(string? SeriesCode, string? BaselineCode, string? Description, string? Reason, IReadOnlyList<BaselineVersionSelectionRequest>? VersionSelections = null, IReadOnlyList<Guid>? TestingVersionIds = null);
 public sealed record BaselineVersionSelectionRequest(Guid ComponentId, Guid VersionId);
 public sealed record MaintainBaselineDraftRequest(DateTimeOffset? CreatedAt, IReadOnlyList<BaselineVersionSelectionRequest>? VersionSelections, string? Reason, bool MaintenanceMode);

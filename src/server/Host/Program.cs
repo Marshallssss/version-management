@@ -82,9 +82,10 @@ builder.Services.ConfigureApplicationCookie(options =>
         return Task.CompletedTask;
     };
 });
-builder.Services.AddAuthorizationBuilder().AddPolicy("Engineer", policy => policy.RequireRole("Engineer", "SeniorEngineer", "Admin"));
-builder.Services.AddAuthorizationBuilder().AddPolicy("SeniorEngineer", policy => policy.RequireRole("SeniorEngineer", "Admin"));
-builder.Services.AddAuthorizationBuilder().AddPolicy("Admin", policy => policy.RequireRole("Admin"));
+builder.Services.AddAuthorizationBuilder().AddPolicy("Engineer", policy => policy.RequireRole("Engineer", "SeniorEngineer", "Admin", "SuperAdmin"));
+builder.Services.AddAuthorizationBuilder().AddPolicy("SeniorEngineer", policy => policy.RequireRole("SeniorEngineer", "Admin", "SuperAdmin"));
+builder.Services.AddAuthorizationBuilder().AddPolicy("Admin", policy => policy.RequireRole("Admin", "SuperAdmin"));
+builder.Services.AddAuthorizationBuilder().AddPolicy("SuperAdmin", policy => policy.RequireRole("SuperAdmin"));
 
 builder.Services
     .AddHealthChecks()

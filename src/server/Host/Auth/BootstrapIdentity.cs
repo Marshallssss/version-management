@@ -5,7 +5,7 @@ namespace ConfigHub.Host.Auth;
 
 public static class BootstrapIdentity
 {
-    private static readonly string[] Roles = ["Admin", "SeniorEngineer", "Engineer", "Viewer"];
+    private static readonly string[] Roles = ["SuperAdmin", "Admin", "SeniorEngineer", "Engineer", "Viewer"];
 
     public static async Task EnsureAsync(IServiceProvider services, IConfiguration configuration)
     {
@@ -97,6 +97,12 @@ public static class BootstrapIdentity
         if (!await userManager.IsInRoleAsync(user, "Admin"))
         {
             var result = await userManager.AddToRoleAsync(user, "Admin");
+            if (!result.Succeeded) throw new InvalidOperationException(string.Join("; ", result.Errors.Select(error => error.Description)));
+        }
+
+        if (!await userManager.IsInRoleAsync(user, "SuperAdmin"))
+        {
+            var result = await userManager.AddToRoleAsync(user, "SuperAdmin");
             if (!result.Succeeded) throw new InvalidOperationException(string.Join("; ", result.Errors.Select(error => error.Description)));
         }
 

@@ -949,9 +949,15 @@ select option { color: #213231; background: #fff; }
 .tree-toolbar { display: grid; gap: 4px; margin-bottom: 14px; }
 .tree-toolbar strong { font-family: Bahnschrift, "Microsoft YaHei UI", sans-serif; font-size: 17px; }
 .tree-toolbar small { color: #657d78; font-size: 11px; }
+.root-drop-target { min-height: 46px; padding: 8px 10px; transition: background-color 120ms ease, box-shadow 120ms ease; }
+.root-drop-target.dragging { background: #e8f2ee; box-shadow: inset 0 -3px #bd563f; }
 .component-columns { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(250px, 330px); align-items: start; gap: 16px; margin-top: 14px; overflow-x: auto; padding-bottom: 8px; }
 .root-component-column { display: grid; gap: 10px; min-width: 0; padding-top: 10px; border-top: 3px solid #5d8d80; }
+.root-node-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 28px; gap: 6px; }
 .root-node { display: grid; grid-template-columns: minmax(0, 1fr) 24px; gap: 8px; min-height: 58px; padding: 9px 11px; border: 0; color: #294a47; background: #e8f2ee; text-align: left; cursor: grab; }
+.root-order-actions { display: grid; grid-template-rows: 1fr 1fr; gap: 4px; }
+.root-order-actions button { border: 1px solid #9bb8b1; color: #294a47; background: #fff; font: 13px Bahnschrift, sans-serif; cursor: pointer; }
+.root-order-actions button:hover:not(:disabled) { border-color: #bd563f; color: #8e3d2e; }
 .root-node span:first-child { display: grid; gap: 3px; min-width: 0; }
 .root-node small { color: #55726d; font-size: 10px; }
 .root-node strong { overflow: hidden; font-family: Bahnschrift, "Microsoft YaHei UI", sans-serif; font-size: 16px; text-overflow: ellipsis; white-space: nowrap; }

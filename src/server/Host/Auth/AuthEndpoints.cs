@@ -16,7 +16,7 @@ public static class AuthEndpoints
         auth.MapPost("/login", LoginAsync);
         auth.MapPost("/logout", LogoutAsync).RequireAuthorization();
         auth.MapGet("/me", Me).RequireAuthorization();
-        var admin = endpoints.MapGroup("/api/v1/admin").RequireAuthorization(policy => policy.RequireRole("Admin"));
+        var admin = endpoints.MapGroup("/api/v1/admin").RequireAuthorization("Admin");
         admin.MapGet("/users", ListUsersAsync);
         admin.MapPost("/users", CreateUserAsync);
         admin.MapPost("/users/{userId:guid}/role", ChangeUserRoleAsync);
@@ -77,6 +77,7 @@ public static class AuthEndpoints
         if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["创建用户必须提供不超过 200 个字符的 Idempotency-Key。"] });
         var role = request.Role.Trim();
         if (!await roleManager.RoleExistsAsync(role)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["role"] = ["角色不存在。"] });
+        if (role == "SuperAdmin" && !context.User.IsInRole("SuperAdmin")) return Results.Forbid();
         var scope = "admin.users.create";
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request))));
         var replay = await database.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
@@ -115,6 +116,7 @@ public static class AuthEndpoints
         if (replay is not null) { if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (replay.Result is not null) return TypedResults.Ok(replay.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
         var user = await userManager.FindByIdAsync(userId.ToString()); if (user is null) return Results.NotFound();
         var currentRoles = await userManager.GetRolesAsync(user);
+        if ((role == "SuperAdmin" || currentRoles.Contains("SuperAdmin")) && !context.User.IsInRole("SuperAdmin")) return Results.Forbid();
         if (currentRoles.Contains("Admin") && role != "Admin" && await userManager.GetUsersInRoleAsync("Admin") is { Count: 1 }) return Results.Conflict(new { message = "不能移除最后一个管理员。" });
         var now = DateTimeOffset.UtcNow; await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken); var record = new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }; database.IdempotencyRecords.Add(record);
         var remove = await userManager.RemoveFromRolesAsync(user, currentRoles); if (!remove.Succeeded) return Results.Problem(statusCode: 500, detail: string.Join(" ", remove.Errors.Select(error => error.Description)));
