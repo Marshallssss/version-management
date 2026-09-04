@@ -37,6 +37,7 @@ public static class CatalogEndpoints
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/review", RequestBaselineReviewAsync).RequireAuthorization("SeniorEngineer");
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/review/approve", ApproveBaselineReviewAsync).RequireAuthorization("Admin");
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/review/reject", RejectBaselineReviewAsync).RequireAuthorization("Admin");
+        endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/undo-creation", UndoBaselineCreationAsync).RequireAuthorization("SeniorEngineer");
         endpoints.MapGet("/api/v1/baselines/{baselineId:guid}", GetBaselineDetailAsync).RequireAuthorization();
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/items/{itemId:guid}/requirement", SetBaselineItemRequirementAsync).RequireAuthorization("SeniorEngineer");
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/maintenance", MaintainBaselineDraftAsync).RequireAuthorization("SuperAdmin");
@@ -1071,7 +1072,7 @@ public static class CatalogEndpoints
                 SortOrder = component.SortOrder
             });
         }
-        AddAuditEvent(database, context, "BaselineDraftCreated", "ConfigurationBaseline", baseline.Id, new { baseline.BaselineCode, baseline.RevisionNo, baseline.BaselineSeriesId, reason = request.Reason!.Trim(), itemCount = components.Count, selectionMode = testingVersions.Count > 0 ? "TestingVersionsPromotedAndSelected" : explicitSelections.Length > 0 ? "ExplicitReleasedVersions" : "LatestReleasedVersions" });
+        AddAuditEvent(database, context, "BaselineDraftCreated", "ConfigurationBaseline", baseline.Id, new { baseline.BaselineCode, baseline.RevisionNo, baseline.BaselineSeriesId, reason = request.Reason!.Trim(), itemCount = components.Count, testingVersionIds, selectionMode = testingVersions.Count > 0 ? "TestingVersionsPromotedAndSelected" : explicitSelections.Length > 0 ? "ExplicitReleasedVersions" : "LatestReleasedVersions" });
         await database.SaveChangesAsync(cancellationToken);
         var record = await database.IdempotencyRecords.SingleAsync(item => item.Scope == scope && item.IdempotencyKey == idempotencyKey, cancellationToken);
         record.Status = IdempotencyRecordStatus.Completed;
@@ -1079,6 +1080,76 @@ public static class CatalogEndpoints
         await database.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return TypedResults.Created($"/api/v1/baselines/{baseline.Id}", new { id = baseline.Id, revisionNo = baseline.RevisionNo, itemCount = components.Count });
+    }
+
+    private static async Task<IResult> UndoBaselineCreationAsync(
+        Guid baselineId,
+        BaselineCreationUndoRequest request,
+        HttpContext context,
+        IDbContextFactory<ConfigHubDbContext> factory,
+        CancellationToken cancellationToken)
+    {
+        var validation = ValidateRequired(request.Reason, "撤回原因", 500);
+        if (validation is not null) return Results.ValidationProblem(validation);
+        var key = context.Request.Headers["Idempotency-Key"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(key) || key.Length > 200)
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["撤回基线创建必须提供不超过 200 个字符的 Idempotency-Key。"] });
+
+        var now = DateTimeOffset.UtcNow;
+        var scope = $"baselines.creation-undo:{baselineId}";
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request))));
+        await using var database = await factory.CreateDbContextAsync(cancellationToken);
+        var replay = await database.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
+        if (replay is not null)
+        {
+            if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" });
+            if (replay.Result is not null) return TypedResults.Ok(replay.Result.RootElement.Clone());
+            return Results.Conflict(new { message = "该请求仍在处理。" });
+        }
+
+        var baseline = await database.ConfigurationBaselines.SingleOrDefaultAsync(item => item.Id == baselineId, cancellationToken);
+        if (baseline is null) return Results.NotFound();
+        if (!await HasProjectWriteAccessAsync(database, context, baseline.ProjectId, cancellationToken, requireSeniorMembership: true)) return Results.Forbid();
+        if (baseline.State != BaselineState.Draft) return Results.Conflict(new { message = "只有尚未发布的基线草稿可以撤回创建。" });
+        if (now - baseline.CreatedAt > TimeSpan.FromMinutes(1)) return Results.Conflict(new { message = "基线创建仅可在 1 分钟内撤回。" });
+        if (await database.BaselineReviews.AnyAsync(item => item.ConfigurationBaselineId == baselineId, cancellationToken)) return Results.Conflict(new { message = "已进入评审流程的基线不能撤回创建。" });
+        if (await database.ProjectStandardAssignments.AnyAsync(item => item.ConfigurationBaselineId == baselineId, cancellationToken)
+            || await database.MachineTargetAssignments.AnyAsync(item => item.ConfigurationBaselineId == baselineId, cancellationToken))
+            return Results.Conflict(new { message = "已被标准或机台引用的基线不能撤回创建。" });
+
+        var createdAudit = await database.AuditEvents.AsNoTracking()
+            .Where(item => item.EntityType == "ConfigurationBaseline" && item.EntityId == baselineId && item.Action == "BaselineDraftCreated")
+            .OrderByDescending(item => item.OccurredAt)
+            .FirstOrDefaultAsync(cancellationToken);
+        var testingVersionIds = createdAudit?.Data?.RootElement.TryGetProperty("testingVersionIds", out var testingIdsElement) == true
+            ? testingIdsElement.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.String && Guid.TryParse(item.GetString(), out _)).Select(item => Guid.Parse(item.GetString()!)).Distinct().ToArray()
+            : [];
+        if (testingVersionIds.Length == 0) return Results.Conflict(new { message = "此基线不是由测试版本生成，不能使用快速撤回。" });
+
+        var versions = await database.ComponentVersions.Where(item => testingVersionIds.Contains(item.Id)).ToListAsync(cancellationToken);
+        if (versions.Count != testingVersionIds.Length || versions.Any(item => item.Maturity != VersionMaturity.Released))
+            return Results.Conflict(new { message = "关联版本已变更，不能安全撤回该基线。" });
+        var actor = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required.");
+        var items = await database.BaselineItems.Where(item => item.ConfigurationBaselineId == baselineId).OrderByDescending(item => item.LineageKeySnapshot.Length).ToListAsync(cancellationToken);
+
+        await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
+        var record = new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) };
+        database.IdempotencyRecords.Add(record);
+        foreach (var version in versions)
+        {
+            version.Maturity = VersionMaturity.Testing;
+            database.VersionLifecycleTransitions.Add(new VersionLifecycleTransition { Id = Guid.NewGuid(), ComponentVersionId = version.Id, Axis = LifecycleAxis.Maturity, FromState = VersionMaturity.Released.ToString(), ToState = VersionMaturity.Testing.ToString(), Reason = request.Reason!.Trim(), Actor = actor, OccurredAt = now });
+            AddAuditEvent(database, context, "VersionMaturityChanged", "ComponentVersion", version.Id, new { from = "Released", to = "Testing", reason = request.Reason!.Trim(), source = "BaselineCreationUndo" });
+        }
+        database.BaselineItems.RemoveRange(items);
+        database.ConfigurationBaselines.Remove(baseline);
+        AddAuditEvent(database, context, "BaselineCreationUndone", "ConfigurationBaseline", baselineId, new { baselineCode = baseline.BaselineCode, reason = request.Reason!.Trim(), testingVersionIds });
+        await database.SaveChangesAsync(cancellationToken);
+        record.Status = IdempotencyRecordStatus.Completed;
+        record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = baselineId, undone = true, restoredTestingVersionCount = versions.Count }));
+        await database.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return TypedResults.Ok(new { id = baselineId, undone = true, restoredTestingVersionCount = versions.Count });
     }
 
     private static async Task<IResult> ReleaseBaselineAsync(
@@ -1517,8 +1588,13 @@ public static class CatalogEndpoints
         if (await database.ComponentVersions.AnyAsync(version => version.ComponentId == componentId && version.NormalizedVersionNumber == normalizedVersion, cancellationToken)) return new VersionCommandResult(null, false, true);
         var sequenceNo = (await database.ComponentVersions.Where(version => version.ComponentId == componentId).Select(version => (long?)version.SequenceNo).MaxAsync(cancellationToken) ?? 0) + 10;
         var version = new ComponentVersion { Id = Guid.NewGuid(), ComponentId = componentId, VersionNumber = versionNumber, NormalizedVersionNumber = normalizedVersion, SequenceNo = sequenceNo, Maturity = initialMaturity, CreatedAt = DateTimeOffset.UtcNow };
-        database.ComponentVersions.Add(version);
         var actor = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required.");
+        if (initialMaturity == VersionMaturity.Testing)
+        {
+            await DeprecateOtherTestingVersionsAsync(database, componentId, version.Id, reason, context, cancellationToken);
+            await database.SaveChangesAsync(cancellationToken);
+        }
+        database.ComponentVersions.Add(version);
         var previousMaturity = VersionMaturity.Draft;
         foreach (var nextMaturity in GetInitialMaturityPath(initialMaturity))
         {
@@ -1527,6 +1603,23 @@ public static class CatalogEndpoints
         }
         AddAuditEvent(database, context, "ComponentVersionCreated", "ComponentVersion", version.Id, new { version.ComponentId, version.VersionNumber, version.SequenceNo, maturity = version.Maturity.ToString(), reason });
         return new VersionCommandResult(version, false, false);
+    }
+
+    private static async Task DeprecateOtherTestingVersionsAsync(ConfigHubDbContext database, Guid componentId, Guid retainedVersionId, string reason, HttpContext context, CancellationToken cancellationToken)
+    {
+        var previousTestingVersions = await database.ComponentVersions
+            .Where(item => item.ComponentId == componentId && item.Id != retainedVersionId && item.Maturity == VersionMaturity.Testing)
+            .ToListAsync(cancellationToken);
+        if (previousTestingVersions.Count == 0) return;
+
+        var actor = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required.");
+        var now = DateTimeOffset.UtcNow;
+        foreach (var previous in previousTestingVersions)
+        {
+            previous.Maturity = VersionMaturity.Deprecated;
+            database.VersionLifecycleTransitions.Add(new VersionLifecycleTransition { Id = Guid.NewGuid(), ComponentVersionId = previous.Id, Axis = LifecycleAxis.Maturity, FromState = VersionMaturity.Testing.ToString(), ToState = VersionMaturity.Deprecated.ToString(), Reason = reason, Actor = actor, OccurredAt = now });
+            AddAuditEvent(database, context, "VersionMaturityChanged", "ComponentVersion", previous.Id, new { from = "Testing", to = "Deprecated", reason, source = "SupersededByNewTestingVersion", retainedVersionId });
+        }
     }
 
     private static async Task<IResult> MoveComponentAsync(Guid componentId, MoveComponentRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
@@ -1587,6 +1680,11 @@ public static class CatalogEndpoints
         if (!IsAllowedMaturityTransition(version.Maturity, next)) return Results.Conflict(new { message = "不允许的成熟度转换。" });
         var now = DateTimeOffset.UtcNow; await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken); database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }); var actor = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required.");
         var previous = version.Maturity;
+        if (next == VersionMaturity.Testing)
+        {
+            await DeprecateOtherTestingVersionsAsync(database, version.ComponentId, version.Id, request.Reason.Trim(), context, cancellationToken);
+            await database.SaveChangesAsync(cancellationToken);
+        }
         version.Maturity = next;
         database.VersionLifecycleTransitions.Add(new VersionLifecycleTransition { Id = Guid.NewGuid(), ComponentVersionId = version.Id, Axis = LifecycleAxis.Maturity, FromState = previous.ToString(), ToState = next.ToString(), Reason = request.Reason.Trim(), Actor = actor, OccurredAt = DateTimeOffset.UtcNow });
         AddAuditEvent(database, context, "VersionMaturityChanged", "ComponentVersion", version.Id, new { from = previous.ToString(), to = next.ToString(), reason = request.Reason.Trim() });
@@ -1757,6 +1855,7 @@ public sealed record BaselineVersionSelectionRequest(Guid ComponentId, Guid Vers
 public sealed record MaintainBaselineDraftRequest(DateTimeOffset? CreatedAt, IReadOnlyList<BaselineVersionSelectionRequest>? VersionSelections, string? Reason, bool MaintenanceMode);
 public sealed record SetBaselineItemRequirementRequest(string? Requirement, string? Reason);
 public sealed record BaselineReviewRequest(string? Reason);
+public sealed record BaselineCreationUndoRequest(string? Reason);
 public sealed record AssignProjectStandardRequest(Guid ConfigurationBaselineId, string? Reason);
 public sealed record AssignProjectMemberRequest(Guid UserId, string? Role, string? Reason);
 public sealed record CreateMachineRequest(Guid ProjectId, string? SerialNumber, string? Name, string? MachineType, string? Reason);

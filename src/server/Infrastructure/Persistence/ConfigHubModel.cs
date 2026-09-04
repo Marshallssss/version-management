@@ -134,6 +134,9 @@ internal static class ConfigHubModel
                 .IsUnique().HasDatabaseName("ux_component_versions_normalized_number");
             entity.HasIndex(version => new { version.ComponentId, version.SequenceNo })
                 .IsUnique().HasDatabaseName("ux_component_versions_sequence_no");
+            entity.HasIndex(version => version.ComponentId)
+                .IsUnique().HasFilter("maturity = 'Testing'")
+                .HasDatabaseName("ux_component_versions_one_testing_per_component");
             entity.HasOne<ConfigurationComponent>().WithMany().HasForeignKey(version => version.ComponentId).OnDelete(DeleteBehavior.Restrict);
         });
 
