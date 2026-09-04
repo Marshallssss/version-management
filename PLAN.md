@@ -1949,6 +1949,8 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 5B 复核补强已交付：当前 Target 的只读 API 和机台页中文状态展示已接入；自动化验收断言 Project Standard 切换到新 Revision 后，既有 Machine Target 仍指向原 Baseline。
 - 5B 复核补强已交付：`catalog-acceptance.ps1` 直连真实 PostgreSQL 验证 `machine_target_assignments` 的唯一当前值与 GiST 时间区间排斥约束，避免只依赖应用层关闭上一条 Assignment。
 - 5B 目标历史补强已交付：机台 Target History 读取 API 与中文时间线展示历史 Assignment 的基线、原因、开始/结束时间；自动验收覆盖重新指派后旧记录被关闭且新记录成为当前目标。
+- 5C 机台工作台已交付：真实 EF Migration 为 Machine 增加可选位置；创建、更新、列表读取均受项目范围、actor、reason、correlation id 与 Idempotency 保护，资料变更写入 Audit。创建可从已有机台预填可编辑资料，但必须登记新的全局序列号；项目归属一旦建立不可跨项目移动，以保护 Target、Actual 与历史事实的项目语义。中文机台页已收束为紧凑创建入口、筛选列表和同一上下文的资料、Target、Actual、时间点与事实历史；实验室机台可手工记录 Testing 版本实际，但 Testing 不可成为 Target。左侧全局导航与机台详情可收合，导航偏好会记住，减少大项目的滚动和横向拥挤。`catalog-acceptance.ps1` 已覆盖位置创建、列表读取、资料更新和幂等重放；真实 Migration、Release build、SPA build 与 EF Pending Model Changes 均已通过。
+- 5D 下一切片：基于已发布 Baseline 的显式多机升级命令。升级必须以 `UPGRADE` Fact 记录用户输入的工程生效时间，保留旧 Current Actual 的历史，按机返回结果并允许快速浏览；Target Assignment 仍保持独立且不得因为升级自动推断或改写。Testing 版本的实验室实际配置继续走受控的局部 Facts，而不是伪造一个可用于生产 Target 的测试 Baseline。
 
 ## Step 6 — Facts → Current Actual
 

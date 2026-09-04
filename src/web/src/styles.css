@@ -939,6 +939,59 @@ select option { color: #213231; background: #fff; }
 .decision-meta { color: #657d78; }
 .form-hint { margin: 0; color: #526a66; font-size: 12px; line-height: 1.55; }
 
+.rail { position: relative; }
+.rail-toggle { display: grid; place-items: center; width: 24px; height: 24px; margin-left: auto; border: 1px solid #9bb8b1; color: #294a47; background: #fff; cursor: pointer; }
+.rail-toggle:hover { border-color: #bd563f; color: #8e3d2e; }
+.nav-item .nav-index { color: #b5ceca; font-family: Bahnschrift, monospace; font-size: 10px; }
+.nav-item .nav-label { color: inherit; }
+.rail-collapsed { grid-template-columns: 64px minmax(0, 1fr); }
+.rail-collapsed .brand-block { min-height: 76px; padding: 16px 10px; }
+.rail-collapsed .brand-copy, .rail-collapsed .nav-label, .rail-collapsed .nav-item em, .rail-collapsed .rail-footer { display: none; }
+.rail-collapsed .rail-toggle { position: absolute; right: -12px; z-index: 2; }
+.rail-collapsed .rail nav { padding: 14px 7px; }
+.rail-collapsed .nav-item { grid-template-columns: 1fr; justify-items: center; padding: 12px 4px; }
+.rail-collapsed .nav-item.active { border-left-width: 2px; }
+
+.machine-workspace { display: grid; grid-template-columns: minmax(250px, 0.36fr) minmax(0, 0.64fr); gap: 18px; grid-column: span 2; align-items: start; }
+.machine-registry-panel { grid-column: span 2; }
+.machine-heading { margin-bottom: 10px; }
+.machine-create, .machine-edit, .machine-detail-sections > details { border-top: 1px solid #d6e2df; }
+.machine-create > summary, .machine-edit > summary, .machine-detail-sections > details > summary { padding: 13px 0; color: #294a47; font-family: Bahnschrift, "Microsoft YaHei UI", sans-serif; font-weight: 600; cursor: pointer; }
+.machine-create[open] > summary, .machine-edit[open] > summary, .machine-detail-sections > details[open] > summary { color: #8e3d2e; }
+.machine-create .catalog-form, .machine-edit .catalog-form { padding: 4px 0 16px; }
+.machine-list-panel { max-height: calc(100vh - 206px); overflow: auto; }
+.machine-list-controls { display: flex; align-items: end; justify-content: space-between; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #d6e2df; color: #657d78; font-size: 12px; }
+.machine-list-controls label { display: grid; flex: 1; gap: 6px; color: #3d5752; }
+.machine-list-controls select { min-height: 36px; border: 1px solid #aabfba; color: #213231; background: #fff; font: inherit; }
+.machine-list { display: grid; }
+.machine-list-item { display: grid; gap: 4px; width: 100%; padding: 13px 2px; border: 0; border-bottom: 1px solid #d6e2df; color: #213231; background: transparent; text-align: left; cursor: pointer; }
+.machine-list-item strong { font-family: Bahnschrift, "Microsoft YaHei UI", sans-serif; font-size: 15px; }
+.machine-list-item span, .machine-list-item small { overflow: hidden; color: #657d78; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.machine-list-item:hover, .machine-list-item.selected { padding-left: 10px; color: #8e3d2e; background: #f5f9f7; }
+.machine-list-item.selected { border-left: 3px solid #bd563f; }
+.machine-detail-panel { min-height: 470px; }
+.machine-detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding-bottom: 16px; border-bottom: 1px solid #d6e2df; }
+.machine-detail-header h3 { margin: 6px 0; font-size: 25px; }
+.machine-detail-header p { margin: 0; color: #657d78; font-size: 12px; }
+.machine-statuses { display: flex; flex-wrap: wrap; justify-content: end; gap: 7px; }
+.machine-statuses span { padding: 6px 8px; border: 1px solid #b9cfca; color: #35524e; background: #f5f9f7; font-size: 11px; white-space: nowrap; }
+.machine-edit { margin-top: 10px; }
+.machine-edit .form-hint { padding-bottom: 16px; }
+.machine-detail-sections { display: grid; gap: 0; margin-top: 4px; }
+.machine-detail-sections > details > .catalog-form { padding: 0 0 16px; }
+.machine-detail-sections > details > .form-hint { padding: 0 0 14px; }
+
+@media (max-width: 1050px) {
+  .machine-workspace { grid-template-columns: 1fr; }
+  .machine-registry-panel { grid-column: auto; }
+  .machine-list-panel { max-height: 320px; }
+}
+
+@media (max-width: 720px) {
+  .machine-detail-header { flex-direction: column; }
+  .machine-statuses { justify-content: start; }
+}
+
 .project-workspace { grid-column: span 2; min-width: 0; border: 1px solid #c8d9d5; background: #fff; }
 .workspace-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 24px; border-bottom: 1px solid #d6e2df; }
 .workspace-heading h2 { margin: 6px 0; font-size: 28px; }

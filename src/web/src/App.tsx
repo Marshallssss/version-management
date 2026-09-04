@@ -1,12 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { archiveProject, assignMachineTarget, assignProjectMember, assignProjectStandard, changeUserRole, changeVersionMaturity, changeVersionSafety, cloneProject, commitImport, compareBaselines, createBaseline, createComponent, createComponentVersion, createMachine, createProject, createUser, decideBaselineReview, getBaselineDetail, getBaselines, getCurrentUser, getDashboard, getImportPreview, getMachineConfiguration, getMachineDrift, getMachineFacts, getMachineTarget, getMachineTargetHistory, getMachines, getProject, getProjectMembers, getProjectStandard, getProjects, getUsers, getVersionDetail, getVersionExposureSnapshots, getVersionImpact, login, logout, moveComponent, recommendVersion, recordMachineFacts, releaseBaseline, requestBaselineReview, searchCatalog, setBaselineItemRequirement, stageImport } from './catalog-api'
+import { archiveProject, assignProjectMember, assignProjectStandard, changeUserRole, changeVersionMaturity, changeVersionSafety, cloneProject, commitImport, compareBaselines, createBaseline, createComponent, createComponentVersion, createProject, createUser, decideBaselineReview, getBaselineDetail, getBaselines, getCurrentUser, getDashboard, getImportPreview, getMachineFacts, getMachines, getProject, getProjectMembers, getProjectStandard, getProjects, getUsers, getVersionDetail, getVersionExposureSnapshots, getVersionImpact, login, logout, moveComponent, recommendVersion, releaseBaseline, requestBaselineReview, searchCatalog, setBaselineItemRequirement, stageImport } from './catalog-api'
 import { enqueueNoopJob, getSystemStatus, getSystemVersion, type BackgroundJobStatus } from './system-api'
-import { RollbackFactPanel } from './RollbackFactPanel'
-import { BulkTargetPanel } from './BulkTargetPanel'
 import { BulkFactPanel } from './BulkFactPanel'
-import { HistoricalConfigurationPanel } from './HistoricalConfigurationPanel'
 import { MachineComparePanel } from './MachineComparePanel'
+import { MachineWorkspace } from './MachineWorkspace'
 import { ProjectWorkspace } from './ProjectWorkspace'
 
 const navigation = [
@@ -33,8 +31,6 @@ const connectivityText = { online: '已连接', offline: '未连接', checking: 
 const jobTypeText: Record<string, string> = {
   'system.noop': '连通性任务',
 }
-const matchText: Record<string, string> = { Matched: '匹配', Mismatch: '不匹配', Unknown: '待计算' }
-const riskText: Record<string, string> = { None: '无', High: '高', Critical: '严重', Unknown: '待计算' }
 const operationText: Record<string, string> = { Observation: '观察', Install: '安装', Upgrade: '升级', InitialSnapshot: '初始快照', Rollback: '回退', Correction: '更正' }
 const sourceText: Record<string, string> = { 'manual-ui': '人工录入', 'bulk-ui': '批量录入', 'agent-automation': '机台代理' }
 const maturityText: Record<string, string> = { Draft: '草稿', Testing: '测试中', Released: '已发布', Maintenance: '维护中', Deprecated: '已废弃' }
@@ -47,6 +43,7 @@ function formatTime(value: string | null | undefined) {
 
 function App() {
   const [activePage, setActivePage] = useState('overview')
+  const [railCollapsed, setRailCollapsed] = useState(() => localStorage.getItem('confighub.rail-collapsed') === 'true')
   const [successMessage, setSuccessMessage] = useState('')
   const [note, setNote] = useState('')
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
@@ -93,18 +90,7 @@ function App() {
   const [baselineRequirementReason, setBaselineRequirementReason] = useState('')
   const [standardBaselineId, setStandardBaselineId] = useState('')
   const [standardReason, setStandardReason] = useState('')
-  const [machineProjectId, setMachineProjectId] = useState('')
-  const [machineSerial, setMachineSerial] = useState('')
-  const [machineName, setMachineName] = useState('')
-  const [machineType, setMachineType] = useState('')
-  const [machineReason, setMachineReason] = useState('')
   const [selectedMachineId, setSelectedMachineId] = useState('')
-  const [factComponentId, setFactComponentId] = useState('')
-  const [factVersionId, setFactVersionId] = useState('')
-  const [factCoverage, setFactCoverage] = useState('Partial')
-  const [factReason, setFactReason] = useState('')
-  const [targetBaselineId, setTargetBaselineId] = useState('')
-  const [targetReason, setTargetReason] = useState('')
   const [impactVersionId, setImpactVersionId] = useState('')
   const [focusedVersionId, setFocusedVersionId] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
@@ -142,15 +128,7 @@ function App() {
   const baselineDetail = useQuery({ queryKey: ['baseline-detail', selectedBaselineId], queryFn: () => getBaselineDetail(selectedBaselineId), enabled: isAuthenticated && selectedBaselineId !== '' })
   const standard = useQuery({ queryKey: ['project-standard', baselineProjectId], queryFn: () => getProjectStandard(baselineProjectId), enabled: isAuthenticated && baselineProjectId !== '' })
   const machines = useQuery({ queryKey: ['machines'], queryFn: getMachines, enabled: isAuthenticated })
-  const selectedMachine = machines.data?.find(machine => machine.id === selectedMachineId)
-  const machineProjectDetail = useQuery({ queryKey: ['machine-project', selectedMachine?.projectId], queryFn: () => getProject(selectedMachine!.projectId), enabled: isAuthenticated && selectedMachine !== undefined })
-  const selectedFactComponent = machineProjectDetail.data?.components.find(component => component.id === factComponentId)
-  const targetBaselines = useQuery({ queryKey: ['machine-target-baselines', selectedMachine?.projectId], queryFn: () => getBaselines(selectedMachine!.projectId), enabled: isAuthenticated && selectedMachine !== undefined })
-  const machineTarget = useQuery({ queryKey: ['machine-target', selectedMachineId], queryFn: () => getMachineTarget(selectedMachineId), enabled: isAuthenticated && selectedMachineId !== '' })
-  const machineTargetHistory = useQuery({ queryKey: ['machine-target-history', selectedMachineId], queryFn: () => getMachineTargetHistory(selectedMachineId), enabled: isAuthenticated && selectedMachineId !== '' })
-  const machineConfiguration = useQuery({ queryKey: ['machine-configuration', selectedMachineId], queryFn: () => getMachineConfiguration(selectedMachineId), enabled: isAuthenticated && selectedMachineId !== '' })
   const machineFacts = useQuery({ queryKey: ['machine-facts', selectedMachineId], queryFn: () => getMachineFacts(selectedMachineId), enabled: isAuthenticated && selectedMachineId !== '' })
-  const machineDrift = useQuery({ queryKey: ['machine-drift', selectedMachineId], queryFn: () => getMachineDrift(selectedMachineId), enabled: isAuthenticated && selectedMachineId !== '' })
   const versionImpact = useQuery({ queryKey: ['version-impact', impactVersionId], queryFn: () => getVersionImpact(impactVersionId), enabled: isAuthenticated && impactVersionId !== '' })
   const versionExposure = useQuery({ queryKey: ['version-exposure', impactVersionId], queryFn: () => getVersionExposureSnapshots(impactVersionId), enabled: isAuthenticated && impactVersionId !== '' })
   const versionDetail = useQuery({ queryKey: ['version-detail', impactVersionId], queryFn: () => getVersionDetail(impactVersionId), enabled: isAuthenticated && impactVersionId !== '' })
@@ -182,7 +160,6 @@ function App() {
   })
   const archiveSelectedProject = useMutation({ mutationFn: () => archiveProject(selectedProjectId!, archiveReason), onSuccess: async () => { localStorage.removeItem('confighub.selected-project-id'); setSelectedProjectId(null); setArchiveReason(''); setProjectDialog(null); setSuccessMessage('项目已归档，历史记录保持可追溯。'); await queryClient.invalidateQueries({ queryKey: ['projects'] }) } })
   const stageImportMutation = useMutation({ mutationFn: () => stageImport({ projectId: importProjectId, sourceFileName: '手工预览.csv', reason: importReason, rows: importRows.split(/\r?\n/).filter(Boolean).map(line => { const [componentName = '', versionNumber = ''] = line.split(','); return { componentName: componentName.trim(), versionNumber: versionNumber.trim() } }) }), onSuccess: ({ id }) => setImportBatchId(id) })
-  const assignTarget = useMutation({ mutationFn: () => assignMachineTarget(selectedMachineId, targetBaselineId, targetReason), onSuccess: async () => { setTargetBaselineId(''); setTargetReason(''); setSuccessMessage('已为该机台显式指派目标基线。'); await queryClient.invalidateQueries({ queryKey: ['machines'] }); await queryClient.invalidateQueries({ queryKey: ['machine-target', selectedMachineId] }); await queryClient.invalidateQueries({ queryKey: ['machine-drift', selectedMachineId] }) } })
   const commitImportMutation = useMutation({ mutationFn: () => commitImport(importBatchId), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ['import-preview', importBatchId] }); await queryClient.invalidateQueries({ queryKey: ['project', selectedProjectId] }) } })
   const signIn = useMutation({ mutationFn: login, onSuccess: async () => { setPassword(''); setProjectDialog(null); setActivePage('projects'); await queryClient.invalidateQueries({ queryKey: ['current-user'] }) } })
   const signOut = useMutation({ mutationFn: logout, onSuccess: () => { queryClient.clear(); localStorage.removeItem('confighub.selected-project-id'); setSelectedProjectId(null); setProjectDialog(null); setActivePage('overview') } })
@@ -229,8 +206,6 @@ function App() {
   const decideReview = useMutation({ mutationFn: (decision: 'approve' | 'reject') => decideBaselineReview(selectedBaselineId, decision, reviewReason), onSuccess: async () => { setReviewReason(''); await queryClient.invalidateQueries({ queryKey: ['baseline-detail', selectedBaselineId] }); await queryClient.invalidateQueries({ queryKey: ['baselines', baselineProjectId] }) } })
   const setRequirement = useMutation({ mutationFn: () => setBaselineItemRequirement(selectedBaselineId, baselineRequirementItemId, { requirement: baselineRequirement, reason: baselineRequirementReason }), onSuccess: async () => { setBaselineRequirementReason(''); await queryClient.invalidateQueries({ queryKey: ['baseline-detail', selectedBaselineId] }) } })
   const assignStandard = useMutation({ mutationFn: ({ projectId, baselineId, reason }: { projectId: string; baselineId: string; reason: string }) => assignProjectStandard(projectId, baselineId, reason), onSuccess: async () => { setStandardReason(''); await queryClient.invalidateQueries({ queryKey: ['project-standard', baselineProjectId] }) } })
-  const addMachine = useMutation({ mutationFn: createMachine, onSuccess: async () => { setMachineSerial(''); setMachineName(''); setMachineType(''); setMachineReason(''); await queryClient.invalidateQueries({ queryKey: ['machines'] }) } })
-  const recordFacts = useMutation({ mutationFn: ({ machineId, componentId, versionId, operationType, coverage, reason }: { machineId: string; componentId: string; versionId: string; operationType?: string; coverage: string; reason: string }) => recordMachineFacts(machineId, { operationType: operationType ?? 'Observation', coverage, sourceType: 'manual-ui', reason, items: [{ componentId, versionId, absent: false, knownInstalledAt: null }] }), onSuccess: async () => { setFactReason(''); setSuccessMessage('实际配置观察已记录。'); await queryClient.invalidateQueries({ queryKey: ['machine-configuration', selectedMachineId] }); await queryClient.invalidateQueries({ queryKey: ['machine-facts', selectedMachineId] }); await queryClient.invalidateQueries({ queryKey: ['machine-drift', selectedMachineId] }) } })
 
   const connectivity = system.isSuccess ? 'online' : system.isError ? 'offline' : 'checking'
   const visibleNavigation = navigation.filter((item) => !item.adminOnly || isAdmin)
@@ -243,17 +218,22 @@ function App() {
     setSelectedProjectId(projects.data.some(project => project.id === savedProjectId) ? savedProjectId : projects.data[0].id)
   }, [projects.data, selectedProjectId])
 
+  useEffect(() => {
+    localStorage.setItem('confighub.rail-collapsed', String(railCollapsed))
+  }, [railCollapsed])
+
   return (
-    <div className="app-shell">
+    <div className={railCollapsed ? 'app-shell rail-collapsed' : 'app-shell'}>
       <aside className="rail">
         <div className="brand-block">
           <span className="brand-mark">CH</span>
-          <div><strong>ConfigHub</strong><small>工程配置管理</small></div>
+          <div className="brand-copy"><strong>ConfigHub</strong><small>工程配置管理</small></div>
+          <button className="rail-toggle" type="button" aria-label={railCollapsed ? '展开导航' : '收起导航'} title={railCollapsed ? '展开导航' : '收起导航'} onClick={() => setRailCollapsed(current => !current)}>{railCollapsed ? '>' : '<'}</button>
         </div>
         <nav aria-label="主导航">
           {visibleNavigation.map((item, index) => (
             <button className={item.id === activePage ? 'nav-item active' : 'nav-item'} key={item.id} type="button" onClick={() => setActivePage(!isAuthenticated && item.id !== 'projects' ? 'projects' : item.id)}>
-              <span>{String(index + 1).padStart(2, '0')}</span>{item.label}{!item.available && <em>待实现</em>}
+              <span className="nav-index">{String(index + 1).padStart(2, '0')}</span><span className="nav-label">{item.label}</span>{!item.available && <em>待实现</em>}
             </button>
           ))}
         </nav>
@@ -427,32 +407,11 @@ function App() {
 
             {activePage === 'users' && <section className="status-panel catalog-panel"><div className="panel-heading"><div><span className="section-index">身份管理</span><h3>用户与角色</h3></div><span className="count">{users.data?.length ?? 0}</span></div>{currentUser.data?.roles.includes('Admin') ? <><form className="catalog-form" onSubmit={(event) => { event.preventDefault(); addUser.mutate({ userName: newUserEmail, displayName: newUserName, password: newUserPassword, role: newUserRole, reason: newUserReason }) }}><label>用户名<input value={newUserEmail} onChange={(event) => setNewUserEmail(event.target.value)} required /></label><label>显示名<input value={newUserName} onChange={(event) => setNewUserName(event.target.value)} required /></label><label>初始密码<input type="password" minLength={6} value={newUserPassword} onChange={(event) => setNewUserPassword(event.target.value)} required /></label><label>角色<select value={newUserRole} onChange={(event) => setNewUserRole(event.target.value)}><option>Viewer</option><option>Engineer</option><option>SeniorEngineer</option><option>Admin</option></select></label><label className="wide-field">创建原因<input value={newUserReason} onChange={(event) => setNewUserReason(event.target.value)} required /></label><button type="submit" disabled={addUser.isPending}>{addUser.isPending ? '正在创建' : '创建用户'}</button></form><form className="catalog-form" onSubmit={(event) => { event.preventDefault(); updateUserRole.mutate() }}><label>用户<select value={roleUserId} onChange={(event) => setRoleUserId(event.target.value)} required><option value="">请选择用户</option>{users.data?.map(user => <option key={user.id} value={user.id}>{user.displayName} · {user.userName ?? user.email ?? ''}</option>)}</select></label><label>新角色<select value={roleValue} onChange={(event) => setRoleValue(event.target.value)}><option>Viewer</option><option>Engineer</option><option>SeniorEngineer</option><option>Admin</option></select></label><label>变更原因<input value={roleReason} onChange={(event) => setRoleReason(event.target.value)} required /></label><button type="submit" disabled={updateUserRole.isPending}>{updateUserRole.isPending ? '正在变更' : '变更角色'}</button></form>{(addUser.isError || updateUserRole.isError) && <p className="error-strip">{addUser.error?.message ?? updateUserRole.error?.message}</p>}<div className="catalog-list">{users.data?.map(user => <article className="component-row" key={user.id}><div><strong>{user.displayName}</strong><span>{user.userName ?? user.email ?? ''}</span></div><small>{user.roles.join('、') || '未分配角色'}</small></article>)}</div></> : <p className="empty-state">仅管理员可查看用户与角色。</p>}{users.isError && <p className="error-strip">{users.error.message}</p>}</section>}
 
-            {activePage === 'machines' && <>
-              {selectedMachine && <section className="status-panel catalog-panel"><div className="panel-heading"><div><span className="section-index">目标基线</span><h3>{selectedMachine.serialNumber} 的当前目标</h3></div></div><p className="empty-state">{machineTarget.data ? `${machineTarget.data.baselineCode} · 自 ${formatTime(machineTarget.data.validFrom)} 起生效` : '尚未显式指派目标基线。'}</p>{machineTargetHistory.data?.length ? <div className="component-list">{machineTargetHistory.data.map((assignment) => <article className="component-row" key={assignment.id}><div><strong>{assignment.baselineCode}</strong><span>{assignment.reason}</span></div><small>{formatTime(assignment.validFrom)}<br />{assignment.validTo ? `结束 ${formatTime(assignment.validTo)}` : '当前目标'}</small></article>)}</div> : null}</section>}
-              <section className="status-panel catalog-panel"><div className="panel-heading"><div><span className="section-index">机台登记</span><h3>创建机台</h3></div></div><form className="catalog-form" onSubmit={(event) => { event.preventDefault(); addMachine.mutate({ projectId: machineProjectId, serialNumber: machineSerial, name: machineName, machineType, reason: machineReason }) }}><label>所属项目<select value={machineProjectId} onChange={(event) => setMachineProjectId(event.target.value)} required><option value="">请选择项目</option>{projects.data?.map((project) => <option key={project.id} value={project.id}>{project.code} · {project.name}</option>)}</select></label><label>序列号<input value={machineSerial} onChange={(event) => setMachineSerial(event.target.value)} required /></label><label>机台名称<input value={machineName} onChange={(event) => setMachineName(event.target.value)} required /></label><label>机型<input value={machineType} onChange={(event) => setMachineType(event.target.value)} /></label><label className="wide-field">创建原因<input value={machineReason} onChange={(event) => setMachineReason(event.target.value)} required /></label><button className="primary-action" type="submit" disabled={addMachine.isPending}>{addMachine.isPending ? '正在创建' : '创建机台'}</button></form>{addMachine.isError && <p className="error-strip">{addMachine.error.message}</p>}</section>
-              <section className="status-panel catalog-panel">
-                <div className="panel-heading"><div><span className="section-index">机台列表</span><h3>当前实际配置</h3></div><span className="count">{machines.data?.length ?? 0}</span></div>
-                <div className="catalog-list">{machines.data?.map((machine) => <button type="button" className={machine.id === selectedMachineId ? 'project-row selected' : 'project-row'} key={machine.id} onClick={() => { setSelectedMachineId(machine.id); setFactComponentId(''); setFactVersionId('') }}><span><strong>{machine.serialNumber}</strong><small>{machine.name}{machine.machineType ? ` · ${machine.machineType}` : ''} · 匹配 {matchText[machine.matchStatus ?? 'Unknown']} · 风险 {riskText[machine.riskSeverity ?? 'Unknown']}</small></span><em>{machine.status === 'Active' ? '在用' : '归档'}</em></button>)}</div>
-                {selectedMachineId && <>
-                  <dl className="runtime-list"><div><dt>配置匹配</dt><dd>{matchText[machineDrift.data?.matchStatus ?? 'Unknown']}</dd></div><div><dt>风险等级</dt><dd>{riskText[machineDrift.data?.riskSeverity ?? 'Unknown']}</dd></div></dl>
-                  <p className="empty-state">配置匹配只判断版本是否一致；风险等级独立反映已阻断版本，因此“匹配 + 严重风险”是可能且需要处理的组合。</p>
-                  <form className="catalog-form" onSubmit={(event) => { event.preventDefault(); assignTarget.mutate() }}><label>机台目标基线<select value={targetBaselineId} onChange={(event) => setTargetBaselineId(event.target.value)} required><option value="">请选择已发布基线</option>{targetBaselines.data?.filter(baseline => baseline.state === 'Released').map(baseline => <option key={baseline.id} value={baseline.id}>{baseline.code} · Revision {baseline.revisionNo}</option>)}</select></label><label>指派原因<input value={targetReason} onChange={(event) => setTargetReason(event.target.value)} required /></label><button type="submit" disabled={assignTarget.isPending}>{assignTarget.isPending ? '正在指派' : '设为该机台目标'}</button></form>
-                  <p className="empty-state">这是该机台的实际目标，不会随项目当前标准自动改变；项目标准仅用于推荐和默认选择。</p>
-                  {assignTarget.isError && <p className="error-strip">{assignTarget.error.message}</p>}
-                  <form className="catalog-form" onSubmit={(event) => { event.preventDefault(); recordFacts.mutate({ machineId: selectedMachineId, componentId: factComponentId, versionId: factVersionId, coverage: factCoverage, reason: factReason }) }}><label>组件<select value={factComponentId} onChange={(event) => { setFactComponentId(event.target.value); setFactVersionId('') }} required><option value="">请选择组件</option>{machineProjectDetail.data?.components.map(component => <option key={component.id} value={component.id}>{component.name}</option>)}</select></label><label>版本<select value={factVersionId} onChange={(event) => setFactVersionId(event.target.value)} disabled={!selectedFactComponent} required><option value="">{selectedFactComponent ? '请选择版本' : '请先选择组件'}</option>{selectedFactComponent?.versions.map(version => <option key={version.id} value={version.id}>{version.versionNumber} · 序列 {version.sequenceNo}</option>)}</select></label><label>覆盖范围<select value={factCoverage} onChange={(event) => setFactCoverage(event.target.value)}><option value="Partial">局部观察</option><option value="Full">完整观察</option></select></label><label>观察原因<input value={factReason} onChange={(event) => setFactReason(event.target.value)} required /></label><button type="submit" disabled={recordFacts.isPending || machineProjectDetail.isLoading}>{recordFacts.isPending ? '正在记录' : '记录实际配置'}</button></form>
-                  <p className="empty-state">观察只记录发现的实际状态，不代表软件安装或升级。局部观察只更新所选组件；完整观察会将未列出的可配置组件标记为缺失，结构分类节点不会参与实际配置。</p>
-                  {recordFacts.isError && <p className="error-strip">{recordFacts.error.message}</p>}
-                  <div className="component-list">{machineConfiguration.data?.map((item) => <article className="component-row" key={item.componentId}><div><strong>{item.state === 'Present' ? '存在' : '缺失'}</strong><span>{item.componentName}</span></div><div className="version-tags"><span>{item.versionNumber ?? '无版本'}<small>状态生效 {formatTime(item.stateEffectiveAt)}<br />已知安装 {formatTime(item.knownInstalledAt)}</small></span></div></article>)}</div>
-                </>}
-              </section>
-            </>}
+            {activePage === 'machines' && <MachineWorkspace projects={projects.data ?? []} selectedMachineId={selectedMachineId} onSelectMachine={setSelectedMachineId} onSuccess={setSuccessMessage} />}
           </div>
         ) : (
           <section className="pending-page"><span className="section-index">后续垂直切片</span><h2>{selectedNavigation.label}尚未实现</h2><p>当前版本只完成了运行基础设施和后台任务链路。{selectedNavigation.label}将在核心领域模型与对应 API 落地后开放，现阶段不会提供无法保存或追溯的占位操作。</p><button className="primary-action" type="button" onClick={() => setActivePage('overview')}>返回运行总览</button></section>
         )}
-        {activePage === 'machines' && selectedMachine && <RollbackFactPanel machineId={selectedMachine.id} components={machineProjectDetail.data?.components ?? []} />}
-        {activePage === 'machines' && selectedMachine && <HistoricalConfigurationPanel machine={selectedMachine} />}
-        {activePage === 'machines' && projects.data && <BulkTargetPanel projects={projects.data} />}
         {activePage === 'deployments' && projects.data && <BulkFactPanel projects={projects.data} />}
       </main>
     </div>

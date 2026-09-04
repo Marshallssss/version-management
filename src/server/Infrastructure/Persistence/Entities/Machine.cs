@@ -8,6 +8,7 @@ public sealed class Machine
     public required string NormalizedSerialNumber { get; set; }
     public required string Name { get; set; }
     public string? MachineType { get; set; }
+    public string? Location { get; set; }
     public MachineStatus Status { get; set; } = MachineStatus.Active;
     public DateTimeOffset CreatedAt { get; set; }
 }

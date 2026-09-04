@@ -108,10 +108,21 @@ try { Invoke-RestMethod -WebSession $viewerSession -Method Post -Uri ([uri]::new
 try { Invoke-RestMethod -WebSession $viewerSession -Method Post -Uri ([uri]::new($BaseUri, '/api/v1/imports')) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() } -ContentType 'application/json' -Body (@{ projectId = $unscopedProject.id; sourceFileName = 'denied.csv'; reason = '自动化导入范围拒绝'; rows = @(@{ componentName = 'Private'; versionNumber = 'denied' }) } | ConvertTo-Json -Depth 5) | Out-Null; throw 'Unscoped SeniorEngineer import staging unexpectedly succeeded.' } catch { if ($_.Exception.Message -match 'unexpectedly succeeded') { throw }; if ($_.Exception.Response.StatusCode.value__ -ne 403) { throw } }
 
 $machineHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() }
-$machineBody = @{ projectId = $project.id; serialNumber = "SN-$suffix"; name = 'Automation machine'; machineType = 'Test'; reason = '自动化机台登记' } | ConvertTo-Json
+$machineBody = @{ projectId = $project.id; serialNumber = "SN-$suffix"; name = 'Automation machine'; machineType = 'Test'; location = 'Automation lab A-01'; reason = '自动化机台登记' } | ConvertTo-Json
 $machine = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, '/api/v1/machines')) -Headers $machineHeaders -ContentType 'application/json' -Body $machineBody
 $machineReplay = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, '/api/v1/machines')) -Headers $machineHeaders -ContentType 'application/json' -Body $machineBody
 if ($machine.id -ne $machineReplay.id) { throw 'Expected idempotent machine creation.' }
+$createdMachine = $null
+foreach ($candidate in (Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, '/api/v1/machines')))) { if ($candidate.id -eq $machine.id) { $createdMachine = $candidate; break } }
+if ($createdMachine.location -ne 'Automation lab A-01') { throw 'Machine location must be returned after creation.' }
+$machineUpdateHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() }
+$machineUpdateBody = @{ serialNumber = "SN-$suffix"; name = 'Automation machine updated'; machineType = 'Verification'; location = 'Automation lab B-02'; status = 'Active'; reason = '自动化机台资料维护' } | ConvertTo-Json
+$machineUpdate = Invoke-RestMethod -WebSession $session -Method Put -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($machine.id)")) -Headers $machineUpdateHeaders -ContentType 'application/json' -Body $machineUpdateBody
+$machineUpdateReplay = Invoke-RestMethod -WebSession $session -Method Put -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($machine.id)")) -Headers $machineUpdateHeaders -ContentType 'application/json' -Body $machineUpdateBody
+if ($machineUpdate.id -ne $machine.id -or $machineUpdateReplay.id -ne $machine.id) { throw 'Machine update must return the edited machine and support idempotent replay.' }
+$updatedMachine = $null
+foreach ($candidate in (Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, '/api/v1/machines')))) { if ($candidate.id -eq $machine.id) { $updatedMachine = $candidate; break } }
+if ($updatedMachine.name -ne 'Automation machine updated' -or $updatedMachine.machineType -ne 'Verification' -or $updatedMachine.location -ne 'Automation lab B-02') { throw 'Machine metadata update was not persisted.' }
 try { Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, '/api/v1/machines')) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() } -ContentType 'application/json' -Body (@{ projectId = $project.id; serialNumber = "sn-$suffix"; name = 'Duplicate'; machineType = 'Test'; reason = '自动化重复校验' } | ConvertTo-Json) | Out-Null; throw 'Duplicate machine serial unexpectedly succeeded.' } catch { if ($_.Exception.Message -match 'unexpectedly succeeded') { throw }; if ($_.Exception.Response.StatusCode.value__ -ne 409) { throw } }
 
 function Invoke-JsonPost([string]$Path, [hashtable]$Body) {

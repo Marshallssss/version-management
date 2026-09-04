@@ -43,6 +43,7 @@ public static class CatalogEndpoints
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/maintenance", MaintainBaselineDraftAsync).RequireAuthorization("SuperAdmin");
         endpoints.MapGet("/api/v1/machines", ListMachinesAsync).RequireAuthorization();
         endpoints.MapPost("/api/v1/machines", CreateMachineAsync).RequireAuthorization("Engineer");
+        endpoints.MapPut("/api/v1/machines/{machineId:guid}", UpdateMachineAsync).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/machines/{machineId:guid}/target", AssignMachineTargetAsync).RequireAuthorization("SeniorEngineer");
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/target", GetMachineTargetAsync).RequireAuthorization();
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/target-history", GetMachineTargetHistoryAsync).RequireAuthorization();
@@ -148,7 +149,7 @@ public static class CatalogEndpoints
     private static async Task<IResult> ListMachinesAsync(IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
     {
         await using var database = await factory.CreateDbContextAsync(cancellationToken);
-        return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => item.SerialNumber).Select(item => new { id = item.Id, projectId = item.ProjectId, serialNumber = item.SerialNumber, name = item.Name, machineType = item.MachineType, status = item.Status.ToString(), matchStatus = database.MachineDriftSummaries.Where(summary => summary.MachineId == item.Id).Select(summary => (string?)summary.MatchStatus.ToString()).SingleOrDefault(), riskSeverity = database.MachineDriftSummaries.Where(summary => summary.MachineId == item.Id).Select(summary => (string?)summary.RiskSeverity.ToString()).SingleOrDefault() }).ToListAsync(cancellationToken));
+        return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => item.SerialNumber).Select(item => new { id = item.Id, projectId = item.ProjectId, serialNumber = item.SerialNumber, name = item.Name, machineType = item.MachineType, location = item.Location, status = item.Status.ToString(), matchStatus = database.MachineDriftSummaries.Where(summary => summary.MachineId == item.Id).Select(summary => (string?)summary.MatchStatus.ToString()).SingleOrDefault(), riskSeverity = database.MachineDriftSummaries.Where(summary => summary.MachineId == item.Id).Select(summary => (string?)summary.RiskSeverity.ToString()).SingleOrDefault() }).ToListAsync(cancellationToken));
     }
 
     private static async Task<IResult> CreateMachineAsync(CreateMachineRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
@@ -163,9 +164,36 @@ public static class CatalogEndpoints
         if (!await HasProjectWriteAccessAsync(database, context, request.ProjectId, cancellationToken)) return Results.Forbid();
         var normalized = Normalize(request.SerialNumber!);
         if (await database.Machines.AnyAsync(item => item.NormalizedSerialNumber == normalized, cancellationToken)) return Results.Conflict(new { message = "机台序列号已存在。" });
-        var now = DateTimeOffset.UtcNow; await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken); database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }); var machine = new Machine { Id = Guid.NewGuid(), ProjectId = request.ProjectId, SerialNumber = request.SerialNumber!.Trim(), NormalizedSerialNumber = normalized, Name = request.Name!.Trim(), MachineType = NormalizeOptional(request.MachineType, 120), CreatedAt = now };
-        database.Machines.Add(machine); AddAuditEvent(database, context, "MachineCreated", "Machine", machine.Id, new { machine.ProjectId, machine.SerialNumber, reason = request.Reason!.Trim() }); await database.SaveChangesAsync(cancellationToken); var record = await database.IdempotencyRecords.SingleAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken); record.Status = IdempotencyRecordStatus.Completed; record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = machine.Id })); await database.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
+        var now = DateTimeOffset.UtcNow; await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken); database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }); var machine = new Machine { Id = Guid.NewGuid(), ProjectId = request.ProjectId, SerialNumber = request.SerialNumber!.Trim(), NormalizedSerialNumber = normalized, Name = request.Name!.Trim(), MachineType = NormalizeOptional(request.MachineType, 120), Location = NormalizeOptional(request.Location, 200), CreatedAt = now };
+        database.Machines.Add(machine); AddAuditEvent(database, context, "MachineCreated", "Machine", machine.Id, new { machine.ProjectId, machine.SerialNumber, machine.Location, reason = request.Reason!.Trim() }); await database.SaveChangesAsync(cancellationToken); var record = await database.IdempotencyRecords.SingleAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken); record.Status = IdempotencyRecordStatus.Completed; record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = machine.Id })); await database.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
         return TypedResults.Created($"/api/v1/machines/{machine.Id}", new { id = machine.Id });
+    }
+
+    private static async Task<IResult> UpdateMachineAsync(Guid machineId, UpdateMachineRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        var validation = ValidateRequired(request.SerialNumber, "序列号", 160) ?? ValidateRequired(request.Name, "机台名称", 200) ?? ValidateRequired(request.Reason, "修改原因", 500);
+        if (validation is not null) return Results.ValidationProblem(validation);
+        if (!Enum.TryParse<MachineStatus>(request.Status, true, out var status)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["status"] = ["机台状态必须为 Active 或 Archived。"] });
+        var key = context.Request.Headers["Idempotency-Key"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["修改机台必须提供不超过 200 个字符的 Idempotency-Key。"] });
+        await using var database = await factory.CreateDbContextAsync(cancellationToken);
+        var scope = $"machines.update:{machineId}"; var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request)))); var existing = await database.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
+        if (existing is not null) { if (existing.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (existing.Result is not null) return TypedResults.Ok(existing.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
+        var machine = await database.Machines.SingleOrDefaultAsync(item => item.Id == machineId, cancellationToken);
+        if (machine is null) return Results.NotFound();
+        if (!await HasProjectWriteAccessAsync(database, context, machine.ProjectId, cancellationToken)) return Results.Forbid();
+        var normalized = Normalize(request.SerialNumber!);
+        if (await database.Machines.AnyAsync(item => item.Id != machineId && item.NormalizedSerialNumber == normalized, cancellationToken)) return Results.Conflict(new { message = "机台序列号已存在。" });
+        var before = new { machine.SerialNumber, machine.Name, machine.MachineType, machine.Location, status = machine.Status.ToString() };
+        var now = DateTimeOffset.UtcNow;
+        await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
+        database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) });
+        machine.SerialNumber = request.SerialNumber!.Trim(); machine.NormalizedSerialNumber = normalized; machine.Name = request.Name!.Trim(); machine.MachineType = NormalizeOptional(request.MachineType, 120); machine.Location = NormalizeOptional(request.Location, 200); machine.Status = status;
+        AddAuditEvent(database, context, "MachineUpdated", "Machine", machine.Id, new { before, after = new { machine.SerialNumber, machine.Name, machine.MachineType, machine.Location, status = machine.Status.ToString() }, reason = request.Reason!.Trim() });
+        await database.SaveChangesAsync(cancellationToken);
+        var record = await database.IdempotencyRecords.SingleAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken); record.Status = IdempotencyRecordStatus.Completed; record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = machine.Id }));
+        await database.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
+        return TypedResults.Ok(new { id = machine.Id });
     }
 
     private static async Task<IResult> AssignMachineTargetAsync(Guid machineId, AssignMachineTargetRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
@@ -1864,7 +1892,8 @@ public sealed record BaselineReviewRequest(string? Reason);
 public sealed record BaselineCreationUndoRequest(string? Reason);
 public sealed record AssignProjectStandardRequest(Guid ConfigurationBaselineId, string? Reason);
 public sealed record AssignProjectMemberRequest(Guid UserId, string? Role, string? Reason);
-public sealed record CreateMachineRequest(Guid ProjectId, string? SerialNumber, string? Name, string? MachineType, string? Reason);
+public sealed record CreateMachineRequest(Guid ProjectId, string? SerialNumber, string? Name, string? MachineType, string? Location, string? Reason);
+public sealed record UpdateMachineRequest(string? SerialNumber, string? Name, string? MachineType, string? Location, string? Status, string? Reason);
 public sealed record AssignMachineTargetRequest(Guid ConfigurationBaselineId, string? Reason);
 public sealed record AssignBulkMachineTargetsRequest(Guid ConfigurationBaselineId, List<Guid>? MachineIds, string? Reason);
 public sealed record RecordFactsRequest(string? OperationType, string? Coverage, string? SourceType, string? ExternalEventId, DateTimeOffset? EffectiveAt, string? Reason, List<RecordFactItem>? Items, Guid? CorrectsDeploymentBatchId = null);
