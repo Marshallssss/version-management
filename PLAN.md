@@ -1918,6 +1918,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 3I 组件身份与实验室版本视图已交付：组件面向用户只使用单一“组件名称”，稳定节点键仅留在内部以保护既有 lineage 和历史；无已登记版本的节点是结构分类节点，可完整冻结在 Baseline Tree，但不能写入机台实际、必需性、漂移、风险或版本安全判断。项目工作台先展示“实验室测试版本”、再展示“当前基线版本”：实验室区完整保留根组件作结构总览，子组件仅在自身或后代存在 `Testing` 版本时显示；发布后测试版本自动离开实验室视图，并成为创建新 Baseline 时可冻结的候选。登记成熟度恢复为 Draft、Testing、Released、Maintenance、Deprecated 五项；服务端为非 Draft 初始登记写入从 Draft 起的合法生命周期轨迹，仍要求 SeniorEngineer、Audit、reason 和 Idempotency，且绝不把 Maturity 与 Safety/Recommendation 混为一个状态。版本发布不会隐式改写 Project Standard、Machine Target 或实际配置。导入改按组件名称匹配，发现同名即拒绝预览，避免误写版本。2026-09-02 已实际应用 `AllowStructuralBaselineItems` Migration，Host/SPA Release build 均为 0 warning/0 error，`catalog-acceptance.ps1`、Web compatibility 与 Windows operations preflight 均通过。
 - 3I 版本工作台可用性切片已交付：项目页采用“左侧完整版本总览 + 右侧固定版本管理面板”，登记、状态、补丁和影响按页签切换，避免管理版本时在长页面往返滚动；窄屏回退为自然上下布局。当前基线根节点若为结构分类节点，数字显示所有后代组件数（不含自身）；有版本意义的根节点仍显示已登记版本数。实验室树改为自动换行分组网格，不再将额外根分组藏在横向滚动区；每个节点以明确“测试中”标签显示其分支内测试版本总数，仍只展示有测试活动的子分支。
 - 3J 项目工作台收敛切片已交付：登录、账户、项目选择、新建/克隆项目均收至顶部轻量入口和弹出层；项目选择以浏览器本地首选项保持，只有手动切换或退出登录才改变。项目页主体只承载当前项目，组件卡缩减为名称、项目当前标准中的版本与计数，不再显示无效的“设为根组件”投放区或新增根组件占位卡。版本和补丁管理均按“已有记录在上，新增记录在下”排列，避免先滚过表单才能看到已登记信息。
+- 3K 实验室到基线切片已交付：版本列表为有补丁记录的版本显示修复标记，点击直接展开补丁内容。实验室测试区可多选各组件的 `Testing` 版本并生成整体基线：同一事务将所选版本转换为 `Released`、记录 Lifecycle/Audit、保留当前 Project Standard 的其余组件版本（无标准时回退到最新 Released），并创建新的 Draft Baseline；发布后的版本自动退出实验室树。基线历史改为按冻结 Parent Item 层级只读显示，不再提供常规内容编辑。
 - 3I 版本补丁记录切片已交付：`VersionPatch` 是附着于既有 `ComponentVersion` 的独立记录，版本号保持 opaque 且不因热修复、工作绕行或小型补丁而变化；同一版本可登记多条补丁，补丁编号在该版本内唯一，包含标题、问题说明、修复说明、状态、登记人和登记时间。登记命令具备 Project RBAC、事务、Idempotency、correlation id 与 Audit；版本详情显示补丁时间线，全局搜索覆盖补丁编号、标题、问题与修复文本，并可直接打开所属项目及版本。真实 Migration 已应用，`catalog-acceptance.ps1` 覆盖登记、重放、审计和搜索。
 - 3I 语义边界已固定：补丁“已发布”不等于任何机台“已安装”。机台补丁实际、基线补丁要求和含补丁的 Drift/Compare 将作为独立的后续 Vertical Slice，在有可审计的补丁安装事实前不得从版本补丁登记自动推断 Current Actual 或 Match。
 - 已交付：组件树移动、版本详情/影响查询，以及基于资源范围的 Project RBAC；完整授权矩阵继续在 Step 10 加固。
@@ -1933,6 +1934,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 4A 复核补强已交付：Baseline Item 追加 `version_number_snapshot`；真实 EF Migration 将历史 Items 从其版本身份回填版本号，后续草稿创建直接保存文本快照，详情 UI/API 与自动化验收均读取该字段。
 - 4A 复核补强已交付：草稿 Baseline Item 的 Required/Optional 通过受 Project SeniorEngineer 授权的命令修改，命令要求原因、`Idempotency-Key` 并写 Audit；发布后仍由 Application 与 PostgreSQL 不可变 Trigger 双重拒绝，详情中文界面显示并仅在草稿阶段提供编辑。
 - 4D 基线历史与明确选版切片已交付：基线入口整合进项目工作台，形成“组件测试 → 发布组件版本 → 明确选择每个已发布组件版本 → 草稿/评审/发布 → 可选设为项目标准”的可读流程。新草稿可明确选择各组件任一已发布版本，而非只能冻结最新版本；服务端验证每个有已发布版本的组件恰选一次、版本归属当前项目与组件，并将选择方式写入 Audit。基线时间轴展示独立 Revision、冻结快照、评审/发布状态和当前 Project Standard；Project Standard 仍只是推荐，绝不自动改变任何 Machine Target。`catalog-acceptance.ps1` 已补充明确选用旧已发布版本的草稿与 Idempotency 验收。
+- 4E 测试维护模式已交付：只有 Admin 可以在明确展开“维护模式”后，为 Draft Baseline 构造 2000–2100 年间的录入时间；该命令必须带 reason、Idempotency-Key、maintenanceMode 标志与 Audit，已发布 Baseline 在 API/Application 层仍返回冲突，不能被维护模式修改。项目“删除”采用可审计归档，日常项目列表只显示 Active 项目，历史数据不物理删除。
 
 ## Step 5 — Machine → Target
 

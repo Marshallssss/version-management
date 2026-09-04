@@ -477,9 +477,9 @@ h1 {
 }
 
 .topbar-controls { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.topbar-control { max-width: 260px; padding: 8px 10px; border: 1px solid #9bb8b1; color: #294a47; background: #fff; font: inherit; font-size: 12px; cursor: pointer; }
+.topbar-control { padding: 8px 10px; border: 1px solid #9bb8b1; color: #294a47; background: #fff; font: inherit; font-size: 12px; cursor: pointer; }
 .topbar-control:hover { border-color: #bd563f; color: #8e3d2e; }
-.project-switch { display: grid; gap: 2px; text-align: left; }
+.project-switch { display: grid; min-width: 220px; gap: 2px; text-align: left; }
 .project-switch span { color: #657d78; font-size: 10px; }
 .project-switch strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-modal-backdrop { position: fixed; z-index: 20; inset: 0; display: grid; place-items: start center; padding: min(12vh, 110px) 20px 20px; background: rgb(32 50 48 / 45%); }
@@ -982,6 +982,18 @@ select option { color: #213231; background: #fff; }
 .laboratory-tree .tree-toolbar strong { color: #8a4a18; }
 .laboratory-tree .tree-toolbar small { max-width: 780px; color: #796044; line-height: 1.55; }
 .lab-root-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); align-items: start; gap: 16px; }
+.lab-baseline-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 16px; padding: 12px; border: 1px solid #e3c8a7; background: #fffaf3; }
+.lab-baseline-form label { display: grid; gap: 6px; color: #66441e; font-size: 11px; }
+.lab-baseline-form input { min-height: 36px; padding: 7px 9px; border: 1px solid #d6bd9d; background: #fff; font: inherit; }
+.lab-baseline-options { display: grid; grid-column: span 2; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 7px; }
+.lab-baseline-options label { display: flex; align-items: center; gap: 7px; padding: 7px; border: 1px solid #ead7bd; background: #fff; }
+.lab-baseline-options input { min-height: auto; }
+.lab-version-overrides { grid-column: span 2; border: 1px solid #ead7bd; background: #fff; }
+.lab-version-overrides summary { padding: 9px 10px; color: #66441e; cursor: pointer; font-size: 12px; }
+.lab-version-overrides > p { margin: 0; padding: 0 10px 8px; color: #806346; font-size: 11px; }
+.lab-version-overrides > div { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px; padding: 0 10px 10px; }
+.lab-version-overrides label { display: grid; gap: 5px; }
+.lab-version-overrides select { min-height: 34px; padding: 6px 8px; border: 1px solid #d6bd9d; background: #fff; color: #443222; font: inherit; }
 .lab-root-column { min-width: 0; padding-top: 10px; border-top: 3px solid #d19a55; }
 .lab-branch-node { min-width: 0; }
 .lab-branch-node + .lab-branch-node { margin-top: 8px; }
@@ -1072,6 +1084,14 @@ select option { color: #213231; background: #fff; }
 .standard-mark { padding: 5px 7px; color: #26665c; background: #dff1ec; font-size: 11px; white-space: nowrap; }
 .snapshot-description { padding: 10px; border-left: 3px solid #9bb8b1; background: #f8fbfa; }
 .snapshot-items { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); border: 1px solid #d6e2df; }
+.snapshot-tree { display: grid; gap: 4px; padding: 10px; border: 1px solid #d6e2df; background: #fbfdfc; }
+.snapshot-tree-item { position: relative; display: flex; min-width: 0; gap: 8px; padding: 7px 9px; border-left: 2px solid #9bb8b1; background: #fff; }
+.snapshot-tree-item .tree-connector { width: 7px; height: 7px; margin-top: 5px; flex: 0 0 auto; background: #5d8d80; }
+.snapshot-tree-item div { display: grid; min-width: 0; gap: 2px; }
+.snapshot-tree-item strong, .snapshot-tree-item small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.snapshot-tree-item strong { color: #294a47; font-size: 12px; }
+.snapshot-tree-item small { color: #657d78; font-size: 10px; }
+.patch-badge { display: inline-block; margin-left: 7px; padding: 2px 5px; color: #8a4a18; background: #fff0da; font-family: inherit; font-size: 10px; font-style: normal; font-weight: 400; }
 .snapshot-item { display: flex; justify-content: space-between; gap: 8px; min-width: 0; padding: 10px; border-right: 1px solid #d6e2df; border-bottom: 1px solid #d6e2df; }
 .snapshot-item div { display: grid; min-width: 0; gap: 3px; }
 .snapshot-item strong, .snapshot-item small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1118,4 +1138,7 @@ select option { color: #213231; background: #fff; }
   .baseline-history-heading, .snapshot-heading { flex-direction: column; }
   .compact-form, .baseline-compose-form { grid-template-columns: 1fr; }
   .baseline-selection-list { grid-template-columns: 1fr; }
+  .lab-baseline-form { grid-template-columns: 1fr; }
+  .lab-baseline-options { grid-column: auto; grid-template-columns: 1fr; }
+  .lab-version-overrides { grid-column: auto; }
 }
