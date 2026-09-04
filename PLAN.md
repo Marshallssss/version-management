@@ -1917,6 +1917,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 3H 软件版本情况视图补强已交付：项目工作台顶部模块更名为“软件版本情况”，从 Project Current Standard 的 Baseline Item 冻结快照读取每个组件的标准基线版本，并直接显示在根组件和子组件卡片中；未设置项目标准或该标准未包含组件时明确标识，绝不以最新登记版本冒充基线版本。前端 Release build、Web 兼容检查和 Host Release build 已通过。
 - 3I 组件身份与实验室版本视图已交付：组件面向用户只使用单一“组件名称”，稳定节点键仅留在内部以保护既有 lineage 和历史；无已登记版本的节点是结构分类节点，可完整冻结在 Baseline Tree，但不能写入机台实际、必需性、漂移、风险或版本安全判断。项目工作台先展示“实验室测试版本”、再展示“当前基线版本”：实验室区完整保留根组件作结构总览，子组件仅在自身或后代存在 `Testing` 版本时显示；发布后测试版本自动离开实验室视图，并成为创建新 Baseline 时可冻结的候选。登记成熟度恢复为 Draft、Testing、Released、Maintenance、Deprecated 五项；服务端为非 Draft 初始登记写入从 Draft 起的合法生命周期轨迹，仍要求 SeniorEngineer、Audit、reason 和 Idempotency，且绝不把 Maturity 与 Safety/Recommendation 混为一个状态。版本发布不会隐式改写 Project Standard、Machine Target 或实际配置。导入改按组件名称匹配，发现同名即拒绝预览，避免误写版本。2026-09-02 已实际应用 `AllowStructuralBaselineItems` Migration，Host/SPA Release build 均为 0 warning/0 error，`catalog-acceptance.ps1`、Web compatibility 与 Windows operations preflight 均通过。
 - 3I 版本工作台可用性切片已交付：项目页采用“左侧完整版本总览 + 右侧固定版本管理面板”，登记、状态、补丁和影响按页签切换，避免管理版本时在长页面往返滚动；窄屏回退为自然上下布局。当前基线根节点若为结构分类节点，数字显示所有后代组件数（不含自身）；有版本意义的根节点仍显示已登记版本数。实验室树改为自动换行分组网格，不再将额外根分组藏在横向滚动区；每个节点以明确“测试中”标签显示其分支内测试版本总数，仍只展示有测试活动的子分支。
+- 3J 项目工作台收敛切片已交付：登录、账户、项目选择、新建/克隆项目均收至顶部轻量入口和弹出层；项目选择以浏览器本地首选项保持，只有手动切换或退出登录才改变。项目页主体只承载当前项目，组件卡缩减为名称、项目当前标准中的版本与计数，不再显示无效的“设为根组件”投放区或新增根组件占位卡。版本和补丁管理均按“已有记录在上，新增记录在下”排列，避免先滚过表单才能看到已登记信息。
 - 3I 版本补丁记录切片已交付：`VersionPatch` 是附着于既有 `ComponentVersion` 的独立记录，版本号保持 opaque 且不因热修复、工作绕行或小型补丁而变化；同一版本可登记多条补丁，补丁编号在该版本内唯一，包含标题、问题说明、修复说明、状态、登记人和登记时间。登记命令具备 Project RBAC、事务、Idempotency、correlation id 与 Audit；版本详情显示补丁时间线，全局搜索覆盖补丁编号、标题、问题与修复文本，并可直接打开所属项目及版本。真实 Migration 已应用，`catalog-acceptance.ps1` 覆盖登记、重放、审计和搜索。
 - 3I 语义边界已固定：补丁“已发布”不等于任何机台“已安装”。机台补丁实际、基线补丁要求和含补丁的 Drift/Compare 将作为独立的后续 Vertical Slice，在有可审计的补丁安装事实前不得从版本补丁登记自动推断 Current Actual 或 Match。
 - 已交付：组件树移动、版本详情/影响查询，以及基于资源范围的 Project RBAC；完整授权矩阵继续在 Step 10 加固。
@@ -1931,6 +1932,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 4A/3I 语义补强已交付：新 Baseline 只冻结 `Released` 版本；未发布版本对应组件仍以无版本结构节点进入快照，Released Baseline 至少须包含一个已发布软件版本。FULL Observation 只将存在软件版本的可配置组件投影为 Absent，绝不把结构分类节点误记为机台缺失。`catalog-acceptance.ps1` 覆盖 Testing 版本在发布前可见、结构节点的可空快照、结构节点不能设 Required/Optional，以及 FULL Observation 忽略结构节点。
 - 4A 复核补强已交付：Baseline Item 追加 `version_number_snapshot`；真实 EF Migration 将历史 Items 从其版本身份回填版本号，后续草稿创建直接保存文本快照，详情 UI/API 与自动化验收均读取该字段。
 - 4A 复核补强已交付：草稿 Baseline Item 的 Required/Optional 通过受 Project SeniorEngineer 授权的命令修改，命令要求原因、`Idempotency-Key` 并写 Audit；发布后仍由 Application 与 PostgreSQL 不可变 Trigger 双重拒绝，详情中文界面显示并仅在草稿阶段提供编辑。
+- 4D 基线历史与明确选版切片已交付：基线入口整合进项目工作台，形成“组件测试 → 发布组件版本 → 明确选择每个已发布组件版本 → 草稿/评审/发布 → 可选设为项目标准”的可读流程。新草稿可明确选择各组件任一已发布版本，而非只能冻结最新版本；服务端验证每个有已发布版本的组件恰选一次、版本归属当前项目与组件，并将选择方式写入 Audit。基线时间轴展示独立 Revision、冻结快照、评审/发布状态和当前 Project Standard；Project Standard 仍只是推荐，绝不自动改变任何 Machine Target。`catalog-acceptance.ps1` 已补充明确选用旧已发布版本的草稿与 Idempotency 验收。
 
 ## Step 5 — Machine → Target
 
@@ -2008,6 +2010,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 10D 升级备份工具补强：`upgrade.ps1` 支持显式 `-PgDumpCommand` 并转交给其受控 Quiesced backup，避免 Windows 11 的 PostgreSQL 客户端未加入 PATH 时升级在备份阶段失败；Windows 运维预检自动检查该参数契约。
 - 10D Windows 11 浏览器兼容补强：所有前端写操作的 `Idempotency-Key` 统一经 `createIdempotencyKey` 生成，优先使用 `crypto.randomUUID`，旧版浏览器/WebView 缺失该方法时回退到 `crypto.getRandomValues` 生成 UUID v4，最后才使用非安全随机回退；`web-compatibility.ps1` 自动模拟缺失 `randomUUID` 的环境并验证回退格式及原生方法优先级，避免创建 Project 等命令在旧浏览器启动即失败。
 - 10D 后台任务定位补强：后台队列从业务导航移入仅 Admin 可见的“系统运维”；运行总览只保留运行摘要，`system/status` 与 `system/jobs/noop` 在 API 层强制 Admin，连通性任务明确用于部署验收、队列诊断和失败重试观察。目录验收覆盖工程师读取队列和提交连通性任务均返回 403，避免仅靠 UI 隐藏造成权限绕过。
+- 10D 后台任务遗留状态修复已交付：早期调试版可能已经写入 `Processing`/`Completed` 旧状态；只前进的 `RepairLegacyBackgroundJobStates` 数据 Migration 已将其分别归一为 `Running`/`Succeeded`。Worker、API、中文运维界面和自动化验收仅使用 `Pending → Running → Succeeded / Failed → Retry`；真实 Migration 与 `background-job-acceptance.ps1` 已通过，旧行不再污染队列汇总。
 - 10D 兼容修复发布包：`0.1.1` `win-x64` 发布包已从离线 Runtime 资产生成，含修复后的 SPA、Host 和 Worker；77 文件 manifest 存在性校验与发布目录 Host 的真实 Migration 通过。`artifacts/ConfigHub-release-0.1.1-win-x64.zip` 通过 Git LFS 发布，部署机可在不运行 npm/restore 的前提下经 `upgrade.ps1` 受控升级。
   - 10D 运维权限发布包：`0.1.2` `win-x64` 发布包包含管理员专属系统运维界面及 API 权限收口；77 文件 ZIP 结构和 manifest 已校验，发布目录 Migration 通过后通过 Git LFS 发布为 `artifacts/ConfigHub-release-0.1.2-win-x64.zip`。
   - V1.1 1C/1D 发布检查：2026-08-31 已通过根目录离线 NuGet 源预热 `win-x64` Runtime 资产，并使用 `publish.ps1 -Version 0.1.3 -SkipRestore -SkipFrontendBuild` 生成 Host、Worker 与 SPA 发布目录；发布目录 Host 对本机 PostgreSQL 17 执行真实 `--migrate` 成功。该结果覆盖批量 Target、后台任务状态机与批量局部事实，不替代 IIS、Windows Service、TLS、服务账户、NAS Restore 的 Production Integration Pending 验收。

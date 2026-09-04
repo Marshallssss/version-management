@@ -917,6 +917,27 @@ public static class CatalogEndpoints
             .OrderByDescending(item => item.SequenceNo)
             .ToListAsync(cancellationToken);
         var versionsByComponent = versions.GroupBy(item => item.ComponentId).ToDictionary(group => group.Key, group => group.First());
+        var explicitSelections = request.VersionSelections?.ToArray() ?? [];
+        if (explicitSelections.Length > 0)
+        {
+            if (explicitSelections.Any(item => item.ComponentId == Guid.Empty || item.VersionId == Guid.Empty)
+                || explicitSelections.Select(item => item.ComponentId).Distinct().Count() != explicitSelections.Length)
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["versionSelections"] = ["每个组件只能选择一个有效的已发布版本。"] });
+
+            var selectedComponentIds = explicitSelections.Select(item => item.ComponentId).ToHashSet();
+            if (!selectedComponentIds.SetEquals(versionsByComponent.Keys))
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["versionSelections"] = ["必须为每个已有已发布版本的组件明确选择一个版本。"] });
+
+            var selectedVersionIds = explicitSelections.Select(item => item.VersionId).ToHashSet();
+            var releasedSelections = versions
+                .Where(item => selectedVersionIds.Contains(item.Id))
+                .ToDictionary(item => item.Id);
+            if (releasedSelections.Count != selectedVersionIds.Count
+                || explicitSelections.Any(item => !releasedSelections.TryGetValue(item.VersionId, out var version) || version.ComponentId != item.ComponentId))
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["versionSelections"] = ["只能选择属于本项目对应组件的已发布版本。"] });
+
+            versionsByComponent = explicitSelections.ToDictionary(item => item.ComponentId, item => releasedSelections[item.VersionId]);
+        }
 
         var normalizedSeries = Normalize(request.SeriesCode!);
         var series = await database.BaselineSeries.SingleOrDefaultAsync(item => item.ProjectId == projectId && item.NormalizedSeriesCode == normalizedSeries, cancellationToken);
@@ -960,7 +981,7 @@ public static class CatalogEndpoints
                 SortOrder = component.SortOrder
             });
         }
-        AddAuditEvent(database, context, "BaselineDraftCreated", "ConfigurationBaseline", baseline.Id, new { baseline.BaselineCode, baseline.RevisionNo, baseline.BaselineSeriesId, reason = request.Reason!.Trim(), itemCount = components.Count });
+        AddAuditEvent(database, context, "BaselineDraftCreated", "ConfigurationBaseline", baseline.Id, new { baseline.BaselineCode, baseline.RevisionNo, baseline.BaselineSeriesId, reason = request.Reason!.Trim(), itemCount = components.Count, selectionMode = explicitSelections.Length > 0 ? "ExplicitReleasedVersions" : "LatestReleasedVersions" });
         await database.SaveChangesAsync(cancellationToken);
         var record = await database.IdempotencyRecords.SingleAsync(item => item.Scope == scope && item.IdempotencyKey == idempotencyKey, cancellationToken);
         record.Status = IdempotencyRecordStatus.Completed;
@@ -1619,7 +1640,8 @@ public sealed record CreateVersionPatchRequest(string? PatchCode, string? Title,
 public sealed record LifecycleRequest(string? State, string? Reason);
 public sealed record CloneProjectRequest(string? Code, string? Name, string? Reason);
 public sealed record MoveComponentRequest(Guid? ParentComponentId, string? Reason);
-public sealed record CreateBaselineRequest(string? SeriesCode, string? BaselineCode, string? Description, string? Reason);
+public sealed record CreateBaselineRequest(string? SeriesCode, string? BaselineCode, string? Description, string? Reason, IReadOnlyList<BaselineVersionSelectionRequest>? VersionSelections = null);
+public sealed record BaselineVersionSelectionRequest(Guid ComponentId, Guid VersionId);
 public sealed record SetBaselineItemRequirementRequest(string? Requirement, string? Reason);
 public sealed record BaselineReviewRequest(string? Reason);
 public sealed record AssignProjectStandardRequest(Guid ConfigurationBaselineId, string? Reason);
