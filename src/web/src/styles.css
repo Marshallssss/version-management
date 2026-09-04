@@ -979,6 +979,14 @@ select option { color: #213231; background: #fff; }
 .tree-node-copy small { overflow: hidden; color: #657d78; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .baseline-version { overflow: hidden; margin-top: 2px; color: #17706a !important; font-family: Bahnschrift, "Microsoft YaHei UI", sans-serif; font-size: 11px !important; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 .tree-node-count { display: grid; place-items: center; width: 22px; height: 22px; color: #365650; background: #dcebe6; font-family: Bahnschrift, monospace; font-size: 10px; }
+.tree-node-row { display: flex; align-items: stretch; gap: 5px; min-width: 0; }
+.tree-node-row .tree-node { flex: 1 1 auto; }
+.patch-tree-preview { position: relative; flex: 0 0 auto; align-self: center; }
+.patch-tree-preview summary { list-style: none; padding: 4px 5px; color: #865115; background: #fff0da; font-size: 10px; white-space: nowrap; cursor: pointer; }
+.patch-tree-preview summary::-webkit-details-marker { display: none; }
+.patch-tree-preview > div { position: absolute; z-index: 4; right: 0; top: calc(100% + 5px); display: grid; min-width: 210px; max-width: min(300px, 72vw); gap: 4px; padding: 9px; border: 1px solid #d8b987; color: #65421d; background: #fffdf8; box-shadow: 0 8px 18px rgb(59 49 37 / 16%); }
+.patch-tree-preview > div strong { color: #66441e; font-size: 11px; }
+.patch-tree-preview > div small { overflow: hidden; color: #745d40; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .branch-node { min-width: 0; }
 .branch-children { display: grid; gap: 8px; margin-top: 8px; padding-left: 10px; border-left: 1px solid #a9c0ba; }
 .add-child-node { min-height: 38px; border: 1px dashed #88aaa2; color: #42615b; background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
@@ -1016,6 +1024,10 @@ select option { color: #213231; background: #fff; }
 .lab-node strong, .lab-node small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lab-node strong { font-size: 12px; }
 .lab-node small { color: #82684a; font-size: 10px; }
+.lab-history-action { display: flex; align-items: center; justify-content: space-between; width: 100%; margin-top: 4px; padding: 5px 8px; border: 1px solid #ead7bd; color: #76552f; background: #fff; font: inherit; font-size: 10px; cursor: pointer; }
+.lab-history-action:hover { border-color: #bd7637; color: #8a4a18; background: #fff6e8; }
+.lab-history-action span { font-family: Bahnschrift, "Microsoft YaHei UI", sans-serif; font-weight: 700; }
+.lab-history-action small { font-size: 10px; }
 .testing-count { display: grid; justify-items: center; align-content: center; min-width: 42px; min-height: 30px; padding: 3px 5px; color: #7c5329; background: #f5dfbd; font-family: Bahnschrift, monospace; }
 .testing-count small { color: #7c5329; font-family: "Microsoft YaHei UI", sans-serif; font-size: 9px; }
 .testing-count b { font-size: 12px; }
@@ -1058,6 +1070,13 @@ select option { color: #213231; background: #fff; }
 .version-item strong { font-family: Bahnschrift, "Microsoft YaHei UI", sans-serif; font-size: 13px; }
 .version-item small { color: #657d78; font-size: 11px; }
 .lifecycle-form { grid-template-columns: 1fr; }
+.version-history { display: grid; gap: 9px; margin-top: 18px; padding-top: 16px; border-top: 1px solid #d6e2df; }
+.version-history h4 { margin: 4px 0 0; color: #294a47; font-size: 14px; }
+.version-history ol { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.version-history li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 8px; padding: 8px 9px; border-left: 3px solid #6d9e91; background: #f5f9f7; }
+.version-history li > span { align-self: start; padding: 2px 4px; color: #42615b; background: #e1eeea; font-size: 9px; }
+.version-history li strong { overflow: hidden; color: #294a47; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.version-history li small { grid-column: span 2; color: #657d78; font-size: 10px; line-height: 1.5; }
 .version-impact { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 16px 0 0; border: 1px solid #d6e2df; background: #fff; }
 .version-impact div { min-width: 0; padding: 10px; border-right: 1px solid #d6e2df; }
 .version-impact div:nth-child(2n) { border-right: 0; }
@@ -1125,6 +1144,19 @@ select option { color: #213231; background: #fff; }
 .snapshot-item small, .snapshot-item > span { color: #657d78; font-size: 10px; }
 .baseline-action-block { display: grid; gap: 10px; padding-top: 16px; border-top: 1px solid #d6e2df; }
 .baseline-action-block h4 { margin: 0; color: #294a47; font-size: 14px; }
+.baseline-difference { display: grid; gap: 10px; margin-top: 16px; padding: 13px; border: 1px solid #d6e0ec; background: #f7faff; }
+.baseline-difference h4 { margin: 3px 0; color: #365d87; font-size: 14px; }
+.baseline-difference p { margin: 0; color: #5c738d; font-size: 11px; }
+.baseline-difference details > summary { color: #365d87; font-size: 11px; cursor: pointer; }
+.baseline-difference details > div { display: grid; gap: 6px; margin-top: 9px; }
+.baseline-difference-item { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 8px; padding: 7px 8px; border-left: 3px solid #398d91; background: #fff; }
+.baseline-difference-item.added { border-left-color: #4d9869; }
+.baseline-difference-item.removed { border-left-color: #bd6a5e; }
+.baseline-difference-item > span { padding: 2px 4px; color: #236246; background: #e7f4eb; font-size: 9px; }
+.baseline-difference-item.removed > span { color: #984232; background: #fae9e6; }
+.baseline-difference-item strong { overflow: hidden; color: #294a47; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.baseline-difference-item small { grid-column: span 2; color: #526a66; font-family: Bahnschrift, "Microsoft YaHei UI", sans-serif; font-size: 11px; }
+.baseline-difference-item b { margin: 0 4px; color: #bd563f; }
 .compact-form, .baseline-compose-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .compact-form label, .baseline-compose-form label { display: grid; gap: 6px; color: #3d5752; font-size: 11px; }
 .compact-form input, .compact-form select, .baseline-compose-form input, .baseline-compose-form select { min-height: 36px; width: 100%; padding: 7px 9px; border: 1px solid #aabfba; color: #213231; background: #fff; font: inherit; }

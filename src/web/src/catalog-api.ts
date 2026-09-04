@@ -18,6 +18,7 @@ export interface ComponentVersion {
   safety: string
   createdAt: string
   patchCount: number
+  patches: Array<{ patchCode: string; title: string; status: string }>
 }
 
 export interface VersionPatch {

@@ -800,7 +800,13 @@ public static class CatalogEndpoints
                         maturity = version.Maturity.ToString(),
                         safety = version.Safety.ToString(),
                         createdAt = version.CreatedAt,
-                        patchCount = database.VersionPatches.Count(patch => patch.ComponentVersionId == version.Id)
+                        patchCount = database.VersionPatches.Count(patch => patch.ComponentVersionId == version.Id),
+                        patches = database.VersionPatches
+                            .Where(patch => patch.ComponentVersionId == version.Id)
+                            .OrderByDescending(patch => patch.RecordedAt)
+                            .Take(3)
+                            .Select(patch => new { patchCode = patch.PatchCode, patch.Title, status = patch.Status.ToString() })
+                            .ToList()
                     })
                     .ToList()
             })
