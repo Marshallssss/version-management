@@ -54,6 +54,7 @@ public static class CatalogEndpoints
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/facts", ListMachineFactsAsync).RequireAuthorization();
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/drift", GetMachineDriftAsync).RequireAuthorization();
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/drift-summary", GetMachineDriftSummaryAsync).RequireAuthorization();
+        endpoints.MapGet("/api/v1/machines/{machineId:guid}/compare-baseline/{baselineId:guid}", CompareMachineToBaselineAsync).RequireAuthorization();
         endpoints.MapGet("/api/v1/machines/{leftMachineId:guid}/compare/{rightMachineId:guid}", CompareMachinesAsync).RequireAuthorization();
         endpoints.MapGet("/api/v1/machines/{machineId:guid}/compare-history", CompareMachineCurrentToHistoryAsync).RequireAuthorization();
         endpoints.MapGet("/api/v1/baselines/{leftBaselineId:guid}/compare/{rightBaselineId:guid}", CompareBaselinesAsync).RequireAuthorization();
@@ -527,14 +528,43 @@ public static class CatalogEndpoints
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         var target = await db.MachineTargetAssignments.AsNoTracking().Where(x => x.MachineId == machineId && x.ValidTo == null).Select(x => x.ConfigurationBaselineId).SingleOrDefaultAsync(cancellationToken);
         if (target == Guid.Empty) return TypedResults.Ok(new { matchStatus = "Unknown", riskSeverity = "High", items = Array.Empty<object>() });
-        var expected = await db.BaselineItems.AsNoTracking().Where(x => x.ConfigurationBaselineId == target && x.ComponentVersionId != null).ToDictionaryAsync(x => x.ConfigurationComponentId, cancellationToken);
-        var actual = await db.MachineCurrentConfigurations.AsNoTracking().Where(x => x.MachineId == machineId).ToDictionaryAsync(x => x.ConfigurationComponentId, cancellationToken);
-        var ids = expected.Keys.Union(actual.Keys).ToArray(); var items = new List<object>(); var mismatch = false; var critical = false;
-        var components = await db.ConfigurationComponents.AsNoTracking().Where(component => ids.Contains(component.Id)).ToDictionaryAsync(component => component.Id, component => component.Name, cancellationToken);
+        return TypedResults.Ok(await BuildMachineBaselineComparisonAsync(db, machineId, target, cancellationToken));
+    }
+
+    private static async Task<IResult> CompareMachineToBaselineAsync(Guid machineId, Guid baselineId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var machine = await db.Machines.AsNoTracking().Where(item => item.Id == machineId).Select(item => new { item.Id, item.ProjectId }).SingleOrDefaultAsync(cancellationToken);
+        if (machine is null) return Results.NotFound();
+        var baseline = await db.ConfigurationBaselines.AsNoTracking().SingleOrDefaultAsync(item => item.Id == baselineId && item.ProjectId == machine.ProjectId, cancellationToken);
+        if (baseline is null) return Results.ValidationProblem(new Dictionary<string, string[]> { ["baselineId"] = ["只能比较同项目的基线。"] });
+        if (baseline.State != BaselineState.Released) return Results.ValidationProblem(new Dictionary<string, string[]> { ["baselineId"] = ["只能比较已发布基线。"] });
+        return TypedResults.Ok(await BuildMachineBaselineComparisonAsync(db, machineId, baselineId, cancellationToken));
+    }
+
+    private static async Task<object> BuildMachineBaselineComparisonAsync(ConfigHubDbContext db, Guid machineId, Guid baselineId, CancellationToken cancellationToken)
+    {
+        var baseline = await db.ConfigurationBaselines.AsNoTracking().Where(item => item.Id == baselineId).Select(item => new { item.BaselineCode }).SingleAsync(cancellationToken);
+        var expected = await db.BaselineItems.AsNoTracking().Where(item => item.ConfigurationBaselineId == baselineId && item.ComponentVersionId != null).ToDictionaryAsync(item => item.ConfigurationComponentId, cancellationToken);
+        var actual = await db.MachineCurrentConfigurations.AsNoTracking().Where(item => item.MachineId == machineId).ToDictionaryAsync(item => item.ConfigurationComponentId, cancellationToken);
+        var componentIds = expected.Keys.Union(actual.Keys).ToArray();
+        var components = await db.ConfigurationComponents.AsNoTracking().Where(item => componentIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, item => item.Name, cancellationToken);
         var versionIds = expected.Values.Select(item => item.ComponentVersionId!.Value).Concat(actual.Values.Where(item => item.ComponentVersionId is not null).Select(item => item.ComponentVersionId!.Value)).Distinct().ToArray();
-        var versions = await db.ComponentVersions.AsNoTracking().Where(version => versionIds.Contains(version.Id)).ToDictionaryAsync(version => version.Id, version => new { version.VersionNumber, version.Safety }, cancellationToken);
-        foreach (var componentId in ids) { expected.TryGetValue(componentId, out var wanted); actual.TryGetValue(componentId, out var found); var status = wanted is null ? "Extra" : found is null || found.State == CurrentConfigurationState.Absent ? "Missing" : wanted.ComponentVersionId == found.ComponentVersionId ? "Matched" : "Mismatch"; if (status != "Matched") mismatch = true; var versionId = found?.ComponentVersionId ?? wanted?.ComponentVersionId; if (versionId is not null && versions[versionId.Value].Safety == VersionSafety.Blocked) critical = true; items.Add(new { componentId, componentName = components[componentId], status, expectedVersionId = wanted?.ComponentVersionId, expectedVersionNumber = wanted is null ? null : versions[wanted.ComponentVersionId!.Value].VersionNumber, actualVersionId = found?.ComponentVersionId, actualVersionNumber = found?.ComponentVersionId is null ? null : versions[found.ComponentVersionId.Value].VersionNumber }); }
-        return TypedResults.Ok(new { matchStatus = mismatch ? "Mismatch" : "Matched", riskSeverity = critical ? "Critical" : "None", items });
+        var versions = await db.ComponentVersions.AsNoTracking().Where(item => versionIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, item => new { item.VersionNumber, item.Safety }, cancellationToken);
+        var items = new List<object>();
+        var mismatch = false;
+        var critical = false;
+        foreach (var componentId in componentIds)
+        {
+            expected.TryGetValue(componentId, out var wanted);
+            actual.TryGetValue(componentId, out var found);
+            var status = wanted is null ? "Extra" : found is null || found.State == CurrentConfigurationState.Absent ? "Missing" : wanted.ComponentVersionId == found.ComponentVersionId ? "Matched" : "Mismatch";
+            if (status != "Matched") mismatch = true;
+            var versionId = found?.ComponentVersionId ?? wanted?.ComponentVersionId;
+            if (versionId is not null && versions[versionId.Value].Safety == VersionSafety.Blocked) critical = true;
+            items.Add(new { componentId, componentName = components[componentId], status, expectedVersionId = wanted?.ComponentVersionId, expectedVersionNumber = wanted is null ? null : versions[wanted.ComponentVersionId!.Value].VersionNumber, actualVersionId = found?.ComponentVersionId, actualVersionNumber = found?.ComponentVersionId is null ? null : versions[found.ComponentVersionId.Value].VersionNumber });
+        }
+        return new { machineId, baselineId, baselineCode = baseline.BaselineCode, matchStatus = mismatch ? "Mismatch" : "Matched", riskSeverity = critical ? "Critical" : "None", items };
     }
 
     private static async Task<IResult> GetMachineDriftSummaryAsync(Guid machineId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)

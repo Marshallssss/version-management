@@ -394,6 +394,8 @@ $upgradeChecks = [ordered]@{
     targetUnchanged = -not $hasUnexpectedTarget
 }
 if ($upgradeChecks.Values -contains $false) { throw ("Bulk baseline upgrade checks failed: " + ($upgradeChecks | ConvertTo-Json -Compress)) }
+$projectStandardComparison = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($bulkMachineOne.id)/compare-baseline/$($secondBaseline.id)"))
+if ($projectStandardComparison.baselineId -ne $secondBaseline.id -or $projectStandardComparison.baselineCode -ne $secondBaselineCode -or $projectStandardComparison.matchStatus -ne 'Matched' -or $projectStandardComparison.riskSeverity -ne 'None' -or @($projectStandardComparison.items | Where-Object { $_.status -ne 'Matched' }).Count -ne 0) { throw 'Machine-to-released-baseline comparison must retain baseline identity and separate matching from risk.' }
 $machineComparison = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($bulkMachineOne.id)/compare/$($bulkMachineTwo.id)"))
 Invoke-Lifecycle "/api/v1/component-versions/$($thirdVersion.id)/safety" 'Blocked' '自动化机台比对风险验收' | Out-Null
 $criticalMachineComparison = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($bulkMachineOne.id)/compare/$($bulkMachineTwo.id)"))

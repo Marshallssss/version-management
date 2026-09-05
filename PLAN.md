@@ -1951,6 +1951,7 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 - 5B 目标历史补强已交付：机台 Target History 读取 API 与中文时间线展示历史 Assignment 的基线、原因、开始/结束时间；自动验收覆盖重新指派后旧记录被关闭且新记录成为当前目标。
 - 5C 机台工作台已交付：真实 EF Migration 为 Machine 增加可选位置；创建、更新、列表读取均受项目范围、actor、reason、correlation id 与 Idempotency 保护，资料变更写入 Audit。创建可从已有机台预填可编辑资料，但必须登记新的全局序列号；项目归属一旦建立不可跨项目移动，以保护 Target、Actual 与历史事实的项目语义。中文机台页已收束为紧凑创建入口、筛选列表和同一上下文的资料、Target、Actual、时间点与事实历史；实验室机台可手工记录 Testing 版本实际，但 Testing 不可成为 Target。左侧全局导航与机台详情可收合，导航偏好会记住，减少大项目的滚动和横向拥挤。`catalog-acceptance.ps1` 已覆盖位置创建、列表读取、资料更新和幂等重放；真实 Migration、Release build、SPA build 与 EF Pending Model Changes 均已通过。
 - 5D 基线批量升级已交付：基于已发布 Baseline 的显式多机升级命令只接受同项目、去重后的机台和用户输入的工程生效时间；每台复用单机完整 `UPGRADE` Fact 核心，要求提交版本与冻结基线快照完全一致，并保留旧 Current Actual 的事实历史。真实 EF Migration 已为 `deployment_batches` 增加来源 Baseline 外键；机台历史可快速显示升级来源基线。Target Assignment 仍保持独立，升级不会自动推断、创建或改写 Target。中文机台页提供已发布基线、多机、升级时间与原因的受控入口，并在机台详情直接预览 Actual 与显式 Target 的差异；Testing 版本的实验室实际配置继续走受控的局部 Facts，而不是伪造一个可用于生产 Target 的测试 Baseline。`catalog-acceptance.ps1` 覆盖两机升级、外层重放、完整 Current Actual 投影、来源基线、审计、历史和 Target 未变化；真实 Migration、Release build、SPA build 与 EF Pending Model Changes 均已通过。
+- 5E 项目标准比对已交付：在不改变 Project Standard 与 Machine Target 独立语义的前提下，机台详情新增“当前实际 vs 当前项目标准”的只读比对；接口只接受同项目的已发布 Baseline，并返回基线身份、Match、Risk 和逐组件的新旧版本。中文界面同时提供“项目当前标准”（推荐）与“机台 Target”（明确要求）的独立折叠预览，二者均明确显示 Match 与 Risk，避免把版本一致误解为无风险，或把项目推荐误解为机台 Target。`catalog-acceptance.ps1` 覆盖已升级机台对指定已发布基线的基线身份、匹配、风险和逐组件结果；Release build、真实 Migration、SPA build 与 EF Pending Model Changes 均已通过。
 
 ## Step 6 — Facts → Current Actual
 
