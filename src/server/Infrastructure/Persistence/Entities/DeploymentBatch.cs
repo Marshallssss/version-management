@@ -9,6 +9,7 @@ public sealed class DeploymentBatch
     public required string SourceType { get; set; }
     public string? ExternalEventId { get; set; }
     public Guid? CorrectsDeploymentBatchId { get; set; }
+    public Guid? SourceConfigurationBaselineId { get; set; }
     public DateTimeOffset RecordedAt { get; set; }
     public DateTimeOffset EffectiveAt { get; set; }
 }

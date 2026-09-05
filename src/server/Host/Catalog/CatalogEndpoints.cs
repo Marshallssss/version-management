@@ -33,6 +33,7 @@ public static class CatalogEndpoints
         projects.MapPost("/{projectId:guid}/standard", AssignProjectStandardAsync).RequireAuthorization("SeniorEngineer");
         projects.MapPost("/{projectId:guid}/bulk-machine-targets", AssignBulkMachineTargetsAsync).RequireAuthorization("SeniorEngineer");
         projects.MapPost("/{projectId:guid}/bulk-facts", RecordBulkFactsAsync).RequireAuthorization("Engineer");
+        projects.MapPost("/{projectId:guid}/bulk-baseline-upgrades", UpgradeMachinesToBaselineAsync).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/release", ReleaseBaselineAsync).RequireAuthorization("SeniorEngineer");
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/review", RequestBaselineReviewAsync).RequireAuthorization("SeniorEngineer");
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/review/approve", ApproveBaselineReviewAsync).RequireAuthorization("Admin");
@@ -318,6 +319,65 @@ public static class CatalogEndpoints
         return TypedResults.Ok(new { id = completedOperation.Id, succeeded, failed });
     }
 
+    private static async Task<IResult> UpgradeMachinesToBaselineAsync(Guid projectId, BulkBaselineUpgradeRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        if (request.ConfigurationBaselineId == Guid.Empty || request.MachineIds is null || request.MachineIds.Count == 0 || request.MachineIds.Distinct().Count() != request.MachineIds.Count || request.EffectiveAt is null || string.IsNullOrWhiteSpace(request.Reason)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = ["必须选择本项目已发布基线、至少一台不重复的机台、实际升级时间并填写原因。"] });
+        var key = context.Request.Headers["Idempotency-Key"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["批量基线升级必须提供不超过 200 个字符的 Idempotency-Key。"] });
+        var scope = $"bulk-baseline-upgrades:{projectId}";
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request))));
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var replay = await db.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
+        if (replay is not null)
+        {
+            if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" });
+            if (replay.Result is not null) return TypedResults.Ok(replay.Result.RootElement.Clone());
+            return Results.Conflict(new { message = "该请求仍在处理。" });
+        }
+        if (!await HasProjectWriteAccessAsync(db, context, projectId, cancellationToken)) return Results.Forbid();
+        var baseline = await db.ConfigurationBaselines.SingleOrDefaultAsync(item => item.Id == request.ConfigurationBaselineId && item.ProjectId == projectId, cancellationToken);
+        if (baseline is null || baseline.State != BaselineState.Released) return Results.ValidationProblem(new Dictionary<string, string[]> { ["configurationBaselineId"] = ["必须选择本项目已发布基线。"] });
+        var machines = await db.Machines.Where(item => request.MachineIds.Contains(item.Id) && item.ProjectId == projectId).Select(item => item.Id).ToArrayAsync(cancellationToken);
+        if (machines.Length != request.MachineIds.Count) return Results.ValidationProblem(new Dictionary<string, string[]> { ["machineIds"] = ["所有机台必须存在且属于该项目。"] });
+        var items = await db.BaselineItems.AsNoTracking().Where(item => item.ConfigurationBaselineId == baseline.Id && item.ComponentVersionId != null).OrderBy(item => item.SortOrder).Select(item => new RecordFactItem(item.ConfigurationComponentId, item.ComponentVersionId, false, request.EffectiveAt)).ToListAsync(cancellationToken);
+        if (items.Count == 0) return Results.ValidationProblem(new Dictionary<string, string[]> { ["configurationBaselineId"] = ["所选基线没有可升级的软件组件。"] });
+        var now = DateTimeOffset.UtcNow;
+        var actor = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required.");
+        var bulkOperation = new BulkOperation { Id = Guid.NewGuid(), ProjectId = projectId, OperationType = BulkOperationType.MachineBaselineUpgrade, Status = BulkOperationStatus.Running, RequestedBy = actor, Reason = request.Reason.Trim(), RequestedAt = now };
+        await using (var transaction = await db.Database.BeginTransactionAsync(cancellationToken))
+        {
+            db.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) });
+            db.BulkOperations.Add(bulkOperation);
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        var singleRequest = new RecordFactsRequest("Upgrade", "Full", "baseline-upgrade", null, request.EffectiveAt, bulkOperation.Reason, items, null, baseline.Id);
+        var succeeded = 0;
+        var failed = 0;
+        foreach (var machineId in machines)
+        {
+            var machineKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{key}:{machineId}")));
+            var result = await RecordFactsCoreAsync(machineId, singleRequest, context, factory, machineKey, cancellationToken);
+            var statusCode = (result as IStatusCodeHttpResult)?.StatusCode ?? StatusCodes.Status500InternalServerError;
+            var itemStatus = statusCode is >= 200 and < 300 ? BulkOperationItemStatus.Succeeded : BulkOperationItemStatus.Failed;
+            succeeded += itemStatus == BulkOperationItemStatus.Succeeded ? 1 : 0;
+            failed += itemStatus == BulkOperationItemStatus.Failed ? 1 : 0;
+            await using var itemDb = await factory.CreateDbContextAsync(cancellationToken);
+            itemDb.BulkOperationItems.Add(new BulkOperationItem { Id = Guid.NewGuid(), BulkOperationId = bulkOperation.Id, MachineId = machineId, Status = itemStatus, Detail = itemStatus == BulkOperationItemStatus.Succeeded ? $"已升级至 {baseline.BaselineCode}。" : $"升级事实命令返回 HTTP {statusCode}。" });
+            await itemDb.SaveChangesAsync(cancellationToken);
+        }
+        await using var completionDb = await factory.CreateDbContextAsync(cancellationToken);
+        var completedOperation = await completionDb.BulkOperations.SingleAsync(item => item.Id == bulkOperation.Id, cancellationToken);
+        completedOperation.Status = failed == 0 ? BulkOperationStatus.Succeeded : BulkOperationStatus.Failed;
+        completedOperation.CompletedAt = DateTimeOffset.UtcNow;
+        AddAuditEvent(completionDb, context, "BulkMachineBaselineUpgradeRecorded", "BulkOperation", completedOperation.Id, new { projectId, baselineId = baseline.Id, baselineCode = baseline.BaselineCode, effectiveAt = request.EffectiveAt, machineCount = machines.Length, succeeded, failed, reason = completedOperation.Reason });
+        var record = await completionDb.IdempotencyRecords.SingleAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
+        record.Status = IdempotencyRecordStatus.Completed;
+        record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = completedOperation.Id, baselineId = baseline.Id, baselineCode = baseline.BaselineCode, effectiveAt = request.EffectiveAt, succeeded, failed }));
+        await completionDb.SaveChangesAsync(cancellationToken);
+        return TypedResults.Ok(new { id = completedOperation.Id, baselineId = baseline.Id, baselineCode = baseline.BaselineCode, effectiveAt = request.EffectiveAt, succeeded, failed });
+    }
+
     private static async Task<IResult> GetMachineTargetHistoryAsync(Guid machineId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
     {
         await using var database = await factory.CreateDbContextAsync(cancellationToken);
@@ -366,6 +426,7 @@ public static class CatalogEndpoints
         }
         else if (request.CorrectsDeploymentBatchId is not null) return Results.ValidationProblem(new Dictionary<string, string[]> { ["correctsDeploymentBatchId"] = ["只有更正操作可以关联原事实。"] });
         var sourceType = request.SourceType.Trim(); var externalEventId = NormalizeOptional(request.ExternalEventId, 200);
+        if (sourceType == "baseline-upgrade" && request.SourceConfigurationBaselineId is null) return Results.ValidationProblem(new Dictionary<string, string[]> { ["sourceConfigurationBaselineId"] = ["基线升级必须关联已发布基线。"] });
         if (externalEventId is not null && await db.DeploymentBatches.AnyAsync(item => item.SourceType == sourceType && item.ExternalEventId == externalEventId, cancellationToken)) return Results.Conflict(new { message = "该来源的外部事件已记录。" });
         var now = DateTimeOffset.UtcNow; await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken); db.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }); var batch = new DeploymentBatch { Id = Guid.NewGuid(), MachineId = machineId, OperationType = operation, Coverage = coverage, SourceType = sourceType, ExternalEventId = externalEventId, CorrectsDeploymentBatchId = correctedBatch?.Id, RecordedAt = now, EffectiveAt = correctedBatch?.EffectiveAt ?? request.EffectiveAt ?? now }; db.DeploymentBatches.Add(batch);
         var componentIds = request.Items.Select(x => x.ComponentId).Distinct().ToArray(); var components = await db.ConfigurationComponents.Where(x => x.ProjectId == machine.ProjectId && componentIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, cancellationToken); if (components.Count != componentIds.Length) return Results.ValidationProblem(new Dictionary<string, string[]> { ["items"] = ["存在不属于机台项目的组件。"] });
@@ -374,6 +435,15 @@ public static class CatalogEndpoints
         var versionIds = request.Items.Where(x => !x.Absent && x.VersionId is not null).Select(x => x.VersionId!.Value).Distinct().ToArray();
         var versions = await db.ComponentVersions.Where(x => versionIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, cancellationToken);
         if (versions.Count != versionIds.Length || request.Items.Any(x => !x.Absent && (x.VersionId is null || versions[x.VersionId.Value].ComponentId != x.ComponentId))) return Results.ValidationProblem(new Dictionary<string, string[]> { ["items"] = ["事实版本必须属于对应组件。"] });
+        if (request.SourceConfigurationBaselineId is not null)
+        {
+            if (operation != DeploymentOperationType.Upgrade || coverage != ObservationCoverage.Full || sourceType != "baseline-upgrade") return Results.ValidationProblem(new Dictionary<string, string[]> { ["sourceConfigurationBaselineId"] = ["基线引用仅可用于完整覆盖的基线升级。"] });
+            var sourceBaseline = await db.ConfigurationBaselines.SingleOrDefaultAsync(item => item.Id == request.SourceConfigurationBaselineId && item.ProjectId == machine.ProjectId, cancellationToken);
+            if (sourceBaseline is null || sourceBaseline.State != BaselineState.Released) return Results.ValidationProblem(new Dictionary<string, string[]> { ["sourceConfigurationBaselineId"] = ["必须选择该项目已发布基线。"] });
+            var expectedItems = await db.BaselineItems.AsNoTracking().Where(item => item.ConfigurationBaselineId == sourceBaseline.Id && item.ComponentVersionId != null).Select(item => new { item.ConfigurationComponentId, item.ComponentVersionId }).ToListAsync(cancellationToken);
+            if (request.Items.Count != expectedItems.Count || request.Items.Select(item => item.ComponentId).Distinct().Count() != request.Items.Count || request.Items.Any(item => item.Absent || item.VersionId is null) || expectedItems.Any(expected => !request.Items.Any(item => item.ComponentId == expected.ConfigurationComponentId && item.VersionId == expected.ComponentVersionId))) return Results.ValidationProblem(new Dictionary<string, string[]> { ["items"] = ["基线升级的组件和版本必须与所选基线快照完全一致。"] });
+            batch.SourceConfigurationBaselineId = sourceBaseline.Id;
+        }
         foreach (var input in request.Items) { var item = new DeploymentItem { Id = Guid.NewGuid(), DeploymentBatchId = batch.Id, ConfigurationComponentId = input.ComponentId, NewComponentVersionId = input.VersionId, Result = input.Absent ? DeploymentItemResult.Absent : DeploymentItemResult.Succeeded, KnownInstalledAt = input.KnownInstalledAt }; db.DeploymentItems.Add(item); await UpsertCurrentAsync(db, machineId, input.ComponentId, input.Absent ? null : input.VersionId, input.Absent, batch.EffectiveAt, input.KnownInstalledAt, item.Id, cancellationToken); }
         if (coverage == ObservationCoverage.Full)
         {
@@ -448,7 +518,7 @@ public static class CatalogEndpoints
     private static async Task<IResult> ListMachineFactsAsync(Guid machineId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var facts = await db.DeploymentBatches.AsNoTracking().Where(item => item.MachineId == machineId).OrderByDescending(item => item.EffectiveAt).ThenByDescending(item => item.RecordedAt).Select(item => new { id = item.Id, operationType = item.OperationType.ToString(), coverage = item.Coverage.ToString(), sourceType = item.SourceType, correctsDeploymentBatchId = item.CorrectsDeploymentBatchId, recordedAt = item.RecordedAt, effectiveAt = item.EffectiveAt, itemCount = db.DeploymentItems.Count(detail => detail.DeploymentBatchId == item.Id) }).ToListAsync(cancellationToken);
+        var facts = await db.DeploymentBatches.AsNoTracking().Where(item => item.MachineId == machineId).OrderByDescending(item => item.EffectiveAt).ThenByDescending(item => item.RecordedAt).Select(item => new { id = item.Id, operationType = item.OperationType.ToString(), coverage = item.Coverage.ToString(), sourceType = item.SourceType, sourceBaselineId = item.SourceConfigurationBaselineId, sourceBaselineCode = db.ConfigurationBaselines.Where(baseline => baseline.Id == item.SourceConfigurationBaselineId).Select(baseline => baseline.BaselineCode).FirstOrDefault(), correctsDeploymentBatchId = item.CorrectsDeploymentBatchId, recordedAt = item.RecordedAt, effectiveAt = item.EffectiveAt, itemCount = db.DeploymentItems.Count(detail => detail.DeploymentBatchId == item.Id) }).ToListAsync(cancellationToken);
         return TypedResults.Ok(facts);
     }
 
@@ -1896,8 +1966,9 @@ public sealed record CreateMachineRequest(Guid ProjectId, string? SerialNumber, 
 public sealed record UpdateMachineRequest(string? SerialNumber, string? Name, string? MachineType, string? Location, string? Status, string? Reason);
 public sealed record AssignMachineTargetRequest(Guid ConfigurationBaselineId, string? Reason);
 public sealed record AssignBulkMachineTargetsRequest(Guid ConfigurationBaselineId, List<Guid>? MachineIds, string? Reason);
-public sealed record RecordFactsRequest(string? OperationType, string? Coverage, string? SourceType, string? ExternalEventId, DateTimeOffset? EffectiveAt, string? Reason, List<RecordFactItem>? Items, Guid? CorrectsDeploymentBatchId = null);
+public sealed record RecordFactsRequest(string? OperationType, string? Coverage, string? SourceType, string? ExternalEventId, DateTimeOffset? EffectiveAt, string? Reason, List<RecordFactItem>? Items, Guid? CorrectsDeploymentBatchId = null, Guid? SourceConfigurationBaselineId = null);
 public sealed record BulkRecordFactsRequest(List<Guid>? MachineIds, string? OperationType, string? Coverage, DateTimeOffset? EffectiveAt, string? Reason, List<RecordFactItem>? Items);
+public sealed record BulkBaselineUpgradeRequest(Guid ConfigurationBaselineId, List<Guid>? MachineIds, DateTimeOffset? EffectiveAt, string? Reason);
 public sealed record ExportVersionImpactRequest(string? Reason);
 public sealed record RebuildDriftSummariesRequest(string? Reason);
 public sealed record RecordFactItem(Guid ComponentId, Guid? VersionId, bool Absent, DateTimeOffset? KnownInstalledAt);

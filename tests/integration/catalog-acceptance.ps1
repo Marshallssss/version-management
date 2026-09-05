@@ -279,7 +279,8 @@ $explicitBaseline = Invoke-RestMethod -WebSession $session -Method Post -Uri ([u
 $explicitBaselineReplay = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/baselines")) -Headers $explicitBaselineHeaders -ContentType 'application/json' -Body $explicitBaselineBody
 $explicitBaselineDetail = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/baselines/$($explicitBaseline.id)"))
 if ($explicitBaseline.id -ne $explicitBaselineReplay.id -or @($explicitBaselineDetail.items | Where-Object { $_.componentId -eq $component.id -and $_.versionId -eq $secondVersion.id -and $_.versionNumber -eq 'opaque-b' }).Count -ne 1) { throw 'Explicit baseline composition must retain the selected older released version and be idempotent.' }
-$secondBaselineBody = @{ seriesCode = "SERIES2-$suffix"; baselineCode = "BL2-$suffix"; description = 'Comparison baseline'; reason = '自动化基线比较验收'; versionSelections = @(@{ componentId = $component.id; versionId = $thirdVersion.id }, @{ componentId = $child.id; versionId = $childVersion.id }, @{ componentId = $memberComponent.id; versionId = $memberVersion.id }) } | ConvertTo-Json -Depth 5
+$secondBaselineCode = "BL2-$suffix"
+$secondBaselineBody = @{ seriesCode = "SERIES2-$suffix"; baselineCode = $secondBaselineCode; description = 'Comparison baseline'; reason = '自动化基线比较验收'; versionSelections = @(@{ componentId = $component.id; versionId = $thirdVersion.id }, @{ componentId = $child.id; versionId = $childVersion.id }, @{ componentId = $memberComponent.id; versionId = $memberVersion.id }) } | ConvertTo-Json -Depth 5
 $secondBaseline = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/baselines")) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() } -ContentType 'application/json' -Body $secondBaselineBody
 $secondReviewHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() }
 Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/baselines/$($secondBaseline.id)/review")) -Headers $secondReviewHeaders -ContentType 'application/json' -Body $reviewBody | Out-Null
@@ -372,13 +373,34 @@ $bulkOneConfiguration = Invoke-RestMethod -WebSession $session -Uri ([uri]::new(
 $bulkTwoFacts = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($bulkMachineTwo.id)/facts"))
 $bulkFactAudit = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/audit?entityId=$($bulkFacts.id)"))
 if ($bulkFacts.id -ne $bulkFactsReplay.id -or $bulkFacts.succeeded -ne 2 -or $bulkFacts.failed -ne 0 -or @($bulkOneConfiguration | Where-Object { $_.componentId -eq $component.id -and $_.versionId -eq $firstVersion.id -and $_.state -eq 'Present' }).Count -ne 1 -or @($bulkTwoFacts | Where-Object { $_.operationType -eq 'Observation' -and $_.coverage -eq 'Partial' -and $_.sourceType -eq 'bulk-ui' }).Count -ne 1 -or @($bulkFactAudit | Where-Object { $_.action -eq 'BulkMachineFactsRecorded' -and $_.correlationId -eq "bulk-facts-$suffix" }).Count -ne 1) { throw 'Bulk facts must replay idempotently, use the single-machine fact semantics, and retain aggregate audit.' }
+$upgradeAt = [DateTimeOffset]::UtcNow.AddMinutes(1)
+$bulkUpgradeHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString(); 'X-Correlation-ID' = "bulk-upgrade-$suffix" }
+$bulkUpgradeBody = @{ configurationBaselineId = $secondBaseline.id; machineIds = @($bulkMachineOne.id, $bulkMachineTwo.id); effectiveAt = $upgradeAt; reason = '自动化批量基线升级验收' } | ConvertTo-Json -Depth 5
+$bulkUpgrade = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/bulk-baseline-upgrades")) -Headers $bulkUpgradeHeaders -ContentType 'application/json' -Body $bulkUpgradeBody
+$bulkUpgradeReplay = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/bulk-baseline-upgrades")) -Headers $bulkUpgradeHeaders -ContentType 'application/json' -Body $bulkUpgradeBody
+$upgradedOneConfiguration = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($bulkMachineOne.id)/configuration"))
+$upgradedOneFacts = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($bulkMachineOne.id)/facts"))
+$bulkUpgradeAudit = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/audit?entityId=$($bulkUpgrade.id)"))
+$upgradedMachineTarget = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($bulkMachineOne.id)/target"))
+$hasUnexpectedTarget = $null -ne $upgradedMachineTarget -and -not [string]::IsNullOrWhiteSpace([string]$upgradedMachineTarget)
+$upgradeChecks = [ordered]@{
+    idempotent = $bulkUpgrade.id -eq $bulkUpgradeReplay.id
+    succeeded = $bulkUpgrade.succeeded -eq 2
+    failed = $bulkUpgrade.failed -eq 0
+    controlProjected = @($upgradedOneConfiguration | Where-Object { $_.componentId -eq $component.id -and $_.versionId -eq $thirdVersion.id -and $_.state -eq 'Present' -and (([DateTimeOffset]$_.knownInstalledAt).ToUniversalTime() - $upgradeAt.ToUniversalTime()).Duration().TotalSeconds -lt 1 }).Count -eq 1
+    childProjected = @($upgradedOneConfiguration | Where-Object { $_.componentId -eq $child.id -and $_.versionId -eq $childVersion.id -and $_.state -eq 'Present' }).Count -eq 1
+    sourceRecorded = @($upgradedOneFacts | Where-Object { $_.operationType -eq 'Upgrade' -and $_.coverage -eq 'Full' -and $_.sourceBaselineId -eq $secondBaseline.id -and $_.sourceBaselineCode -eq $secondBaselineCode }).Count -eq 1
+    audited = @($bulkUpgradeAudit | Where-Object { $_.action -eq 'BulkMachineBaselineUpgradeRecorded' -and $_.correlationId -eq "bulk-upgrade-$suffix" }).Count -eq 1
+    targetUnchanged = -not $hasUnexpectedTarget
+}
+if ($upgradeChecks.Values -contains $false) { throw ("Bulk baseline upgrade checks failed: " + ($upgradeChecks | ConvertTo-Json -Compress)) }
 $machineComparison = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($bulkMachineOne.id)/compare/$($bulkMachineTwo.id)"))
-Invoke-Lifecycle "/api/v1/component-versions/$($firstVersion.id)/safety" 'Blocked' '自动化机台比对风险验收' | Out-Null
+Invoke-Lifecycle "/api/v1/component-versions/$($thirdVersion.id)/safety" 'Blocked' '自动化机台比对风险验收' | Out-Null
 $criticalMachineComparison = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($bulkMachineOne.id)/compare/$($bulkMachineTwo.id)"))
-$exposureSnapshots = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/component-versions/$($firstVersion.id)/exposures"))
+$exposureSnapshots = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/component-versions/$($thirdVersion.id)/exposures"))
 $latestExposure = @($exposureSnapshots | Select-Object -First 1)
 $exposureAudit = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/audit?entityId=$($latestExposure.id)"))
-Invoke-Lifecycle "/api/v1/component-versions/$($firstVersion.id)/safety" 'Clear' '自动化机台比对恢复安全状态' | Out-Null
+Invoke-Lifecycle "/api/v1/component-versions/$($thirdVersion.id)/safety" 'Clear' '自动化机台比对恢复安全状态' | Out-Null
 if ($machineComparison.matchStatus -ne 'Matched' -or $machineComparison.riskSeverity -ne 'None' -or $criticalMachineComparison.matchStatus -ne 'Matched' -or $criticalMachineComparison.riskSeverity -ne 'Critical' -or $latestExposure.currentMachineCount -lt 2 -or $latestExposure.historicalMachineCount -lt 2 -or @($exposureAudit | Where-Object { $_.action -eq 'VersionExposureSnapshotCaptured' }).Count -ne 1) { throw 'Machine comparison must keep version match separate from blocked-version risk, and blocking must retain an auditable exposure snapshot.' }
 $factHistory = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/machines/$($machine.id)/facts"))
 if (@($factHistory | Where-Object { $_.operationType -eq 'InitialSnapshot' -and $_.coverage -eq 'Full' }).Count -ne 1 -or @($factHistory | Where-Object { $_.operationType -eq 'Observation' -and $_.coverage -eq 'Partial' }).Count -ne 3 -or @($factHistory | Where-Object { $_.operationType -eq 'Observation' -and $_.coverage -eq 'Full' }).Count -ne 1 -or @($factHistory | Where-Object { $_.operationType -eq 'Rollback' -and $_.coverage -eq 'Partial' }).Count -ne 1 -or @($factHistory | Where-Object { $_.operationType -eq 'Correction' -and $_.correctsDeploymentBatchId -eq $rollback.id }).Count -ne 1 -or @($factHistory | Where-Object { $_.sourceType -eq 'agent-automation' }).Count -ne 1) { throw 'Machine fact history must retain operation, coverage, rollback, correction and external event semantics.' }

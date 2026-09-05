@@ -980,6 +980,10 @@ select option { color: #213231; background: #fff; }
 .machine-detail-sections { display: grid; gap: 0; margin-top: 4px; }
 .machine-detail-sections > details > .catalog-form { padding: 0 0 16px; }
 .machine-detail-sections > details > .form-hint { padding: 0 0 14px; }
+.machine-drift-preview { margin: 0 0 16px; border-top: 1px dashed #c8d9d5; }
+.machine-drift-preview > summary { padding: 11px 0; color: #294a47; font-size: 12px; cursor: pointer; }
+.machine-drift-preview .success-strip { margin-bottom: 12px; }
+.bulk-upgrade-panel { grid-column: span 2; }
 
 @media (max-width: 1050px) {
   .machine-workspace { grid-template-columns: 1fr; }

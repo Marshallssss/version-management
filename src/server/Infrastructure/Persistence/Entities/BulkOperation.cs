@@ -21,6 +21,6 @@ public sealed class BulkOperationItem
     public string? Detail { get; set; }
 }
 
-public enum BulkOperationType { MachineTargetAssignment, MachineFactRecording }
+public enum BulkOperationType { MachineTargetAssignment, MachineFactRecording, MachineBaselineUpgrade }
 public enum BulkOperationStatus { Pending, Running, Succeeded, Failed }
 public enum BulkOperationItemStatus { Succeeded, Skipped, Failed }
