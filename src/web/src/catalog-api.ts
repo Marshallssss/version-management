@@ -137,6 +137,20 @@ export const compareMachineToBaseline = (machineId: string, baselineId: string) 
 export const compareMachines = (leftMachineId: string, rightMachineId: string) => request<{ matchStatus: string; riskSeverity: string; items: Array<{ componentId: string; componentName: string; status: string; leftVersionId: string | null; leftVersionNumber: string | null; rightVersionId: string | null; rightVersionNumber: string | null }> }>(`/api/v1/machines/${leftMachineId}/compare/${rightMachineId}`)
 export const compareMachineCurrentToHistory = (machineId: string, at: string) => request<{ matchStatus: string; riskSeverity: string; items: Array<{ componentId: string; componentName: string; status: string; currentVersionId: string | null; currentVersionNumber: string | null; historicalVersionId: string | null; historicalVersionNumber: string | null }> }>(`/api/v1/machines/${machineId}/compare-history?at=${encodeURIComponent(at)}`)
 export const getVersionImpact = (versionId: string) => request<{ usedBaselineIds: string[]; currentMachineIds: string[]; targetMachineIds: string[]; historicalMachineIds: string[]; recentFacts: Array<{ machineId: string; operationType: string; effectiveAt: string }> }>(`/api/v1/component-versions/${versionId}/impact`)
+export const exportVersionImpactCsv = async (versionId: string, reason: string) => {
+  const response = await fetch(`/api/v1/component-versions/${versionId}/impact/export`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { Accept: 'text/csv', 'Content-Type': 'application/json', 'Idempotency-Key': createIdempotencyKey() },
+    body: JSON.stringify({ reason }),
+  })
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as { message?: string; errors?: Record<string, string[]> } | null
+    throw new Error(body?.message ?? Object.values(body?.errors ?? {}).flat().join(' ') ?? `HTTP ${response.status}`)
+  }
+  const filename = response.headers.get('content-disposition')?.match(/filename="?([^";]+)"?/i)?.[1] ?? `version-impact-${versionId}.csv`
+  return { blob: await response.blob(), filename }
+}
 export const getVersionExposureSnapshots = (versionId: string) => request<Array<{ id: string; blockedAt: string; blockedBy: string; reason: string; currentMachineCount: number; targetMachineCount: number; historicalMachineCount: number; baselineCount: number }>>(`/api/v1/component-versions/${versionId}/exposures`)
 export const getVersionDetail = (versionId: string) => request<{ version: { componentName: string; versionNumber: string; sequenceNo: number; maturity: string; safety: string; createdAt: string }; recommended: boolean; transitions: Array<{ axis: string; fromState: string; toState: string; reason: string; actor: string; occurredAt: string }>; patches: VersionPatch[] }>(`/api/v1/component-versions/${versionId}`)
 export const searchCatalog = (query: string) => request<Array<{ type: string; id: string; projectId: string; versionId?: string; label: string }>>(`/api/v1/search?query=${encodeURIComponent(query)}`)
