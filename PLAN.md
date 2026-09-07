@@ -1720,8 +1720,8 @@ Core V1 必须形成完整可用闭环，不追求所有高级能力。
 
 ### V1.1 Immediate Next Work
 
-- 当前处于 `0.2.0-pilot.1` Freeze：先执行内部试点并收集阻断问题，不继续开发 3A 后续 UI/验收、附件、导入映射或保存视图。
-- 试点通过后，恢复顺序为 3A 的 CSV 导出中文 UI、导出自动验收与全局部署检索；继续保持每个 Vertical Slice 的数据库 → Domain/Application → API → UI → 自动化测试 → Release/Migration/集成验收闭环。
+- `0.2.0-pilot.1` Freeze 后的阻断问题与核心机台工作台补强已处理；3A 的阻断快照、影响页、CSV 导出和自动验收现已全部闭环。
+- 下一片为 3B-1 导入映射模板：模板只保存列映射与个人偏好，导入数据仍必须经过 Stage → Validate → Preview → Domain Commands；随后才评估不可变附件对象与轻量保存视图。继续保持每个 Vertical Slice 的数据库 → Domain/Application → API → UI → 自动化测试 → Release/Migration/集成验收闭环。
 
 ## Phase 2
 
