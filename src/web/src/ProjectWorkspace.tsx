@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { changeVersionMaturity, changeVersionSafety, createBaseline, createComponent, createComponentVersion, createVersionPatch, deleteComponent, exportVersionImpactCsv, getBaselineDetail, getProjectStandard, getVersionDetail, getVersionImpact, moveComponent, recommendVersion, reorderComponent, updateComponent, type ConfigurationComponent, type ProjectDetail } from './catalog-api'
+import { changeVersionMaturity, changeVersionSafety, createComponent, createComponentVersion, createVersionPatch, deleteComponent, exportVersionImpactCsv, getBaselineDetail, getProjectStandard, getVersionDetail, getVersionImpact, moveComponent, recommendVersion, reorderComponent, updateComponent, type ConfigurationComponent, type ProjectDetail } from './catalog-api'
+import { Modal } from 'antd'
+import { ArrowLeftOutlined, ArrowRightOutlined, HistoryOutlined, SortAscendingOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons'
+import { LaboratoryHistory } from './LaboratoryHistory'
 import { ProjectBaselineHistory } from './ProjectBaselineHistory'
 
 type FormMode = 'idle' | 'create-root' | 'create-child' | 'edit' | 'delete'
@@ -43,12 +46,11 @@ export function ProjectWorkspace({ detail, focusedVersionId, focusedBaselineId, 
   const [patchResolution, setPatchResolution] = useState('')
   const [patchStatus, setPatchStatus] = useState('Released')
   const [impactExportReason, setImpactExportReason] = useState('')
-  const [selectedTestingVersionIds, setSelectedTestingVersionIds] = useState<string[]>([])
-  const [labVersionOverrides, setLabVersionOverrides] = useState<Record<string, string>>({})
-  const [labBaselineCode, setLabBaselineCode] = useState('')
-  const [labBaselineReason, setLabBaselineReason] = useState('')
   const [rootColumnWidth, setRootColumnWidth] = useState(190)
-  const [inspectorCollapsed, setInspectorCollapsed] = useState(false)
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(true)
+  const [sorting, setSorting] = useState(false)
+  const [laboratoryHistoryOpen, setLaboratoryHistoryOpen] = useState(false)
+  const [composerRequest, setComposerRequest] = useState(0)
   const selected = detail.components.find(component => component.id === selectedId) ?? null
   const selectedVersion = selected?.versions.find(version => version.id === selectedVersionId) ?? null
   const projectStandard = useQuery({ queryKey: ['workspace-project-standard', detail.project.id], queryFn: () => getProjectStandard(detail.project.id) })
@@ -87,9 +89,11 @@ export function ProjectWorkspace({ detail, focusedVersionId, focusedBaselineId, 
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: ['project', detail.project.id] })
     await queryClient.invalidateQueries({ queryKey: ['projects'] })
+    await queryClient.invalidateQueries({ queryKey: ['project-version-detail'] })
   }
   const reset = () => { setFormMode('idle'); setName(''); setReason('') }
   const selectComponent = (componentId: string) => {
+    setInspectorCollapsed(false)
     const component = detail.components.find(candidate => candidate.id === componentId)
     setSelectedId(componentId)
     setSelectedVersionId(current => component?.versions.some(version => version.id === current) ? current : component?.versions[0]?.id ?? '')
@@ -99,7 +103,10 @@ export function ProjectWorkspace({ detail, focusedVersionId, focusedBaselineId, 
     setSelectedVersionId(detail.components[0]?.versions[0]?.id ?? '')
     setFormMode('idle')
     setInspectorTab('versions')
-    setInspectorCollapsed(false)
+    setInspectorCollapsed(true)
+    setSorting(false)
+    setComposerRequest(0)
+    setLaboratoryHistoryOpen(false)
     const savedWidth = Number(window.localStorage.getItem(`confighub.root-column-width:${detail.project.id}`))
     setRootColumnWidth(Number.isFinite(savedWidth) && savedWidth >= 150 && savedWidth <= 320 ? savedWidth : 190)
   }, [detail.project.id])
@@ -114,6 +121,7 @@ export function ProjectWorkspace({ detail, focusedVersionId, focusedBaselineId, 
       setSelectedId(component.id)
       setSelectedVersionId(focusedVersionId)
       setInspectorTab('status')
+      setInspectorCollapsed(false)
     }
   }, [detail.components, focusedVersionId])
   const startCreate = (mode: 'create-root' | 'create-child') => { setFormMode(mode); setName(''); setReason('') }
@@ -177,18 +185,6 @@ export function ProjectWorkspace({ detail, focusedVersionId, focusedBaselineId, 
       await queryClient.invalidateQueries({ queryKey: ['project-version-detail', selectedVersionId] })
     },
   })
-  const createBaselineFromLab = useMutation({
-    mutationFn: () => {
-      const selectedTestingVersions = detail.components.flatMap(component => component.versions.filter(version => selectedTestingVersionIds.includes(version.id)).map(version => ({ componentId: component.id, versionId: version.id })))
-      const selectedTestingByComponent = new Map(selectedTestingVersions.map(item => [item.componentId, item.versionId]))
-      const versionSelections = detail.components.flatMap(component => {
-        const versionId = selectedTestingByComponent.get(component.id) ?? labVersionOverrides[component.id] ?? standardVersionIdByComponent.get(component.id) ?? component.versions.filter(version => version.maturity === 'Released').sort((left, right) => right.sequenceNo - left.sequenceNo)[0]?.id
-        return versionId ? [{ componentId: component.id, versionId }] : []
-      })
-      return createBaseline(detail.project.id, { seriesCode: detail.project.code, baselineCode: labBaselineCode, description: '由实验室测试版本生成', reason: labBaselineReason, versionSelections, testingVersionIds: selectedTestingVersionIds })
-    },
-    onSuccess: async () => { setSelectedTestingVersionIds([]); setLabVersionOverrides({}); setLabBaselineCode(''); setLabBaselineReason(''); onSuccess('测试版本已发布，并按当前标准的其余版本创建基线草稿。'); await refresh(); await queryClient.invalidateQueries({ queryKey: ['project-baseline-history', detail.project.id] }) },
-  })
   const onDrop = (parentComponentId: string | null) => {
     if (!draggingId || draggingId === parentComponentId) return
     const dragged = detail.components.find(component => component.id === draggingId)
@@ -205,12 +201,6 @@ export function ProjectWorkspace({ detail, focusedVersionId, focusedBaselineId, 
     const version = patchPreviewFor(component)
     return version && version.patchCount > 0 ? <details className="patch-tree-preview"><summary title={`${version.patchCount} 条补丁记录`}>补丁 {version.patchCount}</summary><div><strong>{version.versionNumber}</strong>{version.patches.map(patch => <small key={patch.patchCode}>{patch.patchCode} · {patch.title}（{patchStatusText(patch.status)}）</small>)}</div></details> : null
   }
-  const selectTestingVersion = (component: ConfigurationComponent, versionId: string) => {
-    setSelectedId(component.id)
-    setSelectedVersionId(versionId)
-    setInspectorTab('status')
-    setInspectorCollapsed(false)
-  }
   const renderBranchNode = (component: ConfigurationComponent, depth: number) => <div className="branch-node" key={component.id} style={{ paddingLeft: `${depth * 12}px` }}>
     <div className="tree-node-row"><button type="button" draggable className={`tree-node ${component.id === selectedId ? 'selected' : ''}`} onClick={() => selectComponent(component.id)} onDragStart={(event) => { event.dataTransfer.effectAllowed = 'move'; setDraggingId(component.id) }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); onDrop(component.id) }}>
       <span className="tree-node-copy"><strong>{component.name}</strong><small className="baseline-version">{standardVersionText(component)}</small></span>
@@ -222,7 +212,6 @@ export function ProjectWorkspace({ detail, focusedVersionId, focusedBaselineId, 
       <span><strong>{component.name}</strong><small>{testingVersions.get(component.id)?.length ? testingVersions.get(component.id)!.map(version => version.versionNumber).join('、') : testingBranchIds.has(component.id) ? '包含测试中的子组件' : '暂无实验室测试版本'}</small></span>
       <span className="testing-count" title={`此分支共 ${testingVersionCounts.get(component.id) ?? 0} 个测试中版本`}><small>测试中</small><b>{testingVersionCounts.get(component.id) ?? 0}</b></span>
     </button>
-    {testingVersions.get(component.id)?.map(version => <button type="button" className="lab-history-action" key={version.id} onClick={() => selectTestingVersion(component, version.id)}><span>{version.versionNumber}</span><small>查看时间线</small></button>)}
     {children.get(component.id)?.filter(child => testingBranchIds.has(child.id)).map(child => renderTestingNode(child, depth + 1))}
   </div>
   const versionSelection = selectedVersion ? <div className="selected-version-summary"><strong>{selectedVersion.versionNumber}</strong><small>{maturityText(selectedVersion.maturity)} · {safetyText(selectedVersion.safety)}</small></div> : <p className="empty-state">先在“版本”中选择或登记软件版本。</p>
@@ -231,19 +220,25 @@ export function ProjectWorkspace({ detail, focusedVersionId, focusedBaselineId, 
     <div className="workspace-heading"><div><span className="section-index">{detail.project.code}</span><h2>{detail.project.name}</h2><p>{detail.project.description || '在此查看项目标准下的组件版本情况，并按需选择、拖拽、维护组件或登记版本。'}</p></div></div>
     <div className={`workspace-layout ${inspectorCollapsed ? 'inspector-collapsed' : ''}`}>
       <aside className="component-tree-panel">
-        <section className="laboratory-tree"><div className="tree-toolbar"><strong>实验室测试版本</strong><small>根组件完整展示；子组件只在自身或后代存在“测试中”版本时显示。选择测试版本后生成新基线：所选版本会原子发布，其余组件默认保留当前项目标准。</small></div><div className="lab-root-grid">{children.get(null)?.map(root => <section className="lab-root-column" key={root.id}>{renderTestingNode(root, 0)}</section>)}</div>{detail.components.some(component => testingVersions.get(component.id)?.length) && <form className="lab-baseline-form" onSubmit={event => { event.preventDefault(); createBaselineFromLab.mutate() }}><div className="lab-baseline-options">{detail.components.flatMap(component => testingVersions.get(component.id)?.map(version => <label key={version.id}><input type="checkbox" checked={selectedTestingVersionIds.includes(version.id)} onChange={event => setSelectedTestingVersionIds(current => event.target.checked ? [...current, version.id] : current.filter(id => id !== version.id))} /><span>{component.name} · {version.versionNumber}</span></label>) ?? [])}</div><details className="lab-version-overrides"><summary>手动修正其余组件版本</summary><p>默认沿用当前项目标准；没有标准时采用该组件最新已发布版本。</p><div>{detail.components.map(component => { const released = component.versions.filter(version => version.maturity === 'Released').sort((left, right) => right.sequenceNo - left.sequenceNo); const defaultVersionId = standardVersionIdByComponent.get(component.id) ?? released[0]?.id; return released.length && !selectedTestingVersionIds.some(versionId => testingVersions.get(component.id)?.some(version => version.id === versionId)) ? <label key={component.id}>{component.name}<select value={labVersionOverrides[component.id] ?? defaultVersionId ?? ''} onChange={event => setLabVersionOverrides(current => ({ ...current, [component.id]: event.target.value }))}>{released.map(version => <option key={version.id} value={version.id}>{version.versionNumber}</option>)}</select></label> : null })}</div></details><label>新基线名称<input value={labBaselineCode} maxLength={100} placeholder="例如：BL-108" onChange={event => setLabBaselineCode(event.target.value)} required /></label><label>创建原因<input value={labBaselineReason} maxLength={500} onChange={event => setLabBaselineReason(event.target.value)} required /></label><button className="primary-action" type="submit" disabled={selectedTestingVersionIds.length === 0 || createBaselineFromLab.isPending}>{createBaselineFromLab.isPending ? '正在生成' : `将 ${selectedTestingVersionIds.length} 个测试版本发布并生成基线`}</button>{createBaselineFromLab.isError && <p className="error-strip">{createBaselineFromLab.error.message}</p>}</form>}</section>
-        <section className="baseline-tree"><div className={`tree-toolbar root-drop-target ${draggingId ? 'dragging' : ''}`} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); onDrop(null) }}><div className="tree-toolbar-line"><div><strong>当前基线版本</strong><small>{draggingId ? '松开鼠标：恢复为根组件' : projectStandard.data ? `项目标准：${projectStandard.data.baselineCode}；仅已发布版本可进入新基线` : '尚未设置项目标准；仅已发布版本可进入新基线'}</small></div>{detail.components.length > 0 && <label className="component-density-control" title="拖动后会记住此项目的组件列宽"><span>列宽</span><input type="range" min="150" max="320" step="10" value={rootColumnWidth} onChange={event => updateRootColumnWidth(Number(event.target.value))} /></label>}</div></div>
-          {detail.components.length ? <div className="component-columns" style={{ '--root-column-min': `${rootColumnWidth}px` } as CSSProperties}>{children.get(null)?.map(root => <section className="root-component-column" key={root.id}><div className="root-node-wrap"><button type="button" draggable className={`root-node ${root.id === selectedId ? 'selected' : ''}`} onClick={() => selectComponent(root.id)} onDragStart={(event) => { event.dataTransfer.effectAllowed = 'move'; setDraggingId(root.id) }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); onDrop(root.id) }}><span><strong>{root.name}</strong><small className="baseline-version">{standardVersionText(root)}</small></span><span className="tree-node-count" title={rootCountTitle(root)}>{rootCount(root)}</span></button>{renderPatchPreview(root)}<div className="root-order-actions"><button type="button" title="向左排序" aria-label="向左排序" disabled={reorder.isPending} onClick={() => reorder.mutate({ componentId: root.id, direction: 'Up' })}>←</button><button type="button" title="向右排序" aria-label="向右排序" disabled={reorder.isPending} onClick={() => reorder.mutate({ componentId: root.id, direction: 'Down' })}>→</button></div></div><div className="root-column-body">{children.get(root.id)?.length ? children.get(root.id)!.map(child => renderBranchNode(child, 0)) : <p className="empty-state">暂无子组件。</p>}<button type="button" className="add-child-node" onClick={() => { selectComponent(root.id); startCreate('create-child') }}>新增 {root.name} 子组件</button></div></section>)}</div> : <p className="empty-state">尚无组件。先新增根组件，再从树上逐层添加零部件。</p>}
+        <section className="laboratory-tree">
+          <div className="tree-toolbar tree-toolbar-line"><div><strong>实验室测试版本</strong><small>测试中的版本与组件层级</small></div><div className="toolbar-actions">
+            <button type="button" onClick={() => setLaboratoryHistoryOpen(true)}><HistoryOutlined aria-hidden /> 测试历史</button>
+            <button type="button" onClick={() => setComposerRequest(value => value + 1)} disabled={!detail.components.some(component => testingVersions.get(component.id)?.length)}>从测试版本创建基线</button>
+          </div></div>
+          <div className="lab-root-grid">{children.get(null)?.map(root => <section className="lab-root-column" key={root.id}>{renderTestingNode(root, 0)}</section>)}</div>
+        </section>
+        <section className="baseline-tree"><div className={`tree-toolbar root-drop-target ${draggingId ? 'dragging' : ''}`} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); onDrop(null) }}><div className="tree-toolbar-line"><div><strong>当前基线版本</strong><small>{draggingId ? '松开鼠标：恢复为根组件' : projectStandard.data ? `项目标准：${projectStandard.data.baselineCode}；仅已发布版本可进入新基线` : '尚未设置项目标准；仅已发布版本可进入新基线'}</small></div>{detail.components.length > 0 && <label className="component-density-control" title="拖动后会记住此项目的组件列宽"><span>列宽</span><input type="range" min="150" max="320" step="10" value={rootColumnWidth} onChange={event => updateRootColumnWidth(Number(event.target.value))} /></label>}<button type="button" className="sort-toggle" aria-pressed={sorting} onClick={() => setSorting(value => !value)}><SortAscendingOutlined aria-hidden /> 排序</button></div></div>
+          {detail.components.length ? <div className="component-columns" style={{ '--root-column-min': `${rootColumnWidth}px` } as CSSProperties}>{children.get(null)?.map(root => <section className="root-component-column" key={root.id}><div className="root-node-wrap"><button type="button" draggable className={`root-node ${root.id === selectedId ? 'selected' : ''}`} onClick={() => selectComponent(root.id)} onDragStart={(event) => { event.dataTransfer.effectAllowed = 'move'; setDraggingId(root.id) }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); onDrop(root.id) }}><span><strong>{root.name}</strong><small className="baseline-version">{standardVersionText(root)}</small></span><span className="tree-node-count" title={rootCountTitle(root)}>{rootCount(root)}</span></button>{renderPatchPreview(root)}{sorting && <div className="root-order-actions"><button type="button" title="向左排序" aria-label="向左排序" disabled={reorder.isPending || children.get(null)?.[0]?.id === root.id} onClick={() => reorder.mutate({ componentId: root.id, direction: 'Up' })}><ArrowLeftOutlined /></button><button type="button" title="向右排序" aria-label="向右排序" disabled={reorder.isPending || children.get(null)?.at(-1)?.id === root.id} onClick={() => reorder.mutate({ componentId: root.id, direction: 'Down' })}><ArrowRightOutlined /></button></div>}</div><div className="root-column-body">{children.get(root.id)?.length ? children.get(root.id)!.map(child => renderBranchNode(child, 0)) : <p className="empty-state">暂无子组件。</p>}<button type="button" className="add-child-node" onClick={() => { selectComponent(root.id); startCreate('create-child') }}>新增 {root.name} 子组件</button></div></section>)}</div> : <p className="empty-state">尚无组件。先新增根组件，再从树上逐层添加零部件。</p>}
         </section>
         <section className="component-create-panel"><div className="tree-create-heading"><div><span className="section-index">组件创建</span><h3>新增组件</h3></div><div className="component-create-actions"><button type="button" onClick={() => startCreate('create-root')}>新增根组件</button>{selected && <button type="button" onClick={() => startCreate('create-child')}>新增 {selected.name} 子组件</button>}</div></div>{(formMode === 'create-root' || formMode === 'create-child') && <form className="workspace-form" onSubmit={(event) => { event.preventDefault(); create.mutate() }}><p className="form-hint wide-field">{formMode === 'create-root' ? '将新增一个与现有根组件并列的组件；没有登记版本时会作为结构分类节点。' : `将新增到 ${selected?.name ?? '当前组件'} 之下；没有登记版本时会作为结构分类节点。`}</p><label className="wide-field">组件名称<input value={name} maxLength={200} onChange={(event) => setName(event.target.value)} required /></label><label className="wide-field">创建原因<input value={reason} maxLength={500} onChange={(event) => setReason(event.target.value)} required /></label><div className="form-actions"><button type="button" onClick={reset}>取消</button><button className="primary-action" type="submit" disabled={create.isPending}>{create.isPending ? '正在新增' : formMode === 'create-root' ? '新增根组件' : '新增子组件'}</button></div>{create.isError && <p className="error-strip wide-field">{create.error.message}</p>}</form>}</section>
       </aside>
       <section className={`component-inspector ${inspectorCollapsed ? 'collapsed' : ''}`}>
-        {inspectorCollapsed ? <button type="button" className="inspector-toggle" title="展开已选组件和版本管理" aria-label="展开已选组件和版本管理" onClick={() => setInspectorCollapsed(false)}>‹</button> : selected ? <><div className="inspector-heading"><div><span className="section-index">已选组件</span><h3>{selected.name}</h3></div><div className="inspector-actions"><button type="button" className="inspector-toggle" title="收起已选组件面板" aria-label="收起已选组件面板" onClick={() => setInspectorCollapsed(true)}>›</button><button type="button" onClick={startEdit}>编辑</button><button type="button" className="danger-action" onClick={() => { setFormMode('delete'); setReason('') }}>删除</button></div></div>
+        {inspectorCollapsed ? <button type="button" className="inspector-toggle" title="展开已选组件和版本管理" aria-label="展开已选组件和版本管理" onClick={() => setInspectorCollapsed(false)}><MenuUnfoldOutlined /></button> : selected ? <><div className="inspector-heading"><div><span className="section-index">已选组件</span><h3>{selected.name}</h3></div><div className="inspector-actions"><button type="button" className="inspector-toggle" title="收起已选组件面板" aria-label="收起已选组件面板" onClick={() => setInspectorCollapsed(true)}><MenuFoldOutlined /></button><button type="button" onClick={startEdit}>编辑</button>{isAdmin && <button type="button" className="danger-action" onClick={() => { setFormMode('delete'); setReason('') }}>删除</button>}</div></div>
           <div className="component-meta"><span>版本 {selected.versions.length}</span><span>拖拽可移动层级</span></div>
-          {(formMode === 'edit' || formMode === 'delete') && <form className="workspace-form inspector-form" onSubmit={(event) => { event.preventDefault(); if (formMode === 'edit') update.mutate(); else remove.mutate() }}>
+          {(formMode === 'edit' || formMode === 'delete') && <form className="workspace-form inspector-form" onSubmit={(event) => { event.preventDefault(); if (formMode === 'edit') update.mutate(); else Modal.confirm({ title: `删除组件「${selected.name}」？`, content: `将同时删除该组件的 ${selected.versions.length} 个版本及补丁记录。操作无法恢复；已被基线或机台历史引用的组件会拒绝删除。`, okText: '确认删除', cancelText: '取消', okButtonProps: { danger: true }, onOk: async () => { try { await remove.mutateAsync() } catch { /* The component form shows the server error after the dialog closes. */ } } }) }}>
             {formMode !== 'delete' && <label className="wide-field">组件名称<input value={name} maxLength={200} onChange={(event) => setName(event.target.value)} required /></label>}
             <label className="wide-field">{formMode === 'delete' ? '删除原因' : '修改原因'}<input value={reason} maxLength={500} onChange={(event) => setReason(event.target.value)} required /></label>
-            {formMode === 'delete' && <p className="form-hint wide-field">仅允许删除没有子组件且没有版本历史的组件。已有版本、基线和实际配置历史不会被删除。</p>}
+            {formMode === 'delete' && <p className="form-hint wide-field">管理员可删除组件及其版本、补丁。请先移走子组件；已进入基线或机台历史的组件需保留。</p>}
             <div className="form-actions"><button type="button" onClick={reset}>取消</button><button className={formMode === 'delete' ? 'danger-action' : 'primary-action'} type="submit" disabled={update.isPending || remove.isPending}>{formMode === 'delete' ? '确认删除' : '保存组件'}</button></div>
             {(update.isError || remove.isError) && <p className="error-strip wide-field">{update.error?.message ?? remove.error?.message}</p>}
           </form>}
@@ -257,6 +252,7 @@ export function ProjectWorkspace({ detail, focusedVersionId, focusedBaselineId, 
         </> : <p className="empty-state">从左侧选择组件，或先创建根组件。</p>}
       </section>
     </div>
-    <ProjectBaselineHistory detail={detail} isAdmin={isAdmin} isSuperAdmin={isSuperAdmin} focusedBaselineId={focusedBaselineId} onSuccess={onSuccess} />
+    <LaboratoryHistory open={laboratoryHistoryOpen} onClose={() => setLaboratoryHistoryOpen(false)} detail={detail} />
+    <ProjectBaselineHistory composerRequest={composerRequest} detail={detail} isAdmin={isAdmin} isSuperAdmin={isSuperAdmin} focusedBaselineId={focusedBaselineId} onSuccess={onSuccess} />
   </section>
 }

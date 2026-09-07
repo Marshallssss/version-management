@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { archiveProject, assignProjectMember, assignProjectStandard, changeUserRole, changeVersionMaturity, changeVersionSafety, cloneProject, commitImport, compareBaselines, createBaseline, createComponent, createComponentVersion, createProject, createUser, decideBaselineReview, getBaselineDetail, getBaselines, getCurrentUser, getDashboard, getImportPreview, getMachineFacts, getMachines, getProject, getProjectMembers, getProjectStandard, getProjects, getUsers, getVersionDetail, getVersionExposureSnapshots, getVersionImpact, login, logout, moveComponent, recommendVersion, releaseBaseline, requestBaselineReview, searchCatalog, setBaselineItemRequirement, stageImport } from './catalog-api'
 import { enqueueNoopJob, getSystemStatus, getSystemVersion, type BackgroundJobStatus } from './system-api'
@@ -228,7 +229,7 @@ function App() {
         <div className="brand-block">
           <span className="brand-mark">CH</span>
           <div className="brand-copy"><strong>ConfigHub</strong><small>工程配置管理</small></div>
-          <button className="rail-toggle" type="button" aria-label={railCollapsed ? '展开导航' : '收起导航'} title={railCollapsed ? '展开导航' : '收起导航'} onClick={() => setRailCollapsed(current => !current)}>{railCollapsed ? '>' : '<'}</button>
+          <button className="rail-toggle" type="button" aria-label={railCollapsed ? '展开导航' : '收起导航'} title={railCollapsed ? '展开导航' : '收起导航'} onClick={() => setRailCollapsed(current => !current)}>{railCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}</button>
         </div>
         <nav aria-label="主导航">
           {visibleNavigation.map((item, index) => (
@@ -344,7 +345,6 @@ function App() {
                 {currentUser.data?.roles.includes('Admin') && <div className="component-list">{projectMembers.data?.map(member => <article className="component-row" key={member.id}><div><strong>{member.displayName}</strong><span>{member.email}</span></div><small>{member.role} · {formatTime(member.assignedAt)}</small></article>)}</div>}
                 <div className="component-list">{projectDetail.data.components.map((component) => <article className="component-row" key={component.id}><div><strong>{component.name}</strong></div><div className="version-tags">{component.versions.length ? component.versions.map((version) => <span key={version.id}>{version.versionNumber}<small>序列 {version.sequenceNo} · {version.maturity} · {version.safety}</small></span>) : <em>尚未登记版本</em>}</div></article>)}</div>
               </section></div>}
-              {projectDetail.data && <ProjectWorkspace detail={projectDetail.data} focusedVersionId={focusedVersionId} focusedBaselineId={focusedBaselineId} isAdmin={isAdmin} isSuperAdmin={isSuperAdmin} onSuccess={setSuccessMessage} />}
               {projectDetail.data && currentUser.data?.roles.includes('Admin') && <section className="status-panel catalog-panel project-members-panel"><div className="panel-heading"><div><span className="section-index">项目权限</span><h3>项目成员</h3></div></div><form className="inline-form" onSubmit={(event) => { event.preventDefault(); assignMember.mutate() }}><label>项目成员<select value={memberUserId} onChange={(event) => setMemberUserId(event.target.value)} required><option value="">请选择用户</option>{users.data?.map(user => <option key={user.id} value={user.id}>{user.displayName} · {user.userName ?? user.email ?? ''}</option>)}</select></label><label>项目角色<select value={memberRole} onChange={(event) => setMemberRole(event.target.value)}><option>Viewer</option><option>Engineer</option><option>SeniorEngineer</option></select></label><label>指派原因<input value={memberReason} onChange={(event) => setMemberReason(event.target.value)} required /></label><button type="submit" disabled={assignMember.isPending}>{assignMember.isPending ? '正在指派' : '指派项目成员'}</button></form>{assignMember.isError && <p className="error-strip">{assignMember.error?.message}</p>}<div className="component-list">{projectMembers.data?.map(member => <article className="component-row" key={member.id}><div><strong>{member.displayName}</strong><span>{member.email}</span></div><small>{member.role} · {formatTime(member.assignedAt)}</small></article>)}</div></section>}
               </div>
             </>}

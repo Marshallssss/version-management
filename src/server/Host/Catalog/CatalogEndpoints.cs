@@ -21,7 +21,7 @@ public static class CatalogEndpoints
         endpoints.MapPut("/api/v1/components/{componentId:guid}", async (Guid componentId, [FromBody] UpdateComponentRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken) =>
             await UpdateComponentAsync(componentId, request, context, factory, cancellationToken)).RequireAuthorization("Engineer");
         endpoints.MapDelete("/api/v1/components/{componentId:guid}", async (Guid componentId, [FromBody] DeleteComponentRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken) =>
-            await DeleteComponentAsync(componentId, request, context, factory, cancellationToken)).RequireAuthorization("Engineer");
+            await DeleteComponentAsync(componentId, request, context, factory, cancellationToken)).RequireAuthorization("Admin");
         endpoints.MapPost("/api/v1/components/{componentId:guid}/move", MoveComponentAsync).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/components/{componentId:guid}/reorder", ReorderComponentAsync).RequireAuthorization("Engineer");
         projects.MapPost("/{projectId:guid}/clone", CloneAsync).RequireAuthorization("Engineer");
@@ -39,6 +39,7 @@ public static class CatalogEndpoints
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/review/approve", ApproveBaselineReviewAsync).RequireAuthorization("Admin");
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/review/reject", RejectBaselineReviewAsync).RequireAuthorization("Admin");
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/undo-creation", UndoBaselineCreationAsync).RequireAuthorization("SeniorEngineer");
+        endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/withdraw-release", WithdrawBaselineReleaseAsync).RequireAuthorization("SeniorEngineer");
         endpoints.MapGet("/api/v1/baselines/{baselineId:guid}", GetBaselineDetailAsync).RequireAuthorization();
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/items/{itemId:guid}/requirement", SetBaselineItemRequirementAsync).RequireAuthorization("SeniorEngineer");
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/maintenance", MaintainBaselineDraftAsync).RequireAuthorization("SuperAdmin");
@@ -1245,8 +1246,6 @@ public static class CatalogEndpoints
         if (baseline is null) return Results.NotFound();
         if (!await HasProjectWriteAccessAsync(database, context, baseline.ProjectId, cancellationToken, requireSeniorMembership: true)) return Results.Forbid();
         if (baseline.State != BaselineState.Draft) return Results.Conflict(new { message = "只有尚未发布的基线草稿可以撤回创建。" });
-        if (now - baseline.CreatedAt > TimeSpan.FromMinutes(1)) return Results.Conflict(new { message = "基线创建仅可在 1 分钟内撤回。" });
-        if (await database.BaselineReviews.AnyAsync(item => item.ConfigurationBaselineId == baselineId, cancellationToken)) return Results.Conflict(new { message = "已进入评审流程的基线不能撤回创建。" });
         if (await database.ProjectStandardAssignments.AnyAsync(item => item.ConfigurationBaselineId == baselineId, cancellationToken)
             || await database.MachineTargetAssignments.AnyAsync(item => item.ConfigurationBaselineId == baselineId, cancellationToken))
             return Results.Conflict(new { message = "已被标准或机台引用的基线不能撤回创建。" });
@@ -1258,11 +1257,14 @@ public static class CatalogEndpoints
         var testingVersionIds = createdAudit?.Data?.RootElement.TryGetProperty("testingVersionIds", out var testingIdsElement) == true
             ? testingIdsElement.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.String && Guid.TryParse(item.GetString(), out _)).Select(item => Guid.Parse(item.GetString()!)).Distinct().ToArray()
             : [];
-        if (testingVersionIds.Length == 0) return Results.Conflict(new { message = "此基线不是由测试版本生成，不能使用快速撤回。" });
 
         var versions = await database.ComponentVersions.Where(item => testingVersionIds.Contains(item.Id)).ToListAsync(cancellationToken);
         if (versions.Count != testingVersionIds.Length || versions.Any(item => item.Maturity != VersionMaturity.Released))
             return Results.Conflict(new { message = "关联版本已变更，不能安全撤回该基线。" });
+        var componentIds = versions.Select(item => item.ComponentId).ToArray();
+        if (await database.ComponentVersions.AnyAsync(item => componentIds.Contains(item.ComponentId) && item.Maturity == VersionMaturity.Testing, cancellationToken)
+            || await database.BaselineItems.AnyAsync(item => item.ConfigurationBaselineId != baselineId && item.ComponentVersionId != null && testingVersionIds.Contains(item.ComponentVersionId.Value), cancellationToken))
+            return Results.Conflict(new { message = "已有新的测试版本或其他基线引用关联版本，无法将其恢复为测试中。" });
         var actor = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required.");
         var items = await database.BaselineItems.Where(item => item.ConfigurationBaselineId == baselineId).OrderByDescending(item => item.LineageKeySnapshot.Length).ToListAsync(cancellationToken);
 
@@ -1276,6 +1278,8 @@ public static class CatalogEndpoints
             AddAuditEvent(database, context, "VersionMaturityChanged", "ComponentVersion", version.Id, new { from = "Released", to = "Testing", reason = request.Reason!.Trim(), source = "BaselineCreationUndo" });
         }
         database.BaselineItems.RemoveRange(items);
+        database.BaselineReviews.RemoveRange(await database.BaselineReviews.Where(item => item.ConfigurationBaselineId == baselineId).ToListAsync(cancellationToken));
+        database.BaselineLifecycleTransitions.RemoveRange(await database.BaselineLifecycleTransitions.Where(item => item.ConfigurationBaselineId == baselineId).ToListAsync(cancellationToken));
         database.ConfigurationBaselines.Remove(baseline);
         AddAuditEvent(database, context, "BaselineCreationUndone", "ConfigurationBaseline", baselineId, new { baselineCode = baseline.BaselineCode, reason = request.Reason!.Trim(), testingVersionIds });
         await database.SaveChangesAsync(cancellationToken);
@@ -1284,6 +1288,45 @@ public static class CatalogEndpoints
         await database.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return TypedResults.Ok(new { id = baselineId, undone = true, restoredTestingVersionCount = versions.Count });
+    }
+
+    private static async Task<IResult> WithdrawBaselineReleaseAsync(Guid baselineId, LifecycleRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        var validation = ValidateRequired(request.Reason, "撤回原因", 500);
+        if (validation is not null) return Results.ValidationProblem(validation);
+        var key = context.Request.Headers["Idempotency-Key"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.BadRequest(new { message = "撤回需要有效的 Idempotency-Key。" });
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        // Serialize against target/standard writes, which acquire a foreign-key lock on this row.
+        var baseline = await db.ConfigurationBaselines.FromSqlInterpolated($"SELECT * FROM configuration_baselines WHERE id = {baselineId} FOR UPDATE").SingleOrDefaultAsync(cancellationToken);
+        if (baseline is null) return Results.NotFound();
+        if (!await HasProjectWriteAccessAsync(db, context, baseline.ProjectId, cancellationToken, requireSeniorMembership: true)) return Results.Forbid();
+        var scope = $"baselines.withdraw-release:{baselineId}";
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request))));
+        var replay = await db.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
+        if (replay is not null)
+        {
+            if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" });
+            if (replay.Result is not null) return Results.Ok(replay.Result.RootElement.Clone());
+            return Results.Conflict(new { message = "该请求仍在处理。" });
+        }
+        var now = DateTimeOffset.UtcNow;
+        if (baseline.State != BaselineState.Released || baseline.ReleasedAt is null || now - baseline.ReleasedAt > TimeSpan.FromMinutes(3))
+            return Results.Conflict(new { message = "仅可在基线正式发布后 3 分钟内撤回。" });
+        if (await db.ProjectStandardAssignments.AnyAsync(item => item.ConfigurationBaselineId == baselineId, cancellationToken)
+            || await db.MachineTargetAssignments.AnyAsync(item => item.ConfigurationBaselineId == baselineId, cancellationToken)
+            || await db.DeploymentBatches.AnyAsync(item => item.SourceConfigurationBaselineId == baselineId, cancellationToken)
+            || await db.ConfigurationBaselines.AnyAsync(item => item.SupersedesBaselineId == baselineId, cancellationToken))
+            return Results.Conflict(new { message = "基线已被项目标准、机台或后续修订使用，不能撤回。" });
+        baseline.State = BaselineState.Deprecated;
+        db.BaselineLifecycleTransitions.Add(new BaselineLifecycleTransition { Id = Guid.NewGuid(), ConfigurationBaselineId = baselineId, FromState = "Released", ToState = "Deprecated", Reason = request.Reason!.Trim(), Actor = context.User.Identity!.Name!, OccurredAt = now });
+        AddAuditEvent(db, context, "BaselineReleaseWithdrawn", "ConfigurationBaseline", baselineId, new { reason = request.Reason.Trim(), baseline.BaselineCode });
+        var result = new { id = baselineId, state = baseline.State.ToString() };
+        db.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7), Status = IdempotencyRecordStatus.Completed, Result = JsonDocument.Parse(JsonSerializer.Serialize(result)) });
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return Results.Ok(result);
     }
 
     private static async Task<IResult> ReleaseBaselineAsync(
@@ -1698,6 +1741,7 @@ public static class CatalogEndpoints
 
     private static async Task<IResult> DeleteComponentAsync(Guid componentId, DeleteComponentRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
     {
+        if (!context.User.IsInRole("Admin") && !context.User.IsInRole("SuperAdmin")) return Results.Forbid();
         if (string.IsNullOrWhiteSpace(request.Reason)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["reason"] = ["必须提供删除原因。"] });
         var key = context.Request.Headers["Idempotency-Key"].FirstOrDefault(); if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["删除组件必须提供不超过 200 个字符的 Idempotency-Key。"] });
         await using var database = await factory.CreateDbContextAsync(cancellationToken);
@@ -1707,9 +1751,21 @@ public static class CatalogEndpoints
         if (component is null) return Results.NotFound();
         if (!await HasProjectWriteAccessAsync(database, context, component.ProjectId, cancellationToken)) return Results.Forbid();
         if (await database.ConfigurationComponents.AnyAsync(item => item.ParentComponentId == componentId, cancellationToken)) return Results.Conflict(new { message = "请先移动或删除子组件后再删除该组件。" });
-        if (await database.ComponentVersions.AnyAsync(item => item.ComponentId == componentId, cancellationToken)) return Results.Conflict(new { message = "已有软件版本的组件不能删除，以保留版本、基线和事实历史。" });
+        if (await database.BaselineItems.AnyAsync(item => item.ConfigurationComponentId == componentId, cancellationToken)
+            || await database.DeploymentItems.AnyAsync(item => item.ConfigurationComponentId == componentId, cancellationToken)
+            || await database.MachineCurrentConfigurations.AnyAsync(item => item.ConfigurationComponentId == componentId, cancellationToken))
+            return Results.Conflict(new { message = "该组件已进入基线或机台历史，不能删除历史引用。" });
+        var versions = await database.ComponentVersions.Where(item => item.ComponentId == componentId).ToListAsync(cancellationToken);
+        var versionIds = versions.Select(item => item.Id).ToArray();
+        if (await database.VersionExposureSnapshots.AnyAsync(item => versionIds.Contains(item.ComponentVersionId), cancellationToken)
+            || await database.ConfigurationBaselines.AnyAsync(item => item.TopComponentVersionId != null && versionIds.Contains(item.TopComponentVersionId.Value), cancellationToken))
+            return Results.Conflict(new { message = "组件版本已有阻断影响快照或基线引用，不能删除。" });
+        database.VersionPatches.RemoveRange(await database.VersionPatches.Where(item => versionIds.Contains(item.ComponentVersionId)).ToListAsync(cancellationToken));
+        database.VersionRecommendations.RemoveRange(await database.VersionRecommendations.Where(item => versionIds.Contains(item.ComponentVersionId)).ToListAsync(cancellationToken));
+        database.VersionLifecycleTransitions.RemoveRange(await database.VersionLifecycleTransitions.Where(item => versionIds.Contains(item.ComponentVersionId)).ToListAsync(cancellationToken));
+        database.ComponentVersions.RemoveRange(versions);
         var now = DateTimeOffset.UtcNow; await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken); database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }); database.ConfigurationComponents.Remove(component);
-        AddAuditEvent(database, context, "ComponentDeleted", "ConfigurationComponent", component.Id, new { component.ProjectId, component.Name, reason = request.Reason.Trim() });
+        AddAuditEvent(database, context, "ComponentDeleted", "ConfigurationComponent", component.Id, new { component.ProjectId, component.Name, versions = versions.Select(item => new { item.Id, item.VersionNumber }), reason = request.Reason.Trim() });
         await database.SaveChangesAsync(cancellationToken); var record = await database.IdempotencyRecords.SingleAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken); record.Status = IdempotencyRecordStatus.Completed; record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = componentId, deleted = true })); await database.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
         return TypedResults.Ok(new { id = componentId, deleted = true });
     }

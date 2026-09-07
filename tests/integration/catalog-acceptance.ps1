@@ -150,9 +150,13 @@ try {
 }
 $deleteChildHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() }
 $deleteChildBody = @{ reason = '自动化空叶节点删除' } | ConvertTo-Json
+$deletableVersion = Invoke-JsonPost "/api/v1/components/$($editableChild.id)/versions" @{ versionNumber = 'delete-with-component'; reason = '自动化同步版本删除'; maturity = 'Testing' }
+Invoke-JsonPost "/api/v1/component-versions/$($deletableVersion.id)/patches" @{ patchCode = 'HF-DELETE'; title = 'Temporary patch'; issueDescription = 'test'; resolutionDescription = 'test'; status = 'Released' } | Out-Null
+try { Invoke-RestMethod -WebSession $viewerSession -Method Delete -Uri ([uri]::new($BaseUri, "/api/v1/components/$($editableChild.id)")) -Headers $deleteChildHeaders -ContentType 'application/json' -Body $deleteChildBody | Out-Null; throw 'Non-admin component deletion unexpectedly succeeded.' } catch { if ($_.Exception.Message -match 'unexpectedly succeeded') { throw }; if ($_.Exception.Response.StatusCode.value__ -ne 403) { throw } }
 $deletedChild = Invoke-RestMethod -WebSession $session -Method Delete -Uri ([uri]::new($BaseUri, "/api/v1/components/$($editableChild.id)")) -Headers $deleteChildHeaders -ContentType 'application/json' -Body $deleteChildBody
 $deletedChildReplay = Invoke-RestMethod -WebSession $session -Method Delete -Uri ([uri]::new($BaseUri, "/api/v1/components/$($editableChild.id)")) -Headers $deleteChildHeaders -ContentType 'application/json' -Body $deleteChildBody
 if (-not $deletedChild.deleted -or -not $deletedChildReplay.deleted) { throw 'Expected idempotent empty leaf component deletion.' }
+try { Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/component-versions/$($deletableVersion.id)")) | Out-Null; throw 'Deleted component version unexpectedly survived.' } catch { if ($_.Exception.Message -match 'unexpectedly survived') { throw }; if ($_.Exception.Response.StatusCode.value__ -ne 404) { throw } }
 Invoke-RestMethod -WebSession $session -Method Delete -Uri ([uri]::new($BaseUri, "/api/v1/components/$($editable.id)")) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() } -ContentType 'application/json' -Body (@{ reason = '自动化空根组件删除' } | ConvertTo-Json) | Out-Null
 $child = Invoke-JsonPost "/api/v1/projects/$($project.id)/components" @{ name = 'Child'; parentComponentId = $component.id; reason = '自动化子组件创建' }
 try {
@@ -259,7 +263,7 @@ $undoBaselineBody = @{ reason = '自动化撤回误生成基线' } | ConvertTo-J
 $undoneBaseline = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/baselines/$($labBaseline.id)/undo-creation")) -Headers $undoBaselineHeaders -ContentType 'application/json' -Body $undoBaselineBody
 $undoneBaselineReplay = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/baselines/$($labBaseline.id)/undo-creation")) -Headers $undoBaselineHeaders -ContentType 'application/json' -Body $undoBaselineBody
 $restoredLabVersion = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/component-versions/$($labVersion.id)"))
-if (-not $undoneBaseline.undone -or -not $undoneBaselineReplay.undone -or $restoredLabVersion.version.maturity -ne 'Testing') { throw 'A testing-generated draft baseline must be safely undoable within one minute and restore its testing version.' }
+if (-not $undoneBaseline.undone -or -not $undoneBaselineReplay.undone -or $restoredLabVersion.version.maturity -ne 'Testing') { throw 'A testing-generated draft baseline must be safely cancellable and restore its testing version.' }
 $labBaseline = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($project.id)/baselines")) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString(); 'X-Correlation-ID' = "baseline-lab-recreated-$suffix" } -ContentType 'application/json' -Body $labBaselineBody
 $labVersionDetail = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/component-versions/$($labVersion.id)"))
 if ($labVersionDetail.version.maturity -ne 'Released') { throw 'Recreating a withdrawn testing baseline must publish the selected testing version again.' }
@@ -452,22 +456,42 @@ if ($committed.committed -ne 1 -or $committed.id -ne $committedReplay.id -or $co
 
 if (-not [string]::IsNullOrWhiteSpace($ConnectionString)) {
     $psql = 'C:\Program Files\PostgreSQL\17\bin\psql.exe'
+    if (-not (Test-Path $psql)) { $psql = Join-Path $env:LOCALAPPDATA 'ConfigHub/PostgreSQL17/bin/psql.exe' }
     if (-not (Test-Path $psql)) { throw 'psql.exe is required to verify the baseline immutability trigger.' }
-    $psqlConnection = ($ConnectionString -replace ';', ' ') -replace '(?i)\bHost=', 'host=' -replace '(?i)\bPort=', 'port=' -replace '(?i)\bDatabase=', 'dbname=' -replace '(?i)\bUsername=', 'user=' -replace '(?i)\bPassword=', 'password='
-    $result = & $psql "--dbname=$psqlConnection" -v ON_ERROR_STOP=1 -c "UPDATE baseline_items SET sort_order = sort_order + 1000 WHERE configuration_baseline_id = '$($baseline.id)'" 2>&1
-    if ($LASTEXITCODE -eq 0 -or ($result -join [Environment]::NewLine) -notmatch 'Items of released baseline cannot be modified') {
+    function Invoke-TestSql([string]$Sql) {
+        $settings = [System.Data.Common.DbConnectionStringBuilder]::new()
+        $settings.set_ConnectionString($ConnectionString)
+        $info = [System.Diagnostics.ProcessStartInfo]::new($psql)
+        $info.UseShellExecute = $false
+        $info.CreateNoWindow = $true
+        $info.RedirectStandardOutput = $true
+        $info.RedirectStandardError = $true
+        foreach ($pair in @{ PGHOST = 'Host'; PGPORT = 'Port'; PGDATABASE = 'Database'; PGUSER = 'Username'; PGPASSWORD = 'Password' }.GetEnumerator()) {
+            if ($settings.ContainsKey($pair.Value)) { $info.Environment[$pair.Key] = [string]$settings[$pair.Value] }
+        }
+        $info.Environment['PGCONNECT_TIMEOUT'] = '5'
+        foreach ($argument in @('-w', '-v', 'ON_ERROR_STOP=1', '-c', $Sql)) { $info.ArgumentList.Add($argument) }
+        $sqlProcess = [System.Diagnostics.Process]::Start($info)
+        $output = $sqlProcess.StandardOutput.ReadToEnd() + $sqlProcess.StandardError.ReadToEnd()
+        $sqlProcess.WaitForExit()
+        $exitCode = $sqlProcess.ExitCode
+        $sqlProcess.Dispose()
+        return @{ ExitCode = $exitCode; Output = $output }
+    }
+    $result = Invoke-TestSql "UPDATE baseline_items SET sort_order = sort_order + 1000 WHERE configuration_baseline_id = '$($baseline.id)'"
+    if ($result.ExitCode -eq 0 -or $result.Output -notmatch 'Items of released baseline cannot be modified') {
         throw 'Released baseline item update was not rejected by the PostgreSQL trigger.'
     }
-    $overlap = & $psql "--dbname=$psqlConnection" -v ON_ERROR_STOP=1 -c "INSERT INTO project_standard_assignments (id, project_id, configuration_baseline_id, valid_from, valid_to, assigned_by, reason) VALUES (gen_random_uuid(), '$($project.id)', '$($baseline.id)', now() - interval '1 minute', now() + interval '1 minute', 'test', 'overlap test')" 2>&1
-    if ($LASTEXITCODE -eq 0 -or ($overlap -join [Environment]::NewLine) -notmatch 'ex_project_standard_assignments_no_overlap') {
+    $overlap = Invoke-TestSql "INSERT INTO project_standard_assignments (id, project_id, configuration_baseline_id, valid_from, valid_to, assigned_by, reason) VALUES (gen_random_uuid(), '$($project.id)', '$($baseline.id)', now() - interval '1 minute', now() + interval '1 minute', 'test', 'overlap test')"
+    if ($overlap.ExitCode -eq 0 -or $overlap.Output -notmatch 'ex_project_standard_assignments_no_overlap') {
         throw 'Overlapping project standard assignment was not rejected by the PostgreSQL exclusion constraint.'
     }
-    $secondCurrentTarget = & $psql "--dbname=$psqlConnection" -v ON_ERROR_STOP=1 -c "INSERT INTO machine_target_assignments (id, machine_id, configuration_baseline_id, valid_from, valid_to, assigned_by, reason) VALUES (gen_random_uuid(), '$($machine.id)', '$($baseline.id)', now(), NULL, 'test', 'second current target test')" 2>&1
-    if ($LASTEXITCODE -eq 0 -or ($secondCurrentTarget -join [Environment]::NewLine) -notmatch 'ux_machine_target_assignments_current_machine') {
+    $secondCurrentTarget = Invoke-TestSql "INSERT INTO machine_target_assignments (id, machine_id, configuration_baseline_id, valid_from, valid_to, assigned_by, reason) VALUES (gen_random_uuid(), '$($machine.id)', '$($baseline.id)', now(), NULL, 'test', 'second current target test')"
+    if ($secondCurrentTarget.ExitCode -eq 0 -or $secondCurrentTarget.Output -notmatch 'ux_machine_target_assignments_current_machine') {
         throw 'A second current machine target was not rejected by the PostgreSQL unique constraint.'
     }
-    $targetOverlap = & $psql "--dbname=$psqlConnection" -v ON_ERROR_STOP=1 -c "INSERT INTO machine_target_assignments (id, machine_id, configuration_baseline_id, valid_from, valid_to, assigned_by, reason) VALUES (gen_random_uuid(), '$($machine.id)', '$($baseline.id)', now() - interval '1 minute', now() + interval '1 minute', 'test', 'overlap target test')" 2>&1
-    if ($LASTEXITCODE -eq 0 -or ($targetOverlap -join [Environment]::NewLine) -notmatch 'ex_machine_target_assignments_no_overlap') {
+    $targetOverlap = Invoke-TestSql "INSERT INTO machine_target_assignments (id, machine_id, configuration_baseline_id, valid_from, valid_to, assigned_by, reason) VALUES (gen_random_uuid(), '$($machine.id)', '$($baseline.id)', now() - interval '1 minute', now() + interval '1 minute', 'test', 'overlap target test')"
+    if ($targetOverlap.ExitCode -eq 0 -or $targetOverlap.Output -notmatch 'ex_machine_target_assignments_no_overlap') {
         throw 'Overlapping machine target assignment was not rejected by the PostgreSQL exclusion constraint.'
     }
 }
@@ -486,4 +510,45 @@ $archiveHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString(); 'X-Correl
 $archivedProject = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/projects/$($unscopedProject.id)/archive")) -Headers $archiveHeaders -ContentType 'application/json' -Body (@{ reason = '自动化项目归档验收' } | ConvertTo-Json)
 $remainingProjects = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, '/api/v1/projects'))
 if ($archivedProject.status -ne 'Archived' -or @($remainingProjects | Where-Object { $_.id -eq $unscopedProject.id }).Count -ne 0) { throw 'Project archive must preserve history while removing the project from the active selector.' }
+$withdrawCandidate = Invoke-JsonPost "/api/v1/projects/$($project.id)/baselines" @{ seriesCode = "WITHDRAW-$suffix"; baselineCode = "WITHDRAW-$suffix"; reason = '自动化发布撤回验收' }
+Invoke-JsonPost "/api/v1/baselines/$($withdrawCandidate.id)/review" @{ reason = '送审撤回样本' } | Out-Null
+Invoke-JsonPost "/api/v1/baselines/$($withdrawCandidate.id)/review/approve" @{ reason = '批准撤回样本' } | Out-Null
+Invoke-JsonPost "/api/v1/baselines/$($withdrawCandidate.id)/release" @{ reason = '发布撤回样本' } | Out-Null
+$beforeWithdrawal = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/baselines/$($withdrawCandidate.id)"))
+$withdrawHeaders = @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() }
+$withdrawBody = @{ reason = '误发布，三分钟内撤回' } | ConvertTo-Json
+$withdrawResult = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/baselines/$($withdrawCandidate.id)/withdraw-release")) -Headers $withdrawHeaders -ContentType 'application/json' -Body $withdrawBody
+$withdrawReplay = Invoke-RestMethod -WebSession $session -Method Post -Uri ([uri]::new($BaseUri, "/api/v1/baselines/$($withdrawCandidate.id)/withdraw-release")) -Headers $withdrawHeaders -ContentType 'application/json' -Body $withdrawBody
+$afterWithdrawal = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/baselines/$($withdrawCandidate.id)"))
+if ($withdrawResult.state -ne 'Deprecated' -or $withdrawReplay.id -ne $withdrawResult.id -or ($beforeWithdrawal.items | ConvertTo-Json -Depth 8 -Compress) -ne ($afterWithdrawal.items | ConvertTo-Json -Depth 8 -Compress)) { throw 'Release withdrawal must be idempotent and retain the entire immutable snapshot.' }
+try { Invoke-JsonPost "/api/v1/baselines/$($baseline.id)/withdraw-release" @{ reason = '已使用基线不可撤回' } | Out-Null; throw 'Referenced baseline withdrawal unexpectedly succeeded.' } catch { if ($_.Exception.Message -match 'unexpectedly succeeded') { throw }; if ($_.Exception.Response.StatusCode.value__ -ne 409) { throw } }
+try { Invoke-RestMethod -WebSession $session -Method Delete -Uri ([uri]::new($BaseUri, "/api/v1/components/$($component.id)")) -Headers @{ 'Idempotency-Key' = [Guid]::NewGuid().ToString() } -ContentType 'application/json' -Body $deleteChildBody | Out-Null; throw 'Historical component deletion unexpectedly succeeded.' } catch { if ($_.Exception.Message -match 'unexpectedly succeeded') { throw }; if ($_.Exception.Response.StatusCode.value__ -ne 409) { throw } }
+$oldDraft = Invoke-JsonPost "/api/v1/projects/$($project.id)/baselines" @{ seriesCode = "CANCEL-$suffix"; baselineCode = "CANCEL-$suffix"; reason = '草稿不限时取消验收' }
+Invoke-JsonPost "/api/v1/baselines/$($oldDraft.id)/maintenance" @{ createdAt = '2001-01-01T00:00:00Z'; reason = '历史草稿样本'; maintenanceMode = $true } | Out-Null
+$cancelOldDraft = Invoke-JsonPost "/api/v1/baselines/$($oldDraft.id)/undo-creation" @{ reason = '取消过去录入的草稿' }
+if (-not $cancelOldDraft.undone) { throw 'Draft cancellation must not expire.' }
+
+if (-not [string]::IsNullOrWhiteSpace($ConnectionString)) {
+    $withdrawAudit = Invoke-RestMethod -WebSession $session -Uri ([uri]::new($BaseUri, "/api/v1/audit?entityId=$($withdrawCandidate.id)"))
+    if (@($withdrawAudit | Where-Object { $_.action -eq 'BaselineReleaseWithdrawn' }).Count -ne 1) { throw 'Withdrawal must write one audit event.' }
+    $expiredCandidate = Invoke-JsonPost "/api/v1/projects/$($project.id)/baselines" @{ seriesCode = "EXPIRED-$suffix"; baselineCode = "EXPIRED-$suffix"; reason = '撤回时间边界样本' }
+    Invoke-JsonPost "/api/v1/baselines/$($expiredCandidate.id)/review" @{ reason = '送审边界样本' } | Out-Null
+    Invoke-JsonPost "/api/v1/baselines/$($expiredCandidate.id)/review/approve" @{ reason = '批准边界样本' } | Out-Null
+    Invoke-JsonPost "/api/v1/baselines/$($expiredCandidate.id)/release" @{ reason = '发布边界样本' } | Out-Null
+    $snapshotTamper = Invoke-TestSql "UPDATE configuration_baselines SET state = 'Deprecated', description = 'tampered' WHERE id = '$($expiredCandidate.id)'"
+    if ($snapshotTamper.ExitCode -eq 0 -or $snapshotTamper.Output -notmatch 'cannot be modified') { throw 'Withdrawal must not permit snapshot metadata edits.' }
+    $ageFixture = Invoke-TestSql "BEGIN; SET LOCAL confighub.baseline_maintenance = 'on'; UPDATE configuration_baselines SET released_at = now() - interval '2 minutes' WHERE id = '$($expiredCandidate.id)'; COMMIT;"
+    if ($ageFixture.ExitCode -ne 0) { throw 'Cannot prepare two-minute boundary fixture.' }
+    Invoke-JsonPost "/api/v1/baselines/$($expiredCandidate.id)/withdraw-release" @{ reason = '两分钟后仍可撤回' } | Out-Null
+    $lateCandidate = Invoke-JsonPost "/api/v1/projects/$($project.id)/baselines" @{ seriesCode = "LATE-$suffix"; baselineCode = "LATE-$suffix"; reason = '超时撤回样本' }
+    Invoke-JsonPost "/api/v1/baselines/$($lateCandidate.id)/review" @{ reason = '送审' } | Out-Null
+    Invoke-JsonPost "/api/v1/baselines/$($lateCandidate.id)/review/approve" @{ reason = '批准' } | Out-Null
+    Invoke-JsonPost "/api/v1/baselines/$($lateCandidate.id)/release" @{ reason = '发布' } | Out-Null
+    $ageFixture = Invoke-TestSql "BEGIN; SET LOCAL confighub.baseline_maintenance = 'on'; UPDATE configuration_baselines SET released_at = now() - interval '4 minutes' WHERE id = '$($lateCandidate.id)'; COMMIT;"
+    if ($ageFixture.ExitCode -ne 0) { throw 'Cannot prepare expired withdrawal fixture.' }
+    try { Invoke-JsonPost "/api/v1/baselines/$($lateCandidate.id)/withdraw-release" @{ reason = '超时拒绝' } | Out-Null; throw 'Expired withdrawal unexpectedly succeeded.' } catch { if ($_.Exception.Message -match 'unexpectedly succeeded') { throw }; if ($_.Exception.Response.StatusCode.value__ -ne 409) { throw } }
+    $lateSql = Invoke-TestSql "UPDATE configuration_baselines SET state = 'Deprecated' WHERE id = '$($lateCandidate.id)'"
+    if ($lateSql.ExitCode -eq 0 -or $lateSql.Output -notmatch 'cannot be modified') { throw 'Database must reject expired release withdrawal.' }
+}
+
 Write-Host "Catalog acceptance passed for project $($project.id)."

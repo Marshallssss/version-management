@@ -1,0 +1,101 @@
+const { chromium } = require('playwright')
+const { readFileSync, mkdirSync } = require('node:fs')
+const path = require('node:path')
+const assert = require('node:assert/strict')
+const { randomUUID } = require('node:crypto')
+
+// Requires Playwright on NODE_PATH and Microsoft Edge. Test credentials stay in local configuration.
+
+async function main() {
+  const baseURL = process.env.CONFIGHUB_TEST_URL || 'http://127.0.0.1:5080'
+  const config = JSON.parse(readFileSync(process.env.CONFIGHUB_TEST_CONFIG || path.join(process.env.LOCALAPPDATA, 'ConfigHub/appsettings.local.json'), 'utf8').replace(/^\uFEFF/, ''))
+  const browser = await chromium.launch({ channel: 'msedge', headless: true })
+  const context = await browser.newContext({ baseURL, viewport: { width: 1440, height: 1000 } })
+  const errors = []
+  let fixtureProjectId
+  const page = await context.newPage()
+  page.on('pageerror', error => errors.push(error.message))
+  const post = async (url, data) => {
+    const response = await context.request.post(url, { data, headers: { 'Idempotency-Key': randomUUID() } })
+    assert(response.ok(), `${url}: HTTP ${response.status()}`)
+    return response.status() === 204 ? null : response.json()
+  }
+  try {
+    await post('/api/v1/auth/login', { email: config.ConfigHub.BootstrapAdmin.Email, password: config.ConfigHub.BootstrapAdmin.Password })
+    const project = await post('/api/v1/projects', { code: `UX-${randomUUID().slice(0, 8)}`, name: '界面验收项目', reason: '自动化界面验收' })
+    fixtureProjectId = project.id
+    for (const rootName of ['控制系统', '运动平台', '视觉系统', '通信系统']) {
+      const root = await post(`/api/v1/projects/${project.id}/components`, { name: rootName, reason: '自动化界面验收' })
+      for (const childName of ['主程序', '驱动模块']) {
+        const child = await post(`/api/v1/projects/${project.id}/components`, { name: `${rootName}${childName}`, parentComponentId: root.id, reason: '自动化界面验收' })
+        await post(`/api/v1/components/${child.id}/versions`, { versionNumber: '2026.09-test', maturity: 'Testing', reason: '自动化测试历史' })
+      }
+    }
+    const machineSerial = `UX-${randomUUID().slice(0, 8)}`
+    const machine = await post('/api/v1/machines', { projectId: project.id, serialNumber: machineSerial, name: '实验室一号机', machineType: '测试机', location: '实验室 A 区', reason: '自动化界面验收' })
+    await page.goto('/')
+    await page.evaluate(id => localStorage.setItem('confighub.selected-project-id', id), project.id)
+    await page.reload()
+    await page.locator('.nav-item').filter({ hasText: '项目' }).click()
+    await page.locator('.workspace-layout.inspector-collapsed').waitFor()
+    assert.equal(await page.locator('.root-order-actions').count(), 0)
+    await page.getByRole('button', { name: '排序', exact: true }).click()
+    assert.equal(await page.locator('.root-order-actions').count(), 4)
+    await page.getByRole('button', { name: '排序', exact: true }).click()
+    await page.locator('.root-node').first().click()
+    await page.locator('.workspace-layout:not(.inspector-collapsed)').waitFor()
+    await page.getByRole('button', { name: '收起已选组件面板' }).click()
+    await page.locator('.tree-node').first().click()
+    await page.locator('.workspace-layout:not(.inspector-collapsed)').waitFor()
+    await page.getByRole('button', { name: '收起已选组件面板' }).click()
+    await page.getByRole('button', { name: '测试历史', exact: true }).click()
+    await page.locator('.laboratory-history-list article').first().waitFor()
+    await page.waitForFunction(() => document.querySelectorAll('.laboratory-history-list article').length === 8)
+    assert.equal(await page.locator('.laboratory-history-list article').count(), 8)
+    const output = path.resolve('artifacts/workspace-ux')
+    mkdirSync(output, { recursive: true })
+    await page.waitForFunction(() => { const dialog = document.querySelector('.ant-modal'); return dialog && getComputedStyle(dialog).opacity === '1' && getComputedStyle(dialog).transform === 'none' })
+    await page.screenshot({ path: path.join(output, 'laboratory-history.png') })
+    await page.locator('.ant-modal-close').click()
+    await page.locator('.ant-modal').waitFor({ state: 'hidden' })
+    await page.screenshot({ path: path.join(output, 'project-desktop.png'), fullPage: true })
+    await page.getByRole('button', { name: '从测试版本创建基线', exact: true }).click()
+    await page.locator('#baseline-composer').waitFor()
+    assert.equal(await page.locator('.composer-tree > .lab-root-column').count(), 4)
+    assert.equal(await page.locator('.composer-tree input[type=checkbox]').count(), 8)
+    await page.locator('.composer-tree input[type=checkbox]').first().check()
+    await page.locator('#baseline-composer').screenshot({ path: path.join(output, 'baseline-composer.png') })
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.screenshot({ path: path.join(output, 'project-mobile.png'), fullPage: true })
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'Mobile project page must not overflow horizontally')
+    await page.setViewportSize({ width: 1440, height: 1000 })
+    const deletable = await post(`/api/v1/projects/${project.id}/components`, { name: '可删除测试组件', reason: '自动化二次确认' })
+    await post(`/api/v1/components/${deletable.id}/versions`, { versionNumber: 'temporary', maturity: 'Testing', reason: '自动化二次确认' })
+    await page.reload()
+    await page.locator('.nav-item').filter({ hasText: '项目' }).click()
+    await page.locator('.root-node').filter({ hasText: '可删除测试组件' }).click()
+    await page.locator('.component-inspector').getByRole('button', { name: '删除', exact: true }).click()
+    await page.locator('.component-inspector').getByLabel('删除原因', { exact: true }).fill('自动化二次确认删除')
+    await page.locator('.component-inspector').getByRole('button', { name: '确认删除', exact: true }).click()
+    await page.getByRole('dialog').getByRole('button', { name: /取\s*消/ }).click()
+    await page.getByRole('dialog').waitFor({ state: 'hidden' })
+    assert.equal(await page.locator('.root-node').filter({ hasText: '可删除测试组件' }).count(), 1)
+    await page.locator('.component-inspector').getByRole('button', { name: '确认删除', exact: true }).click()
+    await page.getByRole('dialog').getByRole('button', { name: '确认删除', exact: true }).click()
+    await page.locator('.root-node').filter({ hasText: '可删除测试组件' }).waitFor({ state: 'detached' })
+    await page.locator('.nav-item').filter({ hasText: '机台' }).click()
+    await page.locator('.machine-list-item').filter({ hasText: machineSerial }).click()
+    await page.locator('.machine-detail-header').waitFor()
+    await page.screenshot({ path: path.join(output, 'machine-desktop.png'), fullPage: true })
+    assert(await page.locator('.machine-detail-header').innerText().then(value => value.includes('实验室一号机')))
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.screenshot({ path: path.join(output, 'machine-mobile.png'), fullPage: true })
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'Mobile machine page must not overflow horizontally')
+    assert.deepEqual(errors, [])
+    console.log(`Workspace UX acceptance passed. Screenshots: ${output}; machine: ${machine.id}`)
+  } finally {
+    if (fixtureProjectId) await post(`/api/v1/projects/${fixtureProjectId}/archive`, { reason: '界面验收结束，归档测试项目' }).catch(() => {})
+    await browser.close()
+  }
+}
+main().catch(error => { console.error(error.message); process.exitCode = 1 })

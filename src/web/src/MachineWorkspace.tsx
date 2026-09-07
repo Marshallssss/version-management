@@ -8,7 +8,7 @@ import { RollbackFactPanel } from './RollbackFactPanel'
 import { assignMachineTarget, compareMachineToBaseline, createMachine, getBaselines, getMachineConfiguration, getMachineDrift, getMachineFacts, getMachineTarget, getMachineTargetHistory, getMachines, getProject, getProjectStandard, recordMachineFacts, updateMachine, type ProjectSummary } from './catalog-api'
 
 const matchText: Record<string, string> = { Matched: '匹配', Mismatch: '不匹配', Unknown: '未知' }
-const riskText: Record<string, string> = { None: '无', Critical: '严重', Unknown: '未知' }
+const riskText: Record<string, string> = { None: '无', High: '高', Critical: '严重', Unknown: '未知' }
 const operationText: Record<string, string> = { Install: '安装', Upgrade: '升级', InitialSnapshot: '初始快照', Observation: '观察', Rollback: '回退', Correction: '更正' }
 
 function formatTime(value: string | null | undefined) {
@@ -17,6 +17,7 @@ function formatTime(value: string | null | undefined) {
 
 export function MachineWorkspace({ projects, selectedMachineId, onSelectMachine, onOpenVersion, onSuccess }: { projects: ProjectSummary[]; selectedMachineId: string; onSelectMachine: (machineId: string) => void; onOpenVersion: (projectId: string, versionId: string) => void; onSuccess: (message: string) => void }) {
   const queryClient = useQueryClient()
+  const [toolTab, setToolTab] = useState('configuration')
   const [projectFilterId, setProjectFilterId] = useState('')
   const [cloneMachineId, setCloneMachineId] = useState('')
   const [machineProjectId, setMachineProjectId] = useState('')
@@ -152,8 +153,15 @@ export function MachineWorkspace({ projects, selectedMachineId, onSelectMachine,
         </div>
       </>}
     </section>
-    {selectedMachine && <><FullConfigurationPanel machineId={selectedMachine.id} projectId={selectedMachine.projectId} components={machineProject.data?.components ?? []} onRecorded={() => onSuccess('完整实际配置已记录为可追溯事实。')} /><RollbackFactPanel machineId={selectedMachine.id} components={machineProject.data?.components ?? []} /><HistoricalConfigurationPanel machine={selectedMachine} /></>}
-    <BulkBaselineUpgradePanel projects={projects} />
-    <BulkTargetPanel projects={projects} />
+    <div className="machine-tools">
+      <nav className="machine-tool-tabs" aria-label="机台操作">
+        {[['configuration', '完整配置'], ['history', '历史查询'], ['correction', '回退与更正'], ['upgrade', '批量升级'], ['target', '批量目标']].map(([id, label]) => <button type="button" key={id} aria-pressed={toolTab === id} onClick={() => setToolTab(id)} disabled={!selectedMachine && !['upgrade', 'target'].includes(id)}>{label}</button>)}
+      </nav>
+      {selectedMachine && toolTab === 'configuration' && <FullConfigurationPanel machineId={selectedMachine.id} projectId={selectedMachine.projectId} components={machineProject.data?.components ?? []} onRecorded={() => onSuccess('完整实际配置已记录为可追溯事实。')} />}
+      {selectedMachine && toolTab === 'correction' && <RollbackFactPanel machineId={selectedMachine.id} components={machineProject.data?.components ?? []} />}
+      {selectedMachine && toolTab === 'history' && <HistoricalConfigurationPanel machine={selectedMachine} />}
+      {toolTab === 'upgrade' && <BulkBaselineUpgradePanel projects={projects} />}
+      {toolTab === 'target' && <BulkTargetPanel projects={projects} />}
+    </div>
   </div>
 }
