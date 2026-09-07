@@ -17,7 +17,7 @@ export function BulkBaselineUpgradePanel({ projects }: { projects: ProjectSummar
   const [reason, setReason] = useState('')
   const machines = useQuery({ queryKey: ['machines'], queryFn: getMachines })
   const baselines = useQuery({ queryKey: ['bulk-upgrade-baselines', projectId], queryFn: () => getBaselines(projectId), enabled: projectId !== '' })
-  const selectedMachines = machines.data?.filter(machine => machine.projectId === projectId && machine.status === 'Active') ?? []
+  const selectedMachines = machines.data?.filter(machine => machine.projectId === projectId && machine.status !== 'Archived') ?? []
   const upgrade = useMutation({
     mutationFn: () => upgradeMachinesToBaseline(projectId, { configurationBaselineId: baselineId, machineIds, effectiveAt: new Date(effectiveAt).toISOString(), reason }),
     onSuccess: async () => {

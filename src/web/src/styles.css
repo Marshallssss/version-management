@@ -1357,3 +1357,30 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
   .laboratory-history-list time { grid-column: 1 / -1; }
   .toolbar-actions { width: 100%; }
 }
+.topbar-controls { flex: 1; }
+.topbar-controls .project-switch { flex: 1; min-width: 0; max-width: none; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; }
+.project-switch strong { white-space: normal; overflow-wrap: anywhere; font-size: 15px; }
+.project-switch .project-intro { flex-basis: 100%; text-align: left; color: #657d78; font-size: 12px; overflow-wrap: anywhere; }
+.snapshot-root-column { min-width: 0; }
+.snapshot-root { border-top: 3px solid #6e91b7; border-left: 0; background: #e8f0f8; }
+.snapshot-children { display: grid; gap: 7px; margin-top: 8px; }
+.snapshot-child-branch .snapshot-children { margin-left: 12px; padding-left: 8px; border-left: 1px solid #b9cddd; }
+.snapshot-tree-item strong, .snapshot-tree-item small { white-space: normal; overflow-wrap: anywhere; }
+.patch-hover-content { width: 280px; max-width: calc(100vw - 70px); overflow-wrap: anywhere; }
+.patch-hover-content p { margin: 0 0 10px; }
+.patch-hover-content small { display: block; color: #657d78; }
+.patch-open { font: inherit; font-size: 11px; cursor: pointer; border: 1px solid #c8d9d5; border-radius: 4px; padding: 3px 6px; background: #edf5f2; color: #365d55; }
+.patch-record-actions { margin-top: 8px; }
+.patch-record-actions form { display: grid; gap: 8px; margin-top: 8px; }
+.patch-location-guide { border-left: 3px solid #477d70; background: #edf5f2; color: #294a47; padding: 8px 12px; font-size: 13px; }
+.version-maintenance { padding: 8px 0; }
+.version-maintenance > button, .patch-record-actions button { min-height: 32px; font: inherit; font-size: 12px; padding: 5px 10px; background: #fff; color: #365d55; border: 1px solid #bdcec8; border-radius: 4px; cursor: pointer; }
+.version-maintenance form { margin-top: 10px; }
+.version-record-row { display: flex; align-items: center; gap: 8px; }
+.version-record-row .version-item { flex: 1; min-width: 0; }
+.patch-hover-content button { background: #fff; color: #365d55; border: 1px solid #bdcec8; border-radius: 4px; padding: 6px 10px; cursor: pointer; font: inherit; font-size: 12px; }
+@media (max-width: 760px) {
+  .topbar { flex-wrap: wrap; }
+  .topbar-controls { flex-basis: 100%; width: 100%; }
+  .topbar-controls .project-switch { flex-basis: 100%; width: 100%; }
+}

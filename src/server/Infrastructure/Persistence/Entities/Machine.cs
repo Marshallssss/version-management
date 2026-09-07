@@ -10,7 +10,8 @@ public sealed class Machine
     public string? MachineType { get; set; }
     public string? Location { get; set; }
     public MachineStatus Status { get; set; } = MachineStatus.Active;
+    public DateTimeOffset? ExpectedResumeAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 }
 
-public enum MachineStatus { Active, Archived }
+public enum MachineStatus { Active, Archived, ShortTermCip, LongTermCip, NoProduction }

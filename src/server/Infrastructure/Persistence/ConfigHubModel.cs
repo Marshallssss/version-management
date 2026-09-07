@@ -327,7 +327,8 @@ internal static class ConfigHubModel
         });
         modelBuilder.Entity<Machine>(entity =>
         {
-            entity.ToTable("machines"); entity.HasKey(machine => machine.Id);
+            entity.ToTable("machines", table => table.HasCheckConstraint("ck_machines_cip_expected_resume", "(status IN ('ShortTermCip', 'LongTermCip') AND expected_resume_at IS NOT NULL) OR (status NOT IN ('ShortTermCip', 'LongTermCip') AND expected_resume_at IS NULL)")); entity.HasKey(machine => machine.Id);
+            entity.Property(machine => machine.ExpectedResumeAt).HasColumnName("expected_resume_at");
             entity.Property(machine => machine.Id).HasColumnName("id"); entity.Property(machine => machine.ProjectId).HasColumnName("project_id");
             entity.Property(machine => machine.SerialNumber).HasColumnName("serial_number").HasMaxLength(160);
             entity.Property(machine => machine.NormalizedSerialNumber).HasColumnName("normalized_serial_number").HasMaxLength(160);

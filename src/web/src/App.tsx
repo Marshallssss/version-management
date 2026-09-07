@@ -245,7 +245,7 @@ function App() {
         <header className="topbar">
           <div><span className="eyebrow">工程运行 / 基础设施</span><h1>{selectedNavigation.label}</h1></div>
           <div className="topbar-controls">
-            {isAuthenticated ? <><button type="button" className="topbar-control project-switch" onClick={() => setProjectDialog('switch')}><span>当前项目</span><strong>{selectedProject?.name ?? '选择项目'}</strong></button><button type="button" className="topbar-control" onClick={() => setProjectDialog('create')}>新建项目</button><button type="button" className="topbar-control" onClick={() => setProjectDialog('account')}>{currentUser.data?.name ?? '账户'}</button></> : <button type="button" className="topbar-control" onClick={() => setProjectDialog('login')}>登录</button>}
+            {isAuthenticated ? <><button type="button" className="topbar-control project-switch" onClick={() => setProjectDialog('switch')}><span>当前项目</span><strong>{selectedProject?.name ?? '选择项目'}</strong>{selectedProject?.description && <small className="project-intro">{selectedProject.description}</small>}</button><button type="button" className="topbar-control" onClick={() => setProjectDialog('create')}>新建项目</button><button type="button" className="topbar-control" onClick={() => setProjectDialog('account')}>{currentUser.data?.name ?? '账户'}</button></> : <button type="button" className="topbar-control" onClick={() => setProjectDialog('login')}>登录</button>}
             <div className={`connection-state ${connectivity}`}><span>{currentUser.data?.name ?? '未登录'}</span><strong>{connectivityText[connectivity]}</strong></div>
           </div>
         </header>

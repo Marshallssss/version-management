@@ -114,3 +114,10 @@ dotnet run --project .\src\server\Host\ConfigHub.Host.csproj -- --urls http://0.
 ```
 
 Do not commit connection strings. Production credentials are supplied through protected machine/service environment configuration.
+## 调测维护开关
+
+当前调测阶段，超级管理员可在版本面板的“调测维护”中修正版本号、登记时间、发布时间和成熟度。此操作保留审计，不会自动修改已经冻结的基线快照。
+
+数据录入完成后，在服务端配置中设置 `ConfigHub:TestDataMaintenanceEnabled=false`，重启服务即可同时关闭版本调测和基线历史维护。Windows 环境变量名为 `ConfigHub__TestDataMaintenanceEnabled`；如本机 `%LOCALAPPDATA%\ConfigHub\appsettings.local.json` 配置了同名设置，请以该文件为准。不要只隐藏前端按钮，服务端也会拒绝维护请求。
+
+补丁：已发布记录使用“撤回补丁”，保留问题与修复内容；误录的草稿由管理员二次确认删除。机台“短期 CIP”“长期 CIP”均需填写预计恢复时间，“暂未过货”用于当前没有过货安排的机台。

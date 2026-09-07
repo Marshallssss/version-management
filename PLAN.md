@@ -2,6 +2,15 @@
 
 ## Final Architecture and Product Plan
 
+### 2026-09-07 项目记录与调测维护
+
+- 项目名称与简介统一收进“当前项目”顶栏，删除项目页重复介绍区；基线历史按冻结快照的根节点分列，后代留在所属根列内，不使用当前组件树替换历史结构。
+- 已发布补丁优先展示；补丁支持悬停摘要、点击展开对应组件的补丁页和 4.5 秒定位提示；已发布补丁可撤回并保留内容，管理员可二次确认删除草稿。所有写操作均有原因、权限、审计和幂等保护。
+- 超级管理员调测维护可修正版本号、登记时间、发布时间和成熟度；重复版本号和单组件单测试版本约束仍有效。版本维护不改冻结基线快照，审计时间保持真实操作时间。
+- 当前调测配置启用 `ConfigHub:TestDataMaintenanceEnabled`，设为 `false` 可同时冻结版本调测与已有基线历史维护 API；普通角色没有版本维护权限。关闭方式同步 README。
+- 机台状态新增“短期 CIP”“长期 CIP”“暂未过货”；CIP 必须填写预计恢复时间，转为非 CIP 时清空预计时间；未归档的 CIP/暂未过货机台仍可纳入批量升级。真实 EF 模型生成前进 Migration `20260907151930_AddMachineCipSchedule`，已在本地 PostgreSQL 17 应用。
+- 验证：Release build 零警告/零错误，前端构建通过（保留资源体积提示），EF 无待生成模型差异，现有 catalog 与 workspace 浏览器回归通过；新增 record-maintenance-acceptance 覆盖补丁撤回/草稿删除/幂等冲突、超级权限与关闭开关、版本界面编辑、已发布快照保持不变、CIP 必填与界面保存、桌面/手机布局，全部通过。Windows Production Integration Pending 状态不因本次开发自动解除。
+
 **Status:** Approved architecture baseline before Core V1 coding  
 **Deployment:** Pure Windows  
 **Delivery approach:** Vertical Slice Incremental Development  
