@@ -2,6 +2,16 @@
 
 ## Final Architecture and Product Plan
 
+### 2026-09-08 表格导入兼容与启动警告修复
+
+- 导入使用 PapaParse 识别逗号、Excel 制表符、连续空格和全角空格；保留名称/版本内部单空格，支持引号转义、BOM、换行，拒绝缺列、多列或不完整引号，继续走原有预览与 Domain Command 提交流程。
+- 修正导入预览的 JSON 字段大小写不一致，确保提交前显示组件名和版本号；增加浏览器内容断言。
+- 前端通过 Rolldown 实际拆分 React、UI 依赖与业务资源，不提高警告阈值。
+- HTTP-only 本地运行不执行 HTTPS 重定向；配置 HTTPS 端口或真实 HTTPS 监听时保留重定向，生产 HSTS 不变。
+- 项目详情的组件、版本与补丁集合采用局部 AsSplitQuery，不全局屏蔽 EF 警告，不修改数据库模型或既有 Migration。
+- 验证通过：import-parser、startup-import-acceptance（真实 TAB 预览/提交、内容显示、两组件各两版本及四补丁的集合完整性、HTTP 无重定向警告、显式 HTTPS 307、桌面/手机截图、JS 分包预算）、catalog、background-job、project-scope-ui、Windows operations preflight、web compatibility。
+- 后端 Release build 零警告/零错误；前端 build 无超限提示，最大 JS 资源约 328 kB；实际 Migration 已最新，EF 无模型差异。保留 PostgreSQL 17 与 Production Integration Pending 的原有部署验收边界，本次不宣称完整 Windows/IIS 生产重新验收。
+
 ### 2026-09-08 SuperAdmin 删除单个登记版本
 
 - 版本列表右侧增加小型删除图标，仅 SuperAdmin 可见；弹窗显示组件与版本、删除范围，必须填写原因并再次确认，取消不修改数据。

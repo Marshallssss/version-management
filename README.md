@@ -1,5 +1,11 @@
 # ConfigHub
 
+### 表格导入与本地 HTTP 启动
+
+- 导入内容为两列：组件名称、版本号。可直接粘贴 Excel 两列数据（制表符分隔），也兼容逗号、连续空格或全角空格分隔；不需要手动替换为逗号。名称或版本中的单个空格保留，含逗号的 CSV 字段请用双引号包围。
+- 仅配置 HTTP 地址的本地运行不会尝试 HTTPS 跳转。生产部署仍应按 Windows 部署流程使用 HTTPS；需要从 HTTP 跳转时，配置 HTTPS 监听，或将 `HttpsRedirection__HttpsPort` 设置为实际对外 HTTPS 端口（例如 `443`）。不要填写尚未部署的端口。
+- 回归入口：`node tests/integration/import-parser.cjs`；安装 Playwright/Edge 并完成本地数据库配置后，可运行 `node tests/integration/startup-import-acceptance.cjs` 验证导入预览/提交、分包预算、项目集合查询及 HTTP/HTTPS 跳转（使用测试端口 5098、5099）。
+
 面向工程团队的本地部署、局域网多用户软件配置管理与机台版本追溯系统。
 
 当前实施状态：

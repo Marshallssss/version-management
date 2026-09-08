@@ -831,7 +831,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         if (batch is null) return Results.NotFound();
         if (!await HasProjectWriteAccessAsync(db, context, batch.ProjectId, cancellationToken)) return Results.Forbid();
         var stagedRows = await db.ImportRows.AsNoTracking().Where(item => item.ImportBatchId == batchId).OrderBy(item => item.RowNumber).ToListAsync(cancellationToken);
-        var rows = stagedRows.Select(item => new { item.RowNumber, payload = item.Payload.RootElement.Clone(), item.ValidationError });
+        var rows = stagedRows.Select(item => new { item.RowNumber, payload = item.Payload.Deserialize<StageImportRow>(), item.ValidationError });
         return TypedResults.Ok(new { id = batch.Id, status = batch.Status.ToString(), sourceFileName = batch.SourceFileName, rows });
     }
 
@@ -915,7 +915,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
             return Results.NotFound();
         }
 
-        var components = await database.ConfigurationComponents.AsNoTracking()
+        var components = await database.ConfigurationComponents.AsNoTracking().AsSplitQuery()
             .Where(component => component.ProjectId == projectId)
             .OrderBy(component => component.SortOrder)
             .ThenBy(component => component.Name)

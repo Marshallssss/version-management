@@ -10,6 +10,8 @@ using Microsoft.AspNetCore.Identity;
 using System.Text.Json;
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
 
 var migrateRequested = args.Contains("--migrate", StringComparer.OrdinalIgnoreCase);
 var bootstrapOnlyRequested = args.Contains("--bootstrap-admin-only", StringComparer.OrdinalIgnoreCase);
@@ -40,6 +42,13 @@ if (string.IsNullOrWhiteSpace(connectionString))
 }
 
 builder.Services.AddProblemDetails();
+var redirectPort = builder.Configuration.GetValue<int?>("HttpsRedirection:HttpsPort")
+    ?? builder.Configuration.GetValue<int?>("https_port")
+    ?? builder.Configuration.GetValue<int?>("ANCM_HTTPS_PORT");
+if (redirectPort is not null)
+{
+    builder.Services.AddHttpsRedirection(options => options.HttpsPort = redirectPort);
+}
 builder.Services.AddPooledDbContextFactory<ConfigHubDbContext>(options =>
     options.UseNpgsql(connectionString, npgsql =>
         npgsql.MigrationsAssembly(
@@ -138,11 +147,15 @@ await BootstrapIdentity.EnsureAsync(app.Services, app.Configuration);
 
 if (!app.Environment.IsDevelopment())
 {
-app.UseExceptionHandler();
+    app.UseExceptionHandler();
     app.UseHsts();
 }
 
-app.UseHttpsRedirection();
+// Server addresses are available after startup, including HTTPS endpoints configured by Kestrel.
+app.UseWhen(_ => redirectPort is not null || app.Services.GetRequiredService<IServer>()
+    .Features.Get<IServerAddressesFeature>()?.Addresses.Any(address =>
+        address.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) == true,
+    branch => branch.UseHttpsRedirection());
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseDefaultFiles();
