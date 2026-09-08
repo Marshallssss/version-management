@@ -14,6 +14,8 @@ public static partial class CatalogEndpoints
     {
         endpoints.MapPost("/api/v1/version-patches/{patchId:guid}/manage", ManageVersionPatchAsync).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/component-versions/{versionId:guid}/maintenance", MaintainVersionAsync).RequireAuthorization("SuperAdmin");
+        endpoints.MapDelete("/api/v1/component-versions/{versionId:guid}", async (Guid versionId, [FromBody] DeleteVersionRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken) =>
+            await DeleteVersionAsync(versionId, request, context, factory, cancellationToken)).RequireAuthorization("SuperAdmin");
         endpoints.MapGet("/api/v1/maintenance-capabilities", (IConfiguration configuration) => Results.Ok(new { enabled = configuration.GetValue<bool>("ConfigHub:TestDataMaintenanceEnabled") })).RequireAuthorization();
         var projects = endpoints.MapGroup("/api/v1/projects").RequireAuthorization();
         projects.MapGet("", ListProjectsAsync);

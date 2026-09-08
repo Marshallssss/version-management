@@ -9,6 +9,55 @@ namespace ConfigHub.Host.Catalog;
 
 public static partial class CatalogEndpoints
 {
+    private static async Task<IResult> DeleteVersionAsync(Guid versionId, DeleteVersionRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    {
+        if (!context.User.IsInRole("SuperAdmin")) return Results.Forbid();
+        if (ValidateRequired(request.Reason, "删除原因", 500) is { } error) return Results.ValidationProblem(error);
+        var key = context.Request.Headers["Idempotency-Key"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.BadRequest(new { message = "删除版本需要有效的幂等键。" });
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
+        var scope = $"versions.delete:{versionId}";
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request))));
+        var replay = await db.IdempotencyRecords.AsNoTracking().SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
+        if (replay is not null) return replay.RequestHash == hash && replay.Result is not null ? Results.Ok(replay.Result.RootElement.Clone()) : Results.Conflict(new { message = "幂等键已用于其他操作。" });
+        var version = await db.ComponentVersions.FromSqlInterpolated($"SELECT * FROM component_versions WHERE id = {versionId} FOR UPDATE").SingleOrDefaultAsync(cancellationToken);
+        if (version is null)
+        {
+            // A concurrent retry may have waited for the original deletion to commit.
+            replay = await db.IdempotencyRecords.AsNoTracking().SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
+            if (replay is not null) return replay.RequestHash == hash && replay.Result is not null ? Results.Ok(replay.Result.RootElement.Clone()) : Results.Conflict(new { message = "幂等键已用于其他操作。" });
+            return Results.NotFound();
+        }
+        if (await db.BaselineItems.AnyAsync(item => item.ComponentVersionId == versionId, cancellationToken)
+            || await db.ConfigurationBaselines.AnyAsync(item => item.TopComponentVersionId == versionId, cancellationToken)
+            || await db.DeploymentItems.AnyAsync(item => item.NewComponentVersionId == versionId, cancellationToken)
+            || await db.MachineCurrentConfigurations.AnyAsync(item => item.ComponentVersionId == versionId, cancellationToken)
+            || await db.VersionExposureSnapshots.AnyAsync(item => item.ComponentVersionId == versionId, cancellationToken))
+            return Results.Conflict(new { message = "该版本已被基线、机台历史或影响快照引用，不能删除。可将版本标记为已废弃，保留追溯记录。" });
+        var patches = await db.VersionPatches.Where(item => item.ComponentVersionId == versionId).ToListAsync(cancellationToken);
+        var transitions = await db.VersionLifecycleTransitions.Where(item => item.ComponentVersionId == versionId).ToListAsync(cancellationToken);
+        var recommendations = await db.VersionRecommendations.Where(item => item.ComponentVersionId == versionId).ToListAsync(cancellationToken);
+        db.VersionPatches.RemoveRange(patches);
+        db.VersionLifecycleTransitions.RemoveRange(transitions);
+        db.VersionRecommendations.RemoveRange(recommendations);
+        db.ComponentVersions.Remove(version);
+        AddAuditEvent(db, context, "ComponentVersionDeleted", "ComponentVersion", versionId, new { version, patches, transitions, recommendations, reason = request.Reason!.Trim() });
+        var result = new { id = versionId, deleted = true, componentId = version.ComponentId };
+        var now = DateTimeOffset.UtcNow;
+        db.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7), Status = IdempotencyRecordStatus.Completed, Result = JsonDocument.Parse(JsonSerializer.Serialize(result)) });
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            await tx.CommitAsync(cancellationToken);
+            return Results.Ok(result);
+        }
+        catch (DbUpdateException exception) when (exception.InnerException is Npgsql.PostgresException { SqlState: Npgsql.PostgresErrorCodes.ForeignKeyViolation })
+        {
+            return Results.Conflict(new { message = "该版本刚被其他记录引用，删除未执行。请刷新后重试。" });
+        }
+    }
+
     private static async Task<IResult> ManageVersionPatchAsync(Guid patchId, ManagePatchRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
     {
         if (ValidateRequired(request.Reason, "操作原因", 500) is { } error) return Results.ValidationProblem(error);
@@ -91,4 +140,5 @@ public static partial class CatalogEndpoints
 }
 
 public sealed record ManagePatchRequest(string Action, string? Reason);
+public sealed record DeleteVersionRequest(string? Reason);
 public sealed record MaintainVersionRequest(string? VersionNumber, string Maturity, DateTimeOffset CreatedAt, string? Reason, bool MaintenanceMode, DateTimeOffset? ReleasedAt = null);

@@ -2,6 +2,14 @@
 
 ## Final Architecture and Product Plan
 
+### 2026-09-08 SuperAdmin 删除单个登记版本
+
+- 版本列表右侧增加小型删除图标，仅 SuperAdmin 可见；弹窗显示组件与版本、删除范围，必须填写原因并再次确认，取消不修改数据。
+- 新增 SuperAdmin 专属 DELETE component-versions API，删除未被引用的版本及其补丁、成熟度/安全转换和推荐记录，保留完整删除审计（含删除前内容）、actor、correlation id 与 idempotency key；不删除组件或其他版本，不自动恢复旧测试版本。
+- 基线（含草稿/顶层版本）、机台历史/实际配置、影响快照引用受保护；返回明确冲突提示，可改用废弃状态。数据库外键作为并发引用保护，事务回滚避免部分删除。
+- 不改变既有 Migration。Release build 零警告/零错误，真实 Migration 检查已是最新，EF 无待生成模型差异；前端构建通过（仍有资源体积提示），catalog 集成与 Windows preflight/web compatibility 通过。
+- 新增 version-delete-acceptance 自动化测试覆盖普通 Admin/Engineer/Viewer API 403、普通 Admin 隐藏入口、必填原因、确认与取消、并发幂等重放/冲突、单条审计、补丁和推荐清理、其他版本保留、各类历史引用保护，以及桌面/手机确认弹窗边界与截图。
+
 ### 2026-09-08 项目范围与只读体验
 
 - 后续 UI 调整持续遵守：沿用既有浅色风格，减少重复边框与背景块，统一按钮尺寸、字体与间距；必须检查桌面/手机截图，确认内容对齐、长文本处理、无重叠和横向溢出，不以堆叠表单代替界面设计。

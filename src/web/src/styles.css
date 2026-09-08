@@ -1433,3 +1433,7 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 .laboratory-tree .lab-node > span:first-child { flex-wrap: nowrap; }
 .laboratory-tree .lab-node strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .laboratory-tree .lab-node > span:first-child > small { max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; }
+.version-delete-button { width: 30px; height: 30px; flex: 0 0 30px; display: inline-grid; place-items: center; border: 0; border-radius: 4px; background: transparent; color: #8a6b64; cursor: pointer; font-size: 14px; }
+.version-delete-button:hover, .version-delete-button:focus-visible { color: #a34335; background: #f9ece8; }
+.version-delete-form label { display: grid; gap: 6px; margin: 18px 0 8px; font-size: 13px; }
+.version-delete-form input { width: 100%; box-sizing: border-box; border: 1px solid #bdcec7; border-radius: 4px; padding: 8px 10px; font: inherit; background: #fff; color: #294a47; }
