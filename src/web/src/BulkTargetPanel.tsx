@@ -10,7 +10,7 @@ export function BulkTargetPanel({ projectId }: { projectId: string }) {
   const machines = useQuery({ queryKey: ['machines'], queryFn: getMachines })
   const baselines = useQuery({ queryKey: ['bulk-target-baselines', projectId], queryFn: () => getBaselines(projectId), enabled: projectId !== '' })
   const selectedMachines = machines.data?.filter(machine => machine.projectId === projectId) ?? []
-  const assign = useMutation({ mutationFn: () => assignBulkMachineTargets(projectId, baselineId, machineIds, reason), onSuccess: async () => { setReason(''); await queryClient.invalidateQueries({ queryKey: ['machines'] }); await queryClient.invalidateQueries({ queryKey: ['machine-target'] }); await queryClient.invalidateQueries({ queryKey: ['machine-target-history'] }) } })
+  const assign = useMutation({ mutationFn: () => assignBulkMachineTargets(projectId, baselineId, machineIds, reason), onSuccess: async () => { setReason(''); await queryClient.invalidateQueries({ queryKey: ['machines'] }); await queryClient.invalidateQueries({ queryKey: ['machine-target'] }); await queryClient.invalidateQueries({ queryKey: ['machine-target-history'] }); queryClient.invalidateQueries({ queryKey: ['machine-target'] }); queryClient.invalidateQueries({ queryKey: ['machines'] }); queryClient.invalidateQueries({ queryKey: ['machine-equipment'] }); queryClient.invalidateQueries({ queryKey: ['machine-drift'] }) } })
   const toggle = (machineId: string) => setMachineIds(current => current.includes(machineId) ? current.filter(id => id !== machineId) : [...current, machineId])
 
   return <section className="status-panel catalog-panel">

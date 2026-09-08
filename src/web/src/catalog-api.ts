@@ -1,5 +1,17 @@
 import { createIdempotencyKey } from './idempotency-key'
 
+export interface ChamberInput { number: number; stage: string }
+export interface ChamberOverride { componentId: string; versionId: string; componentName: string; versionNumber: string; expectedVersionNumber: string | null; match: string; risk: string }
+export interface MachineEquipment {
+  owner: string | null; stage: string | null; targetBaselineId: string | null
+  chambers: Array<ChamberInput & { installed: boolean; overrides: ChamberOverride[] }>
+  history: Array<{ id: string; chamberNumber: number | null; kind: string; actor: string; reason: string; recordedAt: string; details: Record<string, unknown> }>
+}
+export const getMachineEquipment = (id: string) => request<MachineEquipment>(`/api/v1/machines/${id}/equipment`)
+export const changeMachineEquipment = (id: string, input: { owner: string; stage: string; chambers: ChamberInput[]; reason: string }) => request<{ id: string }>(`/api/v1/machines/${id}/equipment`, { method: 'PUT', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': createIdempotencyKey() }, body: JSON.stringify(input) })
+export const changeChamberOverrides = (id: string, number: number, items: Array<{ componentId: string; versionId: string }>, reason: string) => request<{ id: string }>(`/api/v1/machines/${id}/chambers/${number}/configuration`, { method: 'PUT', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': createIdempotencyKey() }, body: JSON.stringify({ items, reason }) })
+export const deleteMachine = (id: string, reason: string) => request<{ id: string }>(`/api/v1/machines/${id}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': createIdempotencyKey() }, body: JSON.stringify({ reason }) })
+
 export interface ProjectSummary {
   id: string
   code: string
@@ -131,9 +143,9 @@ export const decideBaselineReview = (baselineId: string, decision: 'approve' | '
 export const getProjectStandard = (projectId: string) => request<{ baselineId: string; baselineCode: string; validFrom: string } | null>(`/api/v1/projects/${projectId}/standard`).then(value => value ?? null)
 export const assignProjectStandard = (projectId: string, baselineId: string, reason: string) =>
   request<{ id: string; baselineId: string }>(`/api/v1/projects/${projectId}/standard`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': createIdempotencyKey() }, body: JSON.stringify({ configurationBaselineId: baselineId, reason }) })
-export interface MachineSummary { id: string; projectId: string; serialNumber: string; name: string; machineType: string | null; location: string | null; expectedResumeAt: string | null; status: string; matchStatus: string | null; riskSeverity: string | null }
+export interface MachineSummary { id: string; projectId: string; serialNumber: string; name: string; machineType: string | null; location: string | null; owner: string | null; stage: string | null; chambers: number[]; targetBaselineCode: string | null; expectedResumeAt: string | null; status: string; matchStatus: string | null; riskSeverity: string | null }
 export const getMachines = () => request<MachineSummary[]>('/api/v1/machines')
-export const createMachine = (input: { projectId: string; serialNumber: string; name: string; machineType: string; location: string; reason: string }) => request<{ id: string }>('/api/v1/machines', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': createIdempotencyKey() }, body: JSON.stringify(input) })
+export const createMachine = (input: { projectId: string; serialNumber: string; name: string; machineType: string; location: string; reason: string; owner?: string; stage?: string; chambers?: ChamberInput[] }) => request<{ id: string }>('/api/v1/machines', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': createIdempotencyKey() }, body: JSON.stringify(input) })
 export const updateMachine = (machineId: string, input: { serialNumber: string; name: string; machineType: string; location: string; status: string; expectedResumeAt?: string | null; reason: string }) => request<{ id: string }>(`/api/v1/machines/${machineId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': createIdempotencyKey() }, body: JSON.stringify(input) })
 export const getMachineConfiguration = (machineId: string) => request<Array<{ componentId: string; componentName: string; versionId: string | null; versionNumber: string | null; state: string; stateEffectiveAt: string; knownInstalledAt: string | null }>>(`/api/v1/machines/${machineId}/configuration`)
 export const getMachineConfigurationAt = (machineId: string, at: string) => request<{ asOf: string; items: Array<{ componentId: string; componentName: string; versionId: string | null; versionNumber: string | null; state: string; stateEffectiveAt: string; recordedAt: string; knownInstalledAt: string | null }> }>(`/api/v1/machines/${machineId}/configuration-at?at=${encodeURIComponent(at)}`)

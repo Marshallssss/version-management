@@ -1331,6 +1331,49 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 .configuration-version-link { border: 0; background: transparent; padding: 0; }
 .machine-list-panel { position: sticky; top: 16px; }
 .machine-list-item strong { font-size: 15px; }
+.machine-workspace.machine-unselected { grid-template-columns: minmax(0, 1fr); }
+.machine-unselected .machine-list-panel { position: static; max-height: none; }
+.machine-workspace [hidden] { display: none !important; }
+.machine-location-group h4 { margin: 18px 0 8px; padding-bottom: 8px; border-bottom: 1px solid #ccdcd6; font-size: 14px; color: #426c61; }
+.machine-unselected .machine-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 10px 24px; }
+.machine-list-item strong { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
+.machine-list-item em { font-size: 12px; font-weight: 400; font-style: normal; color: #426c61; }
+.machine-list-item span, .machine-list-item small { white-space: normal; overflow-wrap: anywhere; }
+.machine-equipment { border-top: 1px solid #d6e2df; padding: 18px 0; margin-top: 18px; }
+.equipment-heading, .equipment-actions, .chamber-summary header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.equipment-heading > div:first-child { display: grid; gap: 6px; }
+.equipment-heading span { color: #657d78; font-size: 13px; }
+.equipment-actions { justify-content: flex-end; }
+.chamber-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 12px; margin-top: 14px; }
+.chamber-summary > article { border: 1px solid #d6e2df; border-radius: 4px; padding: 12px; background: #fff; }
+.chamber-summary header span { color: #426c61; font-size: 13px; }
+.chamber-summary p { font-size: 13px; color: #657d78; margin-bottom: 0; }
+.chamber-overrides > div { display: grid; grid-template-columns: 1fr auto; gap: 6px; padding-top: 12px; font-size: 13px; }
+.chamber-overrides small { grid-column: 1 / -1; color: #657d78; }
+.chamber-fields { min-width: 0; border: 0; margin: 14px 0; padding: 0; }
+.chamber-fields legend { font-size: 13px; margin-bottom: 8px; }
+.chamber-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(85px, 1fr)); gap: 12px; }
+.chamber-options label { display: flex; gap: 7px; align-items: center; }
+.chamber-options input[type=checkbox] { width: 16px; height: 16px; min-height: 16px; accent-color: #426c61; }
+.chamber-options select { margin-top: 8px; }
+.equipment-dialog label { display: grid; gap: 7px; font-size: 13px; }
+.equipment-dialog .chamber-options label { display: flex; }
+.equipment-dialog input:not([type=checkbox]), .equipment-dialog select { width: 100%; min-width: 0; padding: 8px; min-height: 36px; color: #213231; border: 1px solid #b9cfca; border-radius: 4px; background: #fff; font: inherit; }
+.equipment-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 16px 0; }
+.equipment-dialog button:not(.ant-modal-close) { padding: 7px 12px; border: 1px solid #b9cfca; background: #fff; color: #31534a; border-radius: 4px; cursor: pointer; }
+.equipment-dialog button:disabled { opacity: .5; cursor: not-allowed; }
+.equipment-dialog .equipment-footer .primary-action { background: #bd563f; color: white; border-color: #bd563f; }
+.equipment-reason { margin-top: 18px; }
+.equipment-footer { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+.equipment-dialog .equipment-footer button { height: 38px; min-height: 38px; margin: 0 !important; }
+.equipment-dialog input:focus-visible, .equipment-dialog select:focus-visible { outline: 2px solid #a5c8be; outline-offset: 1px; }
+.equipment-override-list > div { display: grid; grid-template-columns: 1fr 1fr 34px; align-items: center; gap: 12px; padding: 9px 0; border-bottom: 1px solid #d6e2df; overflow-wrap: anywhere; }
+.equipment-override-list > div button { padding: 6px !important; }
+.equipment-history { max-height: 55vh; overflow-y: auto; }
+.equipment-history article { display: grid; gap: 7px; padding: 14px 0; border-bottom: 1px solid #d6e2df; overflow-wrap: anywhere; }
+.equipment-history small { color: #657d78; }
+.equipment-history p { margin: 0; }
+@media (max-width: 600px) { .equipment-form-grid { grid-template-columns: 1fr; } }
 .machine-list-item span, .machine-list-item small { font-size: 12px; }
 .machine-statuses { justify-content: flex-start; }
 .machine-statuses span { border: 0; border-radius: 4px; background: #f3f6f5; font-size: 12px; }

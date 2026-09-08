@@ -29,7 +29,8 @@ public static partial class CatalogEndpoints
             if (replay is not null) return replay.RequestHash == hash && replay.Result is not null ? Results.Ok(replay.Result.RootElement.Clone()) : Results.Conflict(new { message = "幂等键已用于其他操作。" });
             return Results.NotFound();
         }
-        if (await db.BaselineItems.AnyAsync(item => item.ComponentVersionId == versionId, cancellationToken)
+        if (await db.MachineChamberVersions.AnyAsync(item => item.VersionId == versionId, cancellationToken)
+            || await db.BaselineItems.AnyAsync(item => item.ComponentVersionId == versionId, cancellationToken)
             || await db.ConfigurationBaselines.AnyAsync(item => item.TopComponentVersionId == versionId, cancellationToken)
             || await db.DeploymentItems.AnyAsync(item => item.NewComponentVersionId == versionId, cancellationToken)
             || await db.MachineCurrentConfigurations.AnyAsync(item => item.ComponentVersionId == versionId, cancellationToken)

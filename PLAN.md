@@ -2,6 +2,18 @@
 
 ## Final Architecture and Product Plan
 
+### 2026-09-09 机台腔室与阶段管理
+
+- PM1～PM6 任意组合，后续增减保留设备历史；整机与各 PM 独立阶段 Lab / MoveIn / T0 / T1 / T2 / T3 / STR / HVM，既有机台不猜测阶段，显示未登记。
+- PM 特例采用独立追加事实，选组件再选版本；未覆盖组件继承整机，清除特例显式回归继承。仅已安装 PM 参与目标基线特例对比，Match 与 Safety Risk 分开，整机部署/观察投影保持不变。
+- 新建及编辑支持负责人；管理员二次确认删除机台，逻辑删除保留阶段、配置与审计追溯。新 Migration 由真实模型生成，不修改既有 Migration。
+- 机台页进入时不自动选中，按位置分组展示阶段、目标基线、PM 与负责人；新建区域压缩为顶部按钮。创建/复制可自由修改资料及各 PM 阶段，复制不带目标、事实或特例；特例采用同风格弹窗，手机与桌面保持按钮等高对齐。
+- PM 移除后追加恢复继承事实，再加入不会恢复旧特例；设备阶段、腔室增减、负责人、特例均记录 actor/reason/correlation id，写操作事务化、机台行锁及幂等重放；组件/版本删除保护包括 PM 特例历史引用。
+- 逻辑删除机台保留所有追溯，仪表盘过滤已删除机台；原序列号仍保留。批量目标更新会刷新 PM 特例对比，不把整机 Match 与腔室特例混为一个结果。
+- 已生成并实际应用真实 EF Migration `20260908155512_AddMachineEquipment`；无待生成模型差异，后端 Release build 零警告/零错误，前端 build 无超大 chunk 提示。
+- 新增 machine-equipment-acceptance：PM1/PM6 后加 PM2/PM5、独立阶段/负责人历史、重复/非法阶段和跨项目版本拒绝、整机配置隔离、目标前后对比、Matched+Critical、历史引用保护、权限 403、并发幂等/冲突、创建/复制/编辑/取消/管理员删除、移除重装不复活特例、位置分组和进入不选中、桌面/手机截图。
+- 新增验收及 catalog、project-scope-ui、Windows operations preflight、web compatibility 已通过；保留原有 PostgreSQL 17 和 Production Integration Pending 生产验收边界。
+
 ### 2026-09-08 表格导入兼容与启动警告修复
 
 - 导入使用 PapaParse 识别逗号、Excel 制表符、连续空格和全角空格；保留名称/版本内部单空格，支持引号转义、BOM、换行，拒绝缺列、多列或不完整引号，继续走原有预览与 Domain Command 提交流程。

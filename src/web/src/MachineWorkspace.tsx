@@ -1,3 +1,5 @@
+import { ChamberFields, MachineEquipmentPanel, stages } from './MachineEquipmentPanel'
+import { type ChamberInput } from './catalog-api'
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { BulkTargetPanel } from './BulkTargetPanel'
@@ -5,7 +7,7 @@ import { BulkBaselineUpgradePanel } from './BulkBaselineUpgradePanel'
 import { FullConfigurationPanel } from './FullConfigurationPanel'
 import { HistoricalConfigurationPanel } from './HistoricalConfigurationPanel'
 import { RollbackFactPanel } from './RollbackFactPanel'
-import { assignMachineTarget, compareMachineToBaseline, createMachine, getBaselines, getMachineConfiguration, getMachineDrift, getMachineFacts, getMachineTarget, getMachineTargetHistory, getMachines, getProject, getProjectStandard, recordMachineFacts, updateMachine } from './catalog-api'
+import { assignMachineTarget, compareMachineToBaseline, createMachine, getBaselines, getMachineConfiguration, getMachineDrift, getMachineEquipment, getMachineFacts, getMachineTarget, getMachineTargetHistory, getMachines, getProject, getProjectStandard, recordMachineFacts, updateMachine } from './catalog-api'
 
 const machineStatusText: Record<string, string> = { Active: '在用', Archived: '已归档', ShortTermCip: '短期 CIP', LongTermCip: '长期 CIP', NoProduction: '暂未过货' }
 const matchText: Record<string, string> = { Matched: '匹配', Mismatch: '不匹配', Unknown: '未知' }
@@ -16,7 +18,7 @@ function formatTime(value: string | null | undefined) {
   return value ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value)) : '—'
 }
 
-export function MachineWorkspace({ projectId, canWrite = true, selectedMachineId, onSelectMachine, onOpenVersion, onSuccess }: { projectId: string; canWrite?: boolean; selectedMachineId: string; onSelectMachine: (machineId: string) => void; onOpenVersion: (projectId: string, versionId: string) => void; onSuccess: (message: string) => void }) {
+export function MachineWorkspace({ projectId, canWrite = true, isAdmin = false, selectedMachineId, onSelectMachine, onOpenVersion, onSuccess }: { projectId: string; canWrite?: boolean; isAdmin?: boolean; selectedMachineId: string; onSelectMachine: (machineId: string) => void; onOpenVersion: (projectId: string, versionId: string) => void; onSuccess: (message: string) => void }) {
   const queryClient = useQueryClient()
   const [toolTab, setToolTab] = useState(canWrite ? 'configuration' : 'history')
   const [cloneMachineId, setCloneMachineId] = useState('')
@@ -25,6 +27,9 @@ export function MachineWorkspace({ projectId, canWrite = true, selectedMachineId
   const [machineName, setMachineName] = useState('')
   const [machineType, setMachineType] = useState('')
   const [machineLocation, setMachineLocation] = useState('')
+  const [machineOwner, setMachineOwner] = useState('')
+  const [machineStage, setMachineStage] = useState('Lab')
+  const [machineChambers, setMachineChambers] = useState<ChamberInput[]>([])
   const [machineReason, setMachineReason] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
@@ -42,8 +47,10 @@ export function MachineWorkspace({ projectId, canWrite = true, selectedMachineId
   const [targetReason, setTargetReason] = useState('')
 
   const machines = useQuery({ queryKey: ['machines'], queryFn: getMachines })
+  const cloneEquipment = useQuery({ queryKey: ['clone-equipment', cloneMachineId], queryFn: () => getMachineEquipment(cloneMachineId), enabled: !!cloneMachineId })
+  useEffect(() => { if (cloneEquipment.data) setMachineChambers(cloneEquipment.data.chambers.filter(c => c.installed).map(c => ({ number: c.number, stage: c.stage }))) }, [cloneEquipment.data])
   const selectedMachine = machines.data?.find(machine => machine.id === selectedMachineId && machine.projectId === projectId)
-  const visibleMachines = useMemo(() => machines.data?.filter(machine => machine.projectId === projectId) ?? [], [machines.data, projectId])
+  const visibleMachines = useMemo(() => machines.data?.filter(machine => machine.projectId === projectId).sort((a, b) => (a.location || '\uffff').localeCompare(b.location || '\uffff', 'zh-CN', { numeric: true }) || a.name.localeCompare(b.name, 'zh-CN', { numeric: true })) ?? [], [machines.data, projectId])
   const machineProject = useQuery({ queryKey: ['machine-project', selectedMachine?.projectId], queryFn: () => getProject(selectedMachine!.projectId), enabled: selectedMachine !== undefined })
   const selectedFactComponent = machineProject.data?.components.find(component => component.id === factComponentId)
   const targetBaselines = useQuery({ queryKey: ['machine-target-baselines', selectedMachine?.projectId], queryFn: () => getBaselines(selectedMachine!.projectId), enabled: selectedMachine !== undefined })
@@ -74,12 +81,16 @@ export function MachineWorkspace({ projectId, canWrite = true, selectedMachineId
     setMachineName(`${source.name} 副本`)
     setMachineType(source.machineType ?? '')
     setMachineLocation(source.location ?? '')
+    setMachineOwner(source.owner ?? '')
+    setMachineStage(source.stage ?? 'Lab')
+    setMachineChambers((source.chambers ?? []).map(number => ({ number, stage: 'Lab' })))
     setMachineSerial('')
   }, [cloneMachineId, machines.data])
 
   const invalidateMachineData = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['machines'] }),
+      queryClient.invalidateQueries({ queryKey: ['machine-equipment'] }),
       queryClient.invalidateQueries({ queryKey: ['machine-target'] }),
       queryClient.invalidateQueries({ queryKey: ['machine-target-history'] }),
       queryClient.invalidateQueries({ queryKey: ['machine-configuration'] }),
@@ -91,7 +102,7 @@ export function MachineWorkspace({ projectId, canWrite = true, selectedMachineId
   const addMachine = useMutation({
     mutationFn: createMachine,
     onSuccess: async ({ id }) => {
-      setMachineSerial(''); setMachineName(''); setMachineType(''); setMachineLocation(''); setMachineReason(''); setCloneMachineId(''); setCreateOpen(false)
+      setMachineSerial(''); setMachineName(''); setMachineType(''); setMachineLocation(''); setMachineReason(''); setMachineOwner(''); setMachineStage('Lab'); setMachineChambers([]); setCloneMachineId(''); setCreateOpen(false)
       onSelectMachine(id); onSuccess('机台已创建，可继续登记目标和实际配置。')
       await invalidateMachineData()
     },
@@ -118,34 +129,34 @@ export function MachineWorkspace({ projectId, canWrite = true, selectedMachineId
     },
   })
 
-  return <div className="machine-workspace">
+  return <div className={`machine-workspace${selectedMachine ? ' has-selection' : ' machine-unselected'}`}>
     <section className="status-panel catalog-panel machine-registry-panel">
-      <div className="panel-heading machine-heading"><div><span className="section-index">机台管理</span><h3>选择机台后查看配置与历史</h3></div><span className="count">{visibleMachines.length}</span></div>
-      <details hidden={!canWrite || !projectId} className="machine-create" open={createOpen} onToggle={(event) => setCreateOpen((event.target as HTMLDetailsElement).open)}>
-        <summary>新建机台 / 从已有机台复制资料</summary>
-        <form hidden={!canWrite} className="catalog-form" onSubmit={(event) => { event.preventDefault(); addMachine.mutate({ projectId: machineProjectId, serialNumber: machineSerial, name: machineName, machineType, location: machineLocation, reason: machineReason }) }}>
+      <div className="panel-heading machine-heading"><strong>机台管理 · {visibleMachines.length} 台</strong>{canWrite && projectId && <button type="button" aria-expanded={createOpen} onClick={() => setCreateOpen(!createOpen)}>{createOpen ? '收起新建' : '新建机台 / 从已有机台复制资料'}</button>}</div>
+      <div hidden={!canWrite || !projectId || !createOpen} className="machine-create">
+        <form hidden={!canWrite} className="catalog-form" onSubmit={(event) => { event.preventDefault(); addMachine.mutate({ projectId: machineProjectId, serialNumber: machineSerial, name: machineName, machineType, location: machineLocation, owner: machineOwner, stage: machineStage, chambers: machineChambers, reason: machineReason }) }}>
           <label>复制已有机台<select value={cloneMachineId} onChange={(event) => setCloneMachineId(event.target.value)}><option value="">不复制，手工录入</option>{visibleMachines.map(machine => <option key={machine.id} value={machine.id}>{machine.name} · {machine.serialNumber}</option>)}</select></label>
           <label>机台序列号<input value={machineSerial} onChange={(event) => setMachineSerial(event.target.value)} required /></label>
           <label>机台名称<input value={machineName} onChange={(event) => setMachineName(event.target.value)} required /></label>
           <label>机型<input value={machineType} onChange={(event) => setMachineType(event.target.value)} /></label>
           <label>位置<input placeholder="例如：一厂装配线 A-03" value={machineLocation} onChange={(event) => setMachineLocation(event.target.value)} /></label>
-          <label className="wide-field">创建原因<input value={machineReason} onChange={(event) => setMachineReason(event.target.value)} required /></label>
-          <button className="primary-action" type="submit" disabled={addMachine.isPending}>{addMachine.isPending ? '正在创建' : '创建机台'}</button>
+          <label>机台负责人<input value={machineOwner} onChange={event => setMachineOwner(event.target.value)} maxLength={160} /></label><label>整机阶段<select value={machineStage} onChange={event => setMachineStage(event.target.value)} required>{stages.map(stage => <option key={stage}>{stage}</option>)}</select></label><div className="wide-field"><ChamberFields value={machineChambers} onChange={setMachineChambers} /></div><label className="wide-field">创建原因<input value={machineReason} onChange={(event) => setMachineReason(event.target.value)} required /></label>
+          <button className="primary-action" type="submit" disabled={addMachine.isPending || !!cloneMachineId && cloneEquipment.isFetching}>{addMachine.isPending ? '正在创建' : '创建机台'}</button>
         </form>
-        {addMachine.isError && <p className="error-strip">{addMachine.error.message}</p>}
-      </details>
+        {addMachine.isError && <p className="error-strip">{addMachine.error.message}</p>}{cloneEquipment.isError && <p className="error-strip">{cloneEquipment.error.message}</p>}
+      </div>
     </section>
 
     <section className="status-panel catalog-panel machine-list-panel">
       <div className="machine-list-controls"><strong>当前项目机台</strong><span>{visibleMachines.length} 台</span></div>
-      <div className="machine-list">{visibleMachines.map(machine => <button type="button" className={machine.id === selectedMachineId ? 'machine-list-item selected' : 'machine-list-item'} key={machine.id} onClick={() => { onSelectMachine(machine.id); setFactComponentId(''); setFactVersionId('') }}><strong>{machine.name}</strong><span>{machine.serialNumber}{machine.location ? ` · ${machine.location}` : ''}</span><small>{machine.machineType || '未填机型'} · {machineStatusText[machine.status] ?? '未知状态'}{machine.expectedResumeAt && ` · 预计恢复 ${formatTime(machine.expectedResumeAt)}`}</small></button>)}</div>
+      <div className="machine-location-groups">{[...new Set(visibleMachines.map(machine => machine.location || '未填写位置'))].map(location => <section className="machine-location-group" key={location}><h4>{location}</h4><div className="machine-list">{visibleMachines.filter(machine => (machine.location || '未填写位置') === location).map(machine => <button type="button" className={machine.id === selectedMachineId ? 'machine-list-item selected' : 'machine-list-item'} key={machine.id} onClick={() => { onSelectMachine(machine.id); setFactComponentId(''); setFactVersionId('') }}><strong>{machine.name}<em>{machine.stage || '未登记阶段'}</em></strong><span>{machine.serialNumber}{machine.location ? ` · ${machine.location}` : ''}</span><small>{machine.machineType || '未填机型'} · {machineStatusText[machine.status] ?? '未知状态'}{machine.expectedResumeAt && ` · 预计恢复 ${formatTime(machine.expectedResumeAt)}`}</small><span>目标基线 {machine.targetBaselineCode || '未指派'}</span><span>{machine.chambers?.length ? machine.chambers.map(n => `PM${n}`).join(' · ') : '未登记腔室'}</span><span>负责人 {machine.owner || '未填写'}</span></button>)}</div></section>)}</div>
     </section>
 
-    <section className="status-panel catalog-panel machine-detail-panel">
+    <section hidden={!selectedMachine} className="status-panel catalog-panel machine-detail-panel">
       {!selectedMachine ? <p className="empty-state">从左侧列表选择一台机台后，才会显示其实际配置、目标与历史。</p> : <>
         <div className="machine-detail-header"><div><span className="section-index">已选机台</span><h3>{selectedMachine.name}</h3><p>{selectedMachine.serialNumber}{selectedMachine.machineType ? ` · ${selectedMachine.machineType}` : ''}{selectedMachine.location ? ` · ${selectedMachine.location}` : ''}</p></div><div className="machine-statuses"><span>{machineStatusText[selectedMachine.status]}{selectedMachine.expectedResumeAt && ` · 预计恢复 ${formatTime(selectedMachine.expectedResumeAt)}`}</span><span>匹配 {matchText[machineDrift.data?.matchStatus ?? 'Unknown']}</span><span>风险 {riskText[machineDrift.data?.riskSeverity ?? 'Unknown']}</span></div></div>
         <details hidden={!canWrite} className="machine-edit" open={editOpen} onToggle={(event) => setEditOpen((event.target as HTMLDetailsElement).open)}><summary>编辑机台资料</summary><form hidden={!canWrite} className="catalog-form" onSubmit={(event) => { event.preventDefault(); update.mutate() }}><label>机台序列号<input value={editSerial} onChange={(event) => setEditSerial(event.target.value)} required /></label><label>机台名称<input value={editName} onChange={(event) => setEditName(event.target.value)} required /></label><label>机型<input value={editType} onChange={(event) => setEditType(event.target.value)} /></label><label>位置<input value={editLocation} onChange={(event) => setEditLocation(event.target.value)} /></label><label>状态<select value={editStatus} onChange={(event) => setEditStatus(event.target.value)}><option value="Active">在用</option><option value="ShortTermCip">短期 CIP</option><option value="LongTermCip">长期 CIP</option><option value="NoProduction">暂未过货</option><option value="Archived">已归档</option></select></label>{['ShortTermCip', 'LongTermCip'].includes(editStatus) && <label>预计恢复时间<input type="datetime-local" value={expectedResumeAt} onChange={event => setExpectedResumeAt(event.target.value)} required /></label>}<label className="wide-field">修改原因<input value={editReason} onChange={(event) => setEditReason(event.target.value)} required /></label><button type="submit" disabled={update.isPending}>{update.isPending ? '正在保存' : '保存资料'}</button></form><p className="form-hint">项目归属创建后固定，不能跨项目移动，以保护既有目标、实际配置和历史事实。</p>{update.isError && <p className="error-strip">{update.error.message}</p>}</details>
 
+        <MachineEquipmentPanel key={selectedMachine.id} machineId={selectedMachine.id} name={selectedMachine.name} canWrite={canWrite} isAdmin={isAdmin} project={machineProject.data} onDeleted={() => { onSelectMachine(''); onSuccess('机台已删除，历史记录已保留。') }} onSuccess={onSuccess} />
         <div className="machine-detail-sections">
           <details open><summary>目标基线</summary><p className="empty-state">{machineTarget.data ? `${machineTarget.data.baselineCode} · 自 ${formatTime(machineTarget.data.validFrom)} 起生效` : '尚未显式指派目标基线。项目当前标准不会自动成为本机目标。'}</p><form hidden={!canWrite} className="catalog-form" onSubmit={(event) => { event.preventDefault(); assignTarget.mutate() }}><label>已发布基线<select value={targetBaselineId} onChange={(event) => setTargetBaselineId(event.target.value)} required><option value="">请选择已发布基线</option>{targetBaselines.data?.filter(baseline => baseline.state === 'Released').map(baseline => <option key={baseline.id} value={baseline.id}>{baseline.code} · Revision {baseline.revisionNo}</option>)}</select></label><label>指派原因<input value={targetReason} onChange={(event) => setTargetReason(event.target.value)} required /></label><button type="submit" disabled={assignTarget.isPending}>{assignTarget.isPending ? '正在指派' : '设为机台目标'}</button></form>{assignTarget.isError && <p className="error-strip">{assignTarget.error.message}</p>}{machineTarget.data && <details className="machine-drift-preview"><summary>比对当前实际与机台目标基线</summary>{machineDrift.data?.items.every(item => item.status === 'Matched') ? <p className="success-strip">匹配：全部组件一致。风险：{riskText[machineDrift.data?.riskSeverity ?? 'Unknown'] ?? machineDrift.data?.riskSeverity}。</p> : <div className="component-list">{machineDrift.data?.items.filter(item => item.status !== 'Matched').map(item => <article className="component-row" key={item.componentId}><div><strong>{item.componentName}</strong><span>{item.status === 'Missing' ? '实际缺失' : item.status === 'Extra' ? '基线之外' : '版本不同'}</span></div><small>{item.expectedVersionNumber ?? '无'} → {item.actualVersionNumber ?? '无'}</small></article>)}</div>}</details>}</details>
           <details className="machine-drift-preview"><summary>与项目当前标准比对</summary>{machineProjectStandard.isLoading ? <p className="empty-state">正在读取项目当前标准。</p> : !machineProjectStandard.data ? <p className="empty-state">项目尚未设定当前标准，因此暂不能进行此项比对。</p> : <><p className="form-hint">项目当前标准为 {machineProjectStandard.data.baselineCode}，用于展示项目推荐基线下的差异；它不会自动成为本机 Target。</p>{projectStandardComparison.isLoading ? <p className="empty-state">正在计算当前差异。</p> : projectStandardComparison.isError ? <p className="error-strip">{projectStandardComparison.error.message}</p> : projectStandardComparison.data?.items.every(item => item.status === 'Matched') ? <p className="success-strip">匹配：全部组件一致。风险：{riskText[projectStandardComparison.data.riskSeverity] ?? projectStandardComparison.data.riskSeverity}。</p> : <div className="component-list">{projectStandardComparison.data?.items.filter(item => item.status !== 'Matched').map(item => <article className="component-row" key={item.componentId}><div><strong>{item.componentName}</strong><span>{item.status === 'Missing' ? '实际缺失' : item.status === 'Extra' ? '标准之外' : '版本不同'}</span></div><small>{item.expectedVersionNumber ?? '无'} → {item.actualVersionNumber ?? '无'}</small></article>)}</div>}</>}</details>
@@ -154,7 +165,7 @@ export function MachineWorkspace({ projectId, canWrite = true, selectedMachineId
         </div>
       </>}
     </section>
-    <div className="machine-tools">
+    <div hidden={!selectedMachine} className="machine-tools">
       <nav className="machine-tool-tabs" aria-label="机台操作">
         {[['configuration', '完整配置'], ['history', '历史查询'], ['correction', '回退与更正'], ['upgrade', '批量升级'], ['target', '批量目标']].filter(([id]) => canWrite || id === 'history').map(([id, label]) => <button type="button" key={id} aria-pressed={toolTab === id} onClick={() => setToolTab(id)} disabled={!selectedMachine && !['upgrade', 'target'].includes(id)}>{label}</button>)}
       </nav>

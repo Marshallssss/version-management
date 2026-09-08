@@ -9,6 +9,9 @@ public sealed class Machine
     public required string Name { get; set; }
     public string? MachineType { get; set; }
     public string? Location { get; set; }
+    public string? Owner { get; set; }
+    public string? Stage { get; set; }
+    public DateTimeOffset? DeletedAt { get; set; }
     public MachineStatus Status { get; set; } = MachineStatus.Active;
     public DateTimeOffset? ExpectedResumeAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }

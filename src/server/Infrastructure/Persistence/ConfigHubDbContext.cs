@@ -39,6 +39,9 @@ public sealed class ConfigHubDbContext(DbContextOptions<ConfigHubDbContext> opti
 
     public DbSet<ProjectStandardAssignment> ProjectStandardAssignments => Set<ProjectStandardAssignment>();
     public DbSet<Machine> Machines => Set<Machine>();
+    public DbSet<MachineChamber> MachineChambers => Set<MachineChamber>();
+    public DbSet<MachineEquipmentHistory> MachineEquipmentHistory => Set<MachineEquipmentHistory>();
+    public DbSet<MachineChamberVersion> MachineChamberVersions => Set<MachineChamberVersion>();
     public DbSet<MachineTargetAssignment> MachineTargetAssignments => Set<MachineTargetAssignment>();
     public DbSet<DeploymentBatch> DeploymentBatches => Set<DeploymentBatch>();
     public DbSet<DeploymentItem> DeploymentItems => Set<DeploymentItem>();
@@ -56,5 +59,6 @@ public sealed class ConfigHubDbContext(DbContextOptions<ConfigHubDbContext> opti
     {
         base.OnModelCreating(builder);
         ConfigHubModel.Configure(builder);
+        MachineEquipmentModel.Configure(builder);
     }
 }
