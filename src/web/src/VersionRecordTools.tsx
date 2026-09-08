@@ -13,12 +13,12 @@ export function PatchBadge({ version, onOpen }: { version: ComponentVersion; onO
   return <Popover open={open} onOpenChange={setOpen} trigger={['hover', 'focus']} title={version.versionNumber} content={<div className="patch-hover-content">{version.patches.map(patch => <p key={patch.patchCode}><strong>{patch.patchCode}</strong> · {patch.title}<small>{patchNames[patch.status]}</small></p>)}<button type="button" onClick={() => { setOpen(false); onOpen() }}>查看全部修复记录</button></div>}><button type="button" className="patch-badge patch-open" onClick={event => { event.stopPropagation(); setOpen(false); onOpen() }}>补丁 {version.patchCount}</button></Popover>
 }
 
-export function PatchActions({ patch, isAdmin, onSaved }: { patch: VersionPatch; isAdmin: boolean; onSaved: () => Promise<void> }) {
+export function PatchActions({ patch, isAdmin, onSaved, canWrite = true }: { canWrite?: boolean; patch: VersionPatch; isAdmin: boolean; onSaved: () => Promise<void> }) {
   const [open, setOpen] = useState(false)
   const [reason, setReason] = useState('')
   const action = patch.status === 'Draft' ? 'delete' : 'withdraw'
   const mutation = useMutation({ mutationFn: () => managePatch(patch.id, action, reason), onSuccess: async () => { setOpen(false); setReason(''); await onSaved() } })
-  if (patch.status === 'Withdrawn' || patch.status === 'Draft' && !isAdmin) return null
+  if (!canWrite || patch.status === 'Withdrawn' || patch.status === 'Draft' && !isAdmin) return null
   return <div className="patch-record-actions"><button type="button" onClick={() => setOpen(value => !value)}>{action === 'delete' ? '删除草稿' : '撤回补丁'}</button>{open && <form onSubmit={event => { event.preventDefault(); Modal.confirm({ title: action === 'delete' ? '确认删除草稿补丁？' : '确认撤回补丁？', content: action === 'delete' ? '草稿将被删除，操作留有审计。' : '保留补丁内容和登记时间，标记为已撤回。', okText: '确认', cancelText: '取消', onOk: () => mutation.mutateAsync().catch(() => {}) }) }}><label>操作原因<input value={reason} maxLength={500} onChange={event => setReason(event.target.value)} required /></label><button type="submit" disabled={mutation.isPending}>继续</button></form>}{mutation.isError && <p className="error-strip">{mutation.error.message}</p>}</div>
 }
 

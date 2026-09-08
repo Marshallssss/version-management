@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { getBaselines, getMachines, upgradeMachinesToBaseline, type ProjectSummary } from './catalog-api'
+import { getBaselines, getMachines, upgradeMachinesToBaseline } from './catalog-api'
 
 function nowForInput() {
   const now = new Date()
@@ -8,9 +8,8 @@ function nowForInput() {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`
 }
 
-export function BulkBaselineUpgradePanel({ projects }: { projects: ProjectSummary[] }) {
+export function BulkBaselineUpgradePanel({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient()
-  const [projectId, setProjectId] = useState('')
   const [baselineId, setBaselineId] = useState('')
   const [machineIds, setMachineIds] = useState<string[]>([])
   const [effectiveAt, setEffectiveAt] = useState(nowForInput)
@@ -35,7 +34,6 @@ export function BulkBaselineUpgradePanel({ projects }: { projects: ProjectSummar
   return <section className="status-panel catalog-panel bulk-upgrade-panel">
     <div className="panel-heading"><div><span className="section-index">批量升级</span><h3>将实际配置升级到已发布基线</h3></div></div>
     <form className="catalog-form" onSubmit={(event) => { event.preventDefault(); upgrade.mutate() }}>
-      <label>所属项目<select value={projectId} onChange={(event) => { setProjectId(event.target.value); setBaselineId(''); setMachineIds([]) }} required><option value="">请选择项目</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>
       <label>已发布基线<select value={baselineId} onChange={(event) => setBaselineId(event.target.value)} disabled={!projectId} required><option value="">请选择已发布基线</option>{baselines.data?.filter(baseline => baseline.state === 'Released').map(baseline => <option key={baseline.id} value={baseline.id}>{baseline.code} · Revision {baseline.revisionNo}</option>)}</select></label>
       <label>实际升级时间<input type="datetime-local" value={effectiveAt} onChange={(event) => setEffectiveAt(event.target.value)} required /></label>
       <label className="wide-field">升级原因<input value={reason} maxLength={500} onChange={(event) => setReason(event.target.value)} required /></label>

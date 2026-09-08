@@ -127,7 +127,7 @@ export const requestBaselineReview = (baselineId: string, reason: string) =>
   request<{ id: string; status: string }>(`/api/v1/baselines/${baselineId}/review`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': createIdempotencyKey() }, body: JSON.stringify({ reason }) })
 export const decideBaselineReview = (baselineId: string, decision: 'approve' | 'reject', reason: string) =>
   request<{ id: string; status: string }>(`/api/v1/baselines/${baselineId}/review/${decision}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': createIdempotencyKey() }, body: JSON.stringify({ reason }) })
-export const getProjectStandard = (projectId: string) => request<{ baselineId: string; baselineCode: string; validFrom: string } | null>(`/api/v1/projects/${projectId}/standard`)
+export const getProjectStandard = (projectId: string) => request<{ baselineId: string; baselineCode: string; validFrom: string } | null>(`/api/v1/projects/${projectId}/standard`).then(value => value ?? null)
 export const assignProjectStandard = (projectId: string, baselineId: string, reason: string) =>
   request<{ id: string; baselineId: string }>(`/api/v1/projects/${projectId}/standard`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': createIdempotencyKey() }, body: JSON.stringify({ configurationBaselineId: baselineId, reason }) })
 export interface MachineSummary { id: string; projectId: string; serialNumber: string; name: string; machineType: string | null; location: string | null; expectedResumeAt: string | null; status: string; matchStatus: string | null; riskSeverity: string | null }
