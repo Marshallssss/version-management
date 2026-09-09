@@ -45,6 +45,9 @@ export interface VersionPatch {
 }
 
 export interface ConfigurationComponent {
+  owner: string | null
+  model: string | null
+  notes: string | null
   id: string
   parentComponentId: string | null
   name: string
@@ -98,9 +101,9 @@ export const login = (input: { userName: string; password: string }) => request<
 export const logout = () => request<void>('/api/v1/auth/logout', { method: 'POST' })
 export const createProject = (input: { code: string; name: string; description: string; reason: string }) =>
   request<{ id: string }>('/api/v1/projects', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': createIdempotencyKey() }, body: JSON.stringify(input) })
-export const createComponent = (projectId: string, input: { name: string; parentComponentId: string | null; reason: string }) =>
+export const createComponent = (projectId: string, input: { name: string; owner?: string; model?: string; notes?: string; parentComponentId: string | null; reason: string }) =>
   request<{ id: string }>(`/api/v1/projects/${projectId}/components`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': createIdempotencyKey() }, body: JSON.stringify(input) })
-export const updateComponent = (componentId: string, input: { name: string; reason: string }) =>
+export const updateComponent = (componentId: string, input: { name: string; owner?: string; model?: string; notes?: string; reason: string }) =>
   request<{ id: string; lineageKey: string }>(`/api/v1/components/${componentId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': createIdempotencyKey() }, body: JSON.stringify(input) })
 export const deleteComponent = (componentId: string, reason: string) =>
   request<{ id: string; deleted: boolean }>(`/api/v1/components/${componentId}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': createIdempotencyKey() }, body: JSON.stringify({ reason }) })
@@ -126,7 +129,7 @@ export const getBaselines = (projectId: string) => request<BaselineSummary[]>(`/
 export const getBaselineDetail = (baselineId: string) => request<{ baseline: { id: string; projectId: string; code: string; seriesCode: string; revisionNo: number; state: string; description: string | null; createdBy: string; createdAt: string; releasedBy: string | null; releasedAt: string | null; approvedBy: string | null }; review: { id: string; status: string; requestedBy: string; requestedAt: string; requestReason: string; decidedBy: string | null; decidedAt: string | null; decisionReason: string | null } | null; items: Array<{ id: string; parentItemId: string | null; componentId: string; versionId: string | null; versionNumber: string | null; componentName: string; lineageKey: string; requirement: string; sortOrder: number }> }>(`/api/v1/baselines/${baselineId}`)
 export const setBaselineItemRequirement = (baselineId: string, itemId: string, input: { requirement: string; reason: string }) => request<{ id: string; requirement: string }>(`/api/v1/baselines/${baselineId}/items/${itemId}/requirement`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': createIdempotencyKey() }, body: JSON.stringify(input) })
 export const compareBaselines = (leftBaselineId: string, rightBaselineId: string) => request<{ items: Array<{ componentId: string; status: string; componentName: string; leftVersionId: string | null; leftVersionNumber: string | null; rightVersionId: string | null; rightVersionNumber: string | null }> }>(`/api/v1/baselines/${leftBaselineId}/compare/${rightBaselineId}`)
-export const createBaseline = (projectId: string, input: { seriesCode: string; baselineCode: string; description: string; reason: string; versionSelections?: Array<{ componentId: string; versionId: string }>; testingVersionIds?: string[] }) =>
+export const createBaseline = (projectId: string, input: { seriesCode: string; baselineCode: string; description: string; reason: string; versionSelections?: Array<{ componentId: string; versionId: string }>; testingVersionIds?: string[]; publishImmediately?: boolean }) =>
   request<{ id: string; revisionNo: number; itemCount: number }>(`/api/v1/projects/${projectId}/baselines`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': createIdempotencyKey() }, body: JSON.stringify(input) })
 export const undoBaselineCreation = (baselineId: string, reason: string) =>
   request<{ id: string; undone: boolean; restoredTestingVersionCount: number }>(`/api/v1/baselines/${baselineId}/undo-creation`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': createIdempotencyKey() }, body: JSON.stringify({ reason }) })

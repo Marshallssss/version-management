@@ -928,6 +928,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
                 id = component.Id,
                 parentComponentId = component.ParentComponentId,
                 name = component.Name,
+                owner = component.Owner, model = component.Model, notes = component.Notes,
                 sortOrder = component.SortOrder,
                 versions = database.ComponentVersions
                     .Where(version => version.ComponentId == component.Id)
@@ -956,7 +957,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
 
     private static async Task<IResult> CloneAsync(Guid projectId, CloneProjectRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
     {
-        var validation = ValidateIdentifier(request.Code, "项目编码", 50) ?? ValidateRequired(request.Name, "项目名称", 200) ?? ValidateRequired(request.Reason, "克隆原因", 500);
+        var validation = ValidateIdentifier(request.Code, "项目编码", 50, allowSpace: true) ?? ValidateRequired(request.Name, "项目名称", 200) ?? ValidateRequired(request.Reason, "克隆原因", 500);
         if (validation is not null) return Results.ValidationProblem(validation);
         var key = context.Request.Headers["Idempotency-Key"].FirstOrDefault(); if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["克隆项目必须提供不超过 200 个字符的 Idempotency-Key。"] });
         await using var database = await factory.CreateDbContextAsync(cancellationToken);
@@ -974,7 +975,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         var ids = sourceComponents.ToDictionary(item => item.Id, _ => Guid.NewGuid());
         foreach (var sourceComponent in sourceComponents)
         {
-            database.ConfigurationComponents.Add(new ConfigurationComponent { Id = ids[sourceComponent.Id], ProjectId = target.Id, ParentComponentId = sourceComponent.ParentComponentId is null ? null : ids[sourceComponent.ParentComponentId.Value], ComponentCode = sourceComponent.ComponentCode, NormalizedComponentCode = sourceComponent.NormalizedComponentCode, LineageKey = sourceComponent.LineageKey, Name = sourceComponent.Name, SortOrder = sourceComponent.SortOrder, CreatedAt = now });
+            database.ConfigurationComponents.Add(new ConfigurationComponent { Id = ids[sourceComponent.Id], ProjectId = target.Id, ParentComponentId = sourceComponent.ParentComponentId is null ? null : ids[sourceComponent.ParentComponentId.Value], ComponentCode = sourceComponent.ComponentCode, NormalizedComponentCode = sourceComponent.NormalizedComponentCode, LineageKey = sourceComponent.LineageKey, Name = sourceComponent.Name, Owner = sourceComponent.Owner, Model = sourceComponent.Model, Notes = sourceComponent.Notes, SortOrder = sourceComponent.SortOrder, CreatedAt = now });
         }
         database.Projects.Add(target);
         AddAuditEvent(database, context, "ProjectCloned", "Project", target.Id, new { sourceProjectId = source.Id, reason = request.Reason!.Trim(), actor });
@@ -1102,8 +1103,8 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         IDbContextFactory<ConfigHubDbContext> factory,
         CancellationToken cancellationToken)
     {
-        var validation = ValidateIdentifier(request.SeriesCode, "基线系列编码", 80)
-            ?? ValidateIdentifier(request.BaselineCode, "基线编码", 100)
+        var validation = ValidateIdentifier(request.SeriesCode, "基线系列编码", 80, allowSpace: true)
+            ?? ValidateIdentifier(request.BaselineCode, "基线编码", 100, allowSpace: true, allowDot: true)
             ?? ValidateRequired(request.Reason, "创建原因", 500);
         if (validation is not null) return Results.ValidationProblem(validation);
 
@@ -1115,6 +1116,8 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         var requestHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request))));
         var scope = $"baselines.create:{projectId}";
         await using var database = await factory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
+        if (await database.Projects.FromSqlInterpolated($"SELECT * FROM projects WHERE id = {projectId} FOR UPDATE").SingleOrDefaultAsync(cancellationToken) is null) return Results.NotFound();
         var existing = await database.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == idempotencyKey, cancellationToken);
         if (existing is not null)
         {
@@ -1129,6 +1132,8 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         if (await database.ConfigurationBaselines.AnyAsync(item => item.ProjectId == projectId && item.NormalizedBaselineCode == normalizedCode, cancellationToken))
             return Results.Conflict(new { message = "该项目中的基线编码已存在。" });
 
+        // Lock candidate versions before checking maturity/safety so publication sees a stable selection.
+        await database.ComponentVersions.FromSqlInterpolated($"SELECT v.* FROM component_versions AS v JOIN configuration_components AS c ON c.id = v.component_id WHERE c.project_id = {projectId} ORDER BY v.id FOR UPDATE OF v").ToListAsync(cancellationToken);
         var components = await database.ConfigurationComponents
             .Where(item => item.ProjectId == projectId)
             .OrderBy(item => item.LineageKey)
@@ -1171,6 +1176,11 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
             versionsByComponent = explicitSelections.ToDictionary(item => item.ComponentId, item => releasedSelections[item.VersionId]);
         }
 
+        if (testingVersions.Any(v => versionsByComponent.GetValueOrDefault(v.ComponentId)?.Id != v.Id))
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["testingVersionIds"] = ["勾选发布的测试版本必须与基线快照选定版本一致。"] });
+        if (request.PublishImmediately && (versionsByComponent.Count == 0 || versionsByComponent.Values.Any(v => v.Safety == VersionSafety.Blocked)))
+            return Results.Conflict(new { message = "直接发布基线需要至少一个实际版本，且不能包含已阻断版本。" });
+
         var normalizedSeries = Normalize(request.SeriesCode!);
         var series = await database.BaselineSeries.SingleOrDefaultAsync(item => item.ProjectId == projectId && item.NormalizedSeriesCode == normalizedSeries, cancellationToken);
         var nextRevision = series is null
@@ -1192,7 +1202,6 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         };
         var baselineItemIds = components.ToDictionary(item => item.Id, _ => Guid.NewGuid());
 
-        await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
         database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = idempotencyKey, RequestHash = requestHash, CreatedAt = now, ExpiresAt = now.AddDays(7) });
         foreach (var testingVersion in testingVersions)
         {
@@ -1221,12 +1230,19 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         }
         AddAuditEvent(database, context, "BaselineDraftCreated", "ConfigurationBaseline", baseline.Id, new { baseline.BaselineCode, baseline.RevisionNo, baseline.BaselineSeriesId, reason = request.Reason!.Trim(), itemCount = components.Count, testingVersionIds, selectionMode = testingVersions.Count > 0 ? "TestingVersionsPromotedAndSelected" : explicitSelections.Length > 0 ? "ExplicitReleasedVersions" : "LatestReleasedVersions" });
         await database.SaveChangesAsync(cancellationToken);
+        if (request.PublishImmediately)
+        {
+            baseline.State = BaselineState.Released;
+            baseline.ReleasedAt = now; baseline.ReleasedBy = actor; baseline.ReleaseReason = request.Reason!.Trim();
+            database.BaselineLifecycleTransitions.Add(new() { Id = Guid.NewGuid(), ConfigurationBaselineId = baseline.Id, FromState = "Draft", ToState = "Released", Reason = baseline.ReleaseReason, Actor = actor, OccurredAt = now });
+            AddAuditEvent(database, context, "BaselineReleased", "ConfigurationBaseline", baseline.Id, new { baseline.BaselineCode, reason = baseline.ReleaseReason, workflow = "DirectPublish", itemCount = components.Count });
+        }
         var record = await database.IdempotencyRecords.SingleAsync(item => item.Scope == scope && item.IdempotencyKey == idempotencyKey, cancellationToken);
         record.Status = IdempotencyRecordStatus.Completed;
-        record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = baseline.Id, revisionNo = baseline.RevisionNo, itemCount = components.Count }));
+        record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = baseline.Id, revisionNo = baseline.RevisionNo, itemCount = components.Count, state = baseline.State.ToString() }));
         await database.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        return TypedResults.Created($"/api/v1/baselines/{baseline.Id}", new { id = baseline.Id, revisionNo = baseline.RevisionNo, itemCount = components.Count });
+        return TypedResults.Created($"/api/v1/baselines/{baseline.Id}", new { id = baseline.Id, revisionNo = baseline.RevisionNo, itemCount = components.Count, state = baseline.State.ToString() });
     }
 
     private static async Task<IResult> UndoBaselineCreationAsync(
@@ -1380,6 +1396,10 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
             .Join(database.ComponentVersions, item => item.ComponentVersionId, version => version.Id, (_, version) => version)
             .AnyAsync(version => version.Safety == VersionSafety.Blocked, cancellationToken);
         if (blocked) return Results.Conflict(new { message = "包含已阻断版本的基线不能发布。" });
+        if (await database.BaselineItems.Where(item => item.ConfigurationBaselineId == baselineId)
+            .Join(database.ComponentVersions, item => item.ComponentVersionId, version => version.Id, (_, version) => version)
+            .AnyAsync(version => version.Maturity != VersionMaturity.Released && version.Maturity != VersionMaturity.Maintenance, cancellationToken))
+            return Results.Conflict(new { message = "基线中的版本已返回测试或不再处于发布状态，请重新选择已发布版本。" });
 
         var actor = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required.");
         await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
@@ -1505,7 +1525,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         IDbContextFactory<ConfigHubDbContext> contextFactory,
         CancellationToken cancellationToken)
     {
-        var validationError = ValidateIdentifier(request.Code, "项目编码", 50) ?? ValidateRequired(request.Name, "项目名称", 200) ?? ValidateRequired(request.Reason, "创建原因", 500);
+        var validationError = ValidateIdentifier(request.Code, "项目编码", 50, allowSpace: true) ?? ValidateRequired(request.Name, "项目名称", 200) ?? ValidateRequired(request.Reason, "创建原因", 500);
         if (validationError is not null)
         {
             return Results.ValidationProblem(validationError);
@@ -1589,7 +1609,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         IDbContextFactory<ConfigHubDbContext> contextFactory,
         CancellationToken cancellationToken)
     {
-        var validationError = ValidateRequired(request.Name, "组件名称", 200) ?? ValidateRequired(request.Reason, "创建原因", 500);
+        var validationError = ValidateRequired(request.Name, "组件名称", 200) ?? ValidateRequired(request.Reason, "创建原因", 500) ?? ValidateComponentMetadata(request.Owner, request.Model, request.Notes);
         if (validationError is not null)
         {
             return Results.ValidationProblem(validationError);
@@ -1628,11 +1648,12 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
             NormalizedComponentCode = internalCode,
             LineageKey = parent is null ? internalCode : $"{parent.LineageKey}/{internalCode}",
             Name = name,
+            Owner = request.Owner?.Trim(), Model = request.Model?.Trim(), Notes = request.Notes?.Trim(),
             SortOrder = maxSortOrder + 1,
             CreatedAt = now
         };
         database.ConfigurationComponents.Add(component);
-        AddAuditEvent(database, httpContext, "ComponentCreated", "ConfigurationComponent", component.Id, new { component.ProjectId, component.Name, reason = request.Reason!.Trim() });
+        AddAuditEvent(database, httpContext, "ComponentCreated", "ConfigurationComponent", component.Id, new { component.ProjectId, component.Name, component.Owner, component.Model, component.Notes, reason = request.Reason!.Trim() });
         await database.SaveChangesAsync(cancellationToken); var record = await database.IdempotencyRecords.SingleAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken); record.Status = IdempotencyRecordStatus.Completed; record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = component.Id })); await database.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
         return TypedResults.Created($"/api/v1/projects/{projectId}", new { id = component.Id });
     }
@@ -1675,7 +1696,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         IDbContextFactory<ConfigHubDbContext> contextFactory,
         CancellationToken cancellationToken)
     {
-        var validationError = ValidateIdentifier(request.PatchCode, "补丁编号", 80)
+        var validationError = ValidateIdentifier(request.PatchCode, "补丁编号", 80, allowDot: true)
             ?? ValidateRequired(request.Title, "补丁标题", 200)
             ?? ValidateRequired(request.IssueDescription, "问题说明", 2000)
             ?? ValidateRequired(request.ResolutionDescription, "修复说明", 2000);
@@ -1735,7 +1756,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
 
     private static async Task<IResult> UpdateComponentAsync(Guid componentId, UpdateComponentRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
     {
-        var validation = ValidateRequired(request.Name, "组件名称", 200) ?? ValidateRequired(request.Reason, "修改原因", 500);
+        var validation = ValidateRequired(request.Name, "组件名称", 200) ?? ValidateRequired(request.Reason, "修改原因", 500) ?? ValidateComponentMetadata(request.Owner, request.Model, request.Notes);
         if (validation is not null) return Results.ValidationProblem(validation);
         var key = context.Request.Headers["Idempotency-Key"].FirstOrDefault(); if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["编辑组件必须提供不超过 200 个字符的 Idempotency-Key。"] });
         await using var database = await factory.CreateDbContextAsync(cancellationToken);
@@ -1745,8 +1766,9 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         if (component is null) return Results.NotFound();
         if (!await HasProjectWriteAccessAsync(database, context, component.ProjectId, cancellationToken)) return Results.Forbid();
         var now = DateTimeOffset.UtcNow; await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken); database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) });
-        component.Name = request.Name!.Trim();
-        AddAuditEvent(database, context, "ComponentUpdated", "ConfigurationComponent", component.Id, new { component.Name, reason = request.Reason!.Trim() });
+        var before = new { component.Name, component.Owner, component.Model, component.Notes };
+        component.Name = request.Name!.Trim(); component.Owner = request.Owner?.Trim(); component.Model = request.Model?.Trim(); component.Notes = request.Notes?.Trim();
+        AddAuditEvent(database, context, "ComponentUpdated", "ConfigurationComponent", component.Id, new { before, component.Name, component.Owner, component.Model, component.Notes, reason = request.Reason!.Trim() });
         await database.SaveChangesAsync(cancellationToken); var record = await database.IdempotencyRecords.SingleAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken); record.Status = IdempotencyRecordStatus.Completed; record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = component.Id, lineageKey = component.LineageKey })); await database.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
         return TypedResults.Ok(new { id = component.Id, lineageKey = component.LineageKey });
     }
@@ -1888,6 +1910,11 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
             await DeprecateOtherTestingVersionsAsync(database, version.ComponentId, version.Id, request.Reason.Trim(), context, cancellationToken);
             await database.SaveChangesAsync(cancellationToken);
         }
+        if (next is not VersionMaturity.Released and not VersionMaturity.Maintenance)
+        {
+            var recommendation = await database.VersionRecommendations.SingleOrDefaultAsync(x => x.ComponentVersionId == versionId && x.RevokedAt == null, cancellationToken);
+            if (recommendation is not null) { recommendation.RevokedAt = now; recommendation.RevokedBy = actor; recommendation.RevokeReason = request.Reason.Trim(); }
+        }
         version.Maturity = next;
         database.VersionLifecycleTransitions.Add(new VersionLifecycleTransition { Id = Guid.NewGuid(), ComponentVersionId = version.Id, Axis = LifecycleAxis.Maturity, FromState = previous.ToString(), ToState = next.ToString(), Reason = request.Reason.Trim(), Actor = actor, OccurredAt = DateTimeOffset.UtcNow });
         AddAuditEvent(database, context, "VersionMaturityChanged", "ComponentVersion", version.Id, new { from = previous.ToString(), to = next.ToString(), reason = request.Reason.Trim() });
@@ -1961,7 +1988,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         {
             (VersionMaturity.Draft, VersionMaturity.Testing) => true,
             (VersionMaturity.Testing, VersionMaturity.Draft or VersionMaturity.Released) => true,
-            (VersionMaturity.Released, VersionMaturity.Maintenance or VersionMaturity.Deprecated) => true,
+            (VersionMaturity.Released, VersionMaturity.Testing or VersionMaturity.Maintenance or VersionMaturity.Deprecated) => true,
             (VersionMaturity.Maintenance, VersionMaturity.Deprecated) => true,
             _ => false
         };
@@ -1995,16 +2022,20 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         }
     }
 
-    private static Dictionary<string, string[]>? ValidateIdentifier(string? value, string fieldName, int maxLength)
+    private static Dictionary<string, string[]>? ValidateComponentMetadata(string? owner, string? model, string? notes) =>
+        owner?.Trim().Length > 160 || model?.Trim().Length > 200 || notes?.Trim().Length > 2000
+            ? new() { ["metadata"] = ["负责人最多 160 字、型号最多 200 字、备注最多 2000 字。"] } : null;
+
+    private static Dictionary<string, string[]>? ValidateIdentifier(string? value, string fieldName, int maxLength, bool allowSpace = false, bool allowDot = false)
     {
         var required = ValidateRequired(value, fieldName, maxLength);
         if (required is not null)
         {
             return required;
         }
-        return value!.Trim().All(character => char.IsLetterOrDigit(character) || character is '-' or '_')
+        return value!.Trim().All(character => char.IsLetterOrDigit(character) || character is '-' or '_' || allowSpace && character == ' ' || allowDot && character == '.')
             ? null
-            : new Dictionary<string, string[]> { ["code"] = [$"{fieldName}只能包含字母、数字、连字符或下划线。"] };
+            : new Dictionary<string, string[]> { ["code"] = [$"{fieldName}只能包含字母、数字、连字符、下划线{(allowSpace ? "、空格" : "")}{(allowDot ? "、小数点" : "")}。"] };
     }
 
     private static Dictionary<string, string[]>? ValidateRequired(string? value, string fieldName, int maxLength) =>
@@ -2044,8 +2075,8 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
 }
 
 public sealed record CreateProjectRequest(string? Code, string? Name, string? Description, string? Reason);
-public sealed record CreateComponentRequest(string? Name, Guid? ParentComponentId, string? Reason);
-public sealed record UpdateComponentRequest(string? Name, string? Reason);
+public sealed record CreateComponentRequest(string? Name, Guid? ParentComponentId, string? Reason, string? Owner = null, string? Model = null, string? Notes = null);
+public sealed record UpdateComponentRequest(string? Name, string? Reason, string? Owner = null, string? Model = null, string? Notes = null);
 public sealed record DeleteComponentRequest(string? Reason);
 public sealed record CreateComponentVersionRequest(string? VersionNumber, string? Reason, string? Maturity);
 public sealed record CreateVersionPatchRequest(string? PatchCode, string? Title, string? IssueDescription, string? ResolutionDescription, string? Status);
@@ -2053,7 +2084,7 @@ public sealed record LifecycleRequest(string? State, string? Reason);
 public sealed record CloneProjectRequest(string? Code, string? Name, string? Reason);
 public sealed record MoveComponentRequest(Guid? ParentComponentId, string? Reason);
 public sealed record ReorderComponentRequest(string? Direction, string? Reason);
-public sealed record CreateBaselineRequest(string? SeriesCode, string? BaselineCode, string? Description, string? Reason, IReadOnlyList<BaselineVersionSelectionRequest>? VersionSelections = null, IReadOnlyList<Guid>? TestingVersionIds = null);
+public sealed record CreateBaselineRequest(string? SeriesCode, string? BaselineCode, string? Description, string? Reason, IReadOnlyList<BaselineVersionSelectionRequest>? VersionSelections = null, IReadOnlyList<Guid>? TestingVersionIds = null, bool PublishImmediately = false);
 public sealed record BaselineVersionSelectionRequest(Guid ComponentId, Guid VersionId);
 public sealed record MaintainBaselineDraftRequest(DateTimeOffset? CreatedAt, IReadOnlyList<BaselineVersionSelectionRequest>? VersionSelections, string? Reason, bool MaintenanceMode);
 public sealed record SetBaselineItemRequirementRequest(string? Requirement, string? Reason);

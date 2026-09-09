@@ -60,5 +60,11 @@ public sealed class ConfigHubDbContext(DbContextOptions<ConfigHubDbContext> opti
         base.OnModelCreating(builder);
         ConfigHubModel.Configure(builder);
         MachineEquipmentModel.Configure(builder);
+        builder.Entity<ConfigurationComponent>(entity =>
+        {
+            entity.Property(x => x.Owner).HasColumnName("owner").HasMaxLength(160);
+            entity.Property(x => x.Model).HasColumnName("model").HasMaxLength(200);
+            entity.Property(x => x.Notes).HasColumnName("notes").HasMaxLength(2000);
+        });
     }
 }

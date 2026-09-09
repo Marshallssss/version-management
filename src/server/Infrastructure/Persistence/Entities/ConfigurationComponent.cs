@@ -9,6 +9,9 @@ public sealed class ConfigurationComponent
     public required string NormalizedComponentCode { get; set; }
     public required string LineageKey { get; set; }
     public required string Name { get; set; }
+    public string? Owner { get; set; }
+    public string? Model { get; set; }
+    public string? Notes { get; set; }
     public int SortOrder { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 }
