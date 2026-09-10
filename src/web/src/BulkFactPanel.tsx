@@ -1,9 +1,8 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { getMachines, getProject, recordBulkMachineFacts, type ProjectSummary } from './catalog-api'
+import { getMachines, getProject, recordBulkMachineFacts } from './catalog-api'
 
-export function BulkFactPanel({ projects }: { projects: ProjectSummary[] }) {
-  const [projectId, setProjectId] = useState('')
+export function BulkFactPanel({ projectId }: { projectId: string }) {
   const [machineIds, setMachineIds] = useState<string[]>([])
   const [componentId, setComponentId] = useState('')
   const [versionId, setVersionId] = useState('')
@@ -32,7 +31,6 @@ export function BulkFactPanel({ projects }: { projects: ProjectSummary[] }) {
   return <section className="status-panel catalog-panel">
     <div className="panel-heading"><div><span className="section-index">V1.1 批量事实</span><h3>批量记录局部部署或观察</h3></div></div>
     <form className="catalog-form" onSubmit={(event) => { event.preventDefault(); record.mutate() }}>
-      <label>所属项目<select value={projectId} onChange={(event) => { setProjectId(event.target.value); setMachineIds([]); setComponentId(''); setVersionId('') }} required><option value="">请选择项目</option>{projects.map(projectItem => <option key={projectItem.id} value={projectItem.id}>{projectItem.code} · {projectItem.name}</option>)}</select></label>
       <label>事实类型<select value={operationType} onChange={(event) => setOperationType(event.target.value)}><option value="Observation">观察</option><option value="Install">安装</option><option value="Upgrade">升级</option><option value="InitialSnapshot">初始快照</option></select></label>
       <label>组件<select value={componentId} onChange={(event) => { setComponentId(event.target.value); setVersionId('') }} disabled={!projectId} required><option value="">请选择组件</option>{components.map(component => <option key={component.id} value={component.id}>{component.name}</option>)}</select></label>
       <label>版本<select value={versionId} onChange={(event) => setVersionId(event.target.value)} disabled={!componentId} required><option value="">请选择版本</option>{selectedComponent?.versions.map(version => <option key={version.id} value={version.id}>{version.versionNumber}</option>)}</select></label>

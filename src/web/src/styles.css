@@ -520,6 +520,7 @@ h1 {
 }
 
 .catalog-form input,
+.catalog-form select,
 .catalog-form textarea,
 .inline-form input,
 .inline-form select {

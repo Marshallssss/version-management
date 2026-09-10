@@ -76,7 +76,7 @@ async function main() {
       await page.evaluate(id => localStorage.setItem('confighub.selected-project-id', id), project.id)
       await page.reload()
       await page.locator('.nav-item').filter({ hasText: '导入' }).click()
-      await page.getByLabel('所属项目').selectOption(project.id)
+      assert.equal(await page.getByLabel('所属项目').count(), 0)
       await page.getByLabel('表格内容（组件名称、版本号）').fill('Main Control\tV 3\nDriver\tV 3')
       await page.getByLabel('导入原因', { exact: true }).fill('制表符导入验收')
       await page.getByRole('button', { name: '生成预览', exact: true }).click()

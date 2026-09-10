@@ -83,6 +83,7 @@ async function main() {
     await page.locator('.comparison-table tbody tr').first().waitFor()
     assert.equal(await page.getByLabel('左侧配置').inputValue(), baseline.id)
     await page.getByRole('group', { name: '左侧类型' }).getByRole('button', { name: '机台', exact: true }).click()
+    assert.equal(await page.getByLabel('右侧配置').inputValue(), machines[0].id, 'Changing one side must preserve the other valid selection')
     await page.getByLabel('左侧配置').selectOption(machines[0].id)
     await page.getByLabel('右侧配置').selectOption(machines[1].id)
     await page.locator('.comparison-table tbody tr').first().waitFor()

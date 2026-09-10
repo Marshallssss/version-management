@@ -28,7 +28,7 @@ function formatTime(value: string) {
   return new Date(value).toLocaleString('zh-CN', { hour12: false })
 }
 
-export function ProjectWorkspace({ canWrite = true, detail, focusedVersionId, focusedBaselineId, isAdmin, isSuperAdmin, onSuccess }: { canWrite?: boolean; detail: ProjectDetail; focusedVersionId?: string; focusedBaselineId?: string; isAdmin: boolean; isSuperAdmin: boolean; onSuccess: (message: string) => void }) {
+export function ProjectWorkspace({ canWrite = true, detail, focusedVersionId, focusedBaselineId, focusedComponentId, focusPatch, isAdmin, isSuperAdmin, onSuccess }: { canWrite?: boolean; detail: ProjectDetail; focusedVersionId?: string; focusedBaselineId?: string; focusedComponentId?: string; focusPatch?: boolean; isAdmin: boolean; isSuperAdmin: boolean; onSuccess: (message: string) => void }) {
   const queryClient = useQueryClient()
   const [selectedId, setSelectedId] = useState<string | null>(detail.components[0]?.id ?? null)
   const [draggingId, setDraggingId] = useState<string | null>(null)
@@ -123,15 +123,25 @@ export function ProjectWorkspace({ canWrite = true, detail, focusedVersionId, fo
     window.localStorage.setItem(`confighub.root-column-width:${detail.project.id}`, String(value))
   }
   useEffect(() => {
+    if (!focusedComponentId) return
+    const component = detail.components.find(candidate => candidate.id === focusedComponentId)
+    if (component) {
+      setSelectedId(component.id)
+      setSelectedVersionId(component.versions[0]?.id ?? '')
+      setInspectorTab('versions')
+      setInspectorCollapsed(false)
+    }
+  }, [detail.components, focusedComponentId])
+  useEffect(() => {
     if (!focusedVersionId) return
     const component = detail.components.find(candidate => candidate.versions.some(version => version.id === focusedVersionId))
     if (component) {
       setSelectedId(component.id)
       setSelectedVersionId(focusedVersionId)
-      setInspectorTab('status')
+      setInspectorTab(focusPatch ? 'patches' : 'status')
       setInspectorCollapsed(false)
     }
-  }, [detail.components, focusedVersionId])
+  }, [detail.components, focusedVersionId, focusPatch])
   const startCreate = (mode: 'create-root' | 'create-child') => { setFormMode(mode); setName(''); setOwner(''); setModel(''); setNotes(''); setReason('') }
   const startEdit = () => { if (!selected) return; setFormMode('edit'); setName(selected.name); setOwner(selected.owner ?? ''); setModel(selected.model ?? ''); setNotes(selected.notes ?? ''); setReason('') }
   const create = useMutation({

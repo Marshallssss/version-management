@@ -727,31 +727,32 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         return TypedResults.Ok(new { version, recommended, transitions, patches });
     }
 
-    private static async Task<IResult> SearchAsync(string? query, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    private static async Task<IResult> SearchAsync(string? query, Guid? projectId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
     {
         var term = query?.Trim();
         if (string.IsNullOrWhiteSpace(term) || term.Length < 2) return Results.ValidationProblem(new Dictionary<string, string[]> { ["query"] = ["搜索词至少需要两个字符。"] });
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         var pattern = $"%{term}%";
-        var projects = await db.Projects.AsNoTracking().Where(item => EF.Functions.ILike(item.Code, pattern) || EF.Functions.ILike(item.Name, pattern)).OrderBy(item => item.Code).Select(item => new { type = "Project", id = item.Id, projectId = item.Id, label = item.Code + " · " + item.Name }).Take(20).ToListAsync(cancellationToken);
-        var components = await db.ConfigurationComponents.AsNoTracking().Where(item => EF.Functions.ILike(item.Name, pattern)).OrderBy(item => item.Name).Select(item => new { type = "Component", id = item.Id, projectId = item.ProjectId, label = item.Name }).Take(20).ToListAsync(cancellationToken);
-        var versions = await db.ComponentVersions.AsNoTracking().Where(item => EF.Functions.ILike(item.VersionNumber, pattern)).Join(db.ConfigurationComponents.AsNoTracking(), version => version.ComponentId, component => component.Id, (version, component) => new { version, component }).OrderBy(item => item.version.VersionNumber).Select(item => new { type = "Version", id = item.version.Id, projectId = item.component.ProjectId, label = item.version.VersionNumber }).Take(20).ToListAsync(cancellationToken);
-        var patches = await db.VersionPatches.AsNoTracking().Where(item => EF.Functions.ILike(item.PatchCode, pattern) || EF.Functions.ILike(item.Title, pattern) || EF.Functions.ILike(item.IssueDescription, pattern) || EF.Functions.ILike(item.ResolutionDescription, pattern)).Join(db.ComponentVersions.AsNoTracking(), patch => patch.ComponentVersionId, version => version.Id, (patch, version) => new { patch, version }).Join(db.ConfigurationComponents.AsNoTracking(), value => value.version.ComponentId, component => component.Id, (value, component) => new { value.patch, value.version, component }).OrderByDescending(item => item.patch.RecordedAt).Select(item => new { type = "Patch", id = item.patch.Id, projectId = item.component.ProjectId, versionId = item.version.Id, label = item.patch.PatchCode + " · " + item.version.VersionNumber + " · " + item.patch.Title }).Take(20).ToListAsync(cancellationToken);
-        var baselines = await db.ConfigurationBaselines.AsNoTracking().Where(item => EF.Functions.ILike(item.BaselineCode, pattern)).OrderBy(item => item.BaselineCode).Select(item => new { type = "Baseline", id = item.Id, projectId = item.ProjectId, label = item.BaselineCode }).Take(20).ToListAsync(cancellationToken);
-        var machines = await db.Machines.AsNoTracking().Where(item => EF.Functions.ILike(item.SerialNumber, pattern) || EF.Functions.ILike(item.Name, pattern)).OrderBy(item => item.SerialNumber).Select(item => new { type = "Machine", id = item.Id, projectId = item.ProjectId, label = item.SerialNumber + " · " + item.Name }).Take(20).ToListAsync(cancellationToken);
+        var projects = await db.Projects.AsNoTracking().Where(item => !projectId.HasValue || item.Id == projectId).Where(item => EF.Functions.ILike(item.Code, pattern) || EF.Functions.ILike(item.Name, pattern)).OrderBy(item => item.Code).Select(item => new { type = "Project", id = item.Id, projectId = item.Id, label = item.Code + " · " + item.Name }).Take(20).ToListAsync(cancellationToken);
+        var components = await db.ConfigurationComponents.AsNoTracking().Where(item => !projectId.HasValue || item.ProjectId == projectId).Where(item => EF.Functions.ILike(item.Name, pattern)).OrderBy(item => item.Name).Select(item => new { type = "Component", id = item.Id, projectId = item.ProjectId, label = item.Name }).Take(20).ToListAsync(cancellationToken);
+        var versions = await db.ComponentVersions.AsNoTracking().Where(item => EF.Functions.ILike(item.VersionNumber, pattern)).Join(db.ConfigurationComponents.AsNoTracking().Where(item => !projectId.HasValue || item.ProjectId == projectId), version => version.ComponentId, component => component.Id, (version, component) => new { version, component }).OrderBy(item => item.version.VersionNumber).Select(item => new { type = "Version", id = item.version.Id, projectId = item.component.ProjectId, label = item.version.VersionNumber }).Take(20).ToListAsync(cancellationToken);
+        var patches = await db.VersionPatches.AsNoTracking().Where(item => EF.Functions.ILike(item.PatchCode, pattern) || EF.Functions.ILike(item.Title, pattern) || EF.Functions.ILike(item.IssueDescription, pattern) || EF.Functions.ILike(item.ResolutionDescription, pattern)).Join(db.ComponentVersions.AsNoTracking(), patch => patch.ComponentVersionId, version => version.Id, (patch, version) => new { patch, version }).Join(db.ConfigurationComponents.AsNoTracking().Where(item => !projectId.HasValue || item.ProjectId == projectId), value => value.version.ComponentId, component => component.Id, (value, component) => new { value.patch, value.version, component }).OrderByDescending(item => item.patch.RecordedAt).Select(item => new { type = "Patch", id = item.patch.Id, projectId = item.component.ProjectId, versionId = item.version.Id, label = item.patch.PatchCode + " · " + item.version.VersionNumber + " · " + item.patch.Title }).Take(20).ToListAsync(cancellationToken);
+        var baselines = await db.ConfigurationBaselines.AsNoTracking().Where(item => !projectId.HasValue || item.ProjectId == projectId).Where(item => EF.Functions.ILike(item.BaselineCode, pattern)).OrderBy(item => item.BaselineCode).Select(item => new { type = "Baseline", id = item.Id, projectId = item.ProjectId, label = item.BaselineCode }).Take(20).ToListAsync(cancellationToken);
+        var machines = await db.Machines.AsNoTracking().Where(item => !projectId.HasValue || item.ProjectId == projectId).Where(item => EF.Functions.ILike(item.SerialNumber, pattern) || EF.Functions.ILike(item.Name, pattern)).OrderBy(item => item.SerialNumber).Select(item => new { type = "Machine", id = item.Id, projectId = item.ProjectId, label = item.SerialNumber + " · " + item.Name }).Take(20).ToListAsync(cancellationToken);
         return TypedResults.Ok(projects.Cast<object>().Concat(components).Concat(versions).Concat(patches).Concat(baselines).Concat(machines));
     }
 
-    private static async Task<IResult> GetDashboardAsync(IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
+    private static async Task<IResult> GetDashboardAsync(Guid? projectId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var summaries = db.MachineDriftSummaries.AsNoTracking().Where(summary => db.Machines.Any(machine => machine.Id == summary.MachineId));
+        var machines = db.Machines.Where(machine => !projectId.HasValue || machine.ProjectId == projectId);
+        var summaries = db.MachineDriftSummaries.AsNoTracking().Where(summary => machines.Any(machine => machine.Id == summary.MachineId));
         return TypedResults.Ok(new
         {
-            machineCount = await db.Machines.CountAsync(cancellationToken),
+            machineCount = await machines.CountAsync(cancellationToken),
             matchedCount = await summaries.CountAsync(item => item.MatchStatus == DriftMatchStatus.Matched, cancellationToken),
             mismatchCount = await summaries.CountAsync(item => item.MatchStatus == DriftMatchStatus.Mismatch, cancellationToken),
-            unknownCount = await db.Machines.CountAsync(machine => !summaries.Any(summary => summary.MachineId == machine.Id) || summaries.Any(summary => summary.MachineId == machine.Id && summary.MatchStatus == DriftMatchStatus.Unknown), cancellationToken),
+            unknownCount = await machines.CountAsync(machine => !summaries.Any(summary => summary.MachineId == machine.Id) || summaries.Any(summary => summary.MachineId == machine.Id && summary.MatchStatus == DriftMatchStatus.Unknown), cancellationToken),
             criticalRiskCount = await summaries.CountAsync(item => item.RiskSeverity == DriftRiskSeverity.Critical, cancellationToken)
         });
     }
@@ -794,10 +795,10 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         if (request.ProjectId == Guid.Empty || string.IsNullOrWhiteSpace(request.SourceFileName) || string.IsNullOrWhiteSpace(request.Reason) || request.Rows is null || request.Rows.Count == 0) return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = ["必须提供项目、来源文件、原因和至少一行数据。"] });
         var key = context.Request.Headers["Idempotency-Key"].FirstOrDefault(); if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["生成导入预览必须提供不超过 200 个字符的 Idempotency-Key。"] });
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var scope = $"imports.stage:{request.ProjectId}"; var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request)))); var replay = await db.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
-        if (replay is not null) { if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (replay.Result is not null) return TypedResults.Ok(replay.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
         if (!await db.Projects.AnyAsync(item => item.Id == request.ProjectId, cancellationToken)) return Results.NotFound();
         if (!await HasProjectWriteAccessAsync(db, context, request.ProjectId, cancellationToken)) return Results.Forbid();
+        var scope = $"imports.stage:{request.ProjectId}"; var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request)))); var replay = await db.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
+        if (replay is not null) { if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (replay.Result is not null) return TypedResults.Ok(replay.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
         var now = DateTimeOffset.UtcNow; await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken); db.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }); var batch = new ImportBatch { Id = Guid.NewGuid(), ProjectId = request.ProjectId, SourceFileName = request.SourceFileName.Trim(), CreatedBy = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required."), Reason = request.Reason.Trim(), CreatedAt = now };
         var componentsByName = (await db.ConfigurationComponents.Where(item => item.ProjectId == request.ProjectId).ToListAsync(cancellationToken))
             .GroupBy(item => Normalize(item.Name))
@@ -844,11 +845,11 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         var key = context.Request.Headers["Idempotency-Key"].FirstOrDefault();
         if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["提交导入必须提供不超过 200 个字符的 Idempotency-Key。"] });
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var batch = await db.ImportBatches.SingleOrDefaultAsync(item => item.Id == batchId, cancellationToken); if (batch is null) return Results.NotFound();
+        if (!await HasProjectWriteAccessAsync(db, context, batch.ProjectId, cancellationToken)) return Results.Forbid();
         var scope = $"imports.commit:{batchId}"; var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(batchId.ToString())));
         var replay = await db.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
         if (replay is not null) { if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (replay.Result is not null) return TypedResults.Ok(replay.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
-        var batch = await db.ImportBatches.SingleOrDefaultAsync(item => item.Id == batchId, cancellationToken); if (batch is null) return Results.NotFound();
-        if (!await HasProjectWriteAccessAsync(db, context, batch.ProjectId, cancellationToken)) return Results.Forbid();
         var rows = await db.ImportRows.Where(item => item.ImportBatchId == batchId).OrderBy(item => item.RowNumber).ToListAsync(cancellationToken);
         if (batch.Status != ImportBatchStatus.Validated || rows.Any(item => item.ValidationError is not null)) return Results.Conflict(new { message = "只有完全通过校验的导入批次可以提交。" });
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);

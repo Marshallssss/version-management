@@ -2,6 +2,16 @@
 
 ## Final Architecture and Product Plan
 
+### 2026-09-10 正式使用一致性整改
+
+- 按已确认计划分片推进：1 项目上下文与权限；2 项目/机台视觉样板；3 项目工作流；4 机台工作流；5 全局查询与 PM 追溯；6 正式运行收尾。保留现有业务模型与浅色风格，不一次性重写。
+- 第一片实现：搜索默认当前项目并可显式查全部项目，跨项目跳转同步选择项目及机台/组件/版本/补丁/基线；部署和导入继承顶部项目；切项目清理旧选择和导入预览；Viewer 不显示批量写表单，用户管理与 API 一致允许 Admin/SuperAdmin；配置总览按当前项目统计。
+- 导入预览和提交均先验证项目权限，再处理幂等重放；调整输入会失效旧预览，切项目后迟到响应不能带回旧提交入口。配置比对切换一侧类型只清理该侧，另一侧仅在草稿基线变得不适用时清理。
+- 新增 workspace-context-acceptance，覆盖分页前项目过滤、全局搜索兼容、统计范围、跨项目跳转、预览/迟到响应隔离、真实导入、Viewer UI、Viewer/非成员 Engineer 写入与幂等重放拒绝。更新已有项目范围及导入回归；未改领域模型或已有 Migration。
+- 第一片验收：Host/Worker Release 构建 0 warning / 0 error；真实 Migration 确认数据库最新，EF 无待迁移模型差异；前端构建无大包警告。workspace-context、project-scope-ui、catalog、startup-import、catalog-simplification、machine-equipment、workspace-ux、version-delete、background-job、Windows operations preflight、web compatibility 均通过；桌面 1440 与窄屏 390 截图检查无横向溢出。下一片为项目/机台视觉样板，尚未实施全软件换版。
+- 每片补自动化验收、实际 Release build / Migration / 基础集成测试及模型差异检查，再提交推送；没有模型变化不新增 Migration。后续视觉推广须先核对项目与机台两个代表页。
+- 已发布历史、项目标准与机台目标、整机与 PM、Match 与 Risk、Observed At 与 Installed At 继续独立。PostgreSQL 17 / Production Integration Pending 边界不变。
+
 ### 2026-09-09 项目录入与直接发布体验
 
 - 项目编码允许普通空格，补丁编号允许小数点；同步兼容项目克隆和从项目编码派生的基线系列，保持去首尾空白及大小写归一化查重。
