@@ -147,9 +147,10 @@ public static partial class CatalogEndpoints
                 overrides = facts.Where(x => x.ChamberId == chamber.Id).GroupBy(x => x.ComponentId).Select(x => x.First()).Where(x => x.VersionId != null).Select(x =>
                 {
                     var version = versions[x.VersionId!.Value];
-                    var expected = items.SingleOrDefault(i => i.ConfigurationComponentId == x.ComponentId)?.ComponentVersionId;
+                    var expectedItem = items.SingleOrDefault(i => i.ConfigurationComponentId == x.ComponentId);
+                    var expected = expectedItem?.ComponentVersionId;
                     return new { x.ComponentId, x.VersionId, componentName = components[x.ComponentId].Name, versionNumber = version.VersionNumber,
-                        expectedVersionNumber = expected is not null ? versions.GetValueOrDefault(expected.Value)?.VersionNumber : null,
+                        expectedVersionNumber = expectedItem?.VersionNumberSnapshot,
                         match = target is null ? "Unknown" : expected == x.VersionId ? "Matched" : expected is null ? "Extra" : "Mismatch",
                         risk = version.Safety == VersionSafety.Blocked ? "Critical" : "None" };
                 })

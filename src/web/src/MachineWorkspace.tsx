@@ -50,7 +50,7 @@ export function MachineWorkspace({ projectId, canWrite = true, isAdmin = false, 
   const [targetBaselineId, setTargetBaselineId] = useState('')
   const [targetReason, setTargetReason] = useState('')
 
-  const machines = useQuery({ queryKey: ['machines'], queryFn: getMachines })
+  const machines = useQuery({ queryKey: ['machines'], queryFn: getMachines, refetchOnMount: 'always' })
   const cloneEquipment = useQuery({ queryKey: ['clone-equipment', cloneMachineId], queryFn: () => getMachineEquipment(cloneMachineId), enabled: !!cloneMachineId })
   useEffect(() => { if (cloneEquipment.data) setMachineChambers(cloneEquipment.data.chambers.filter(c => c.installed).map(c => ({ number: c.number, stage: c.stage }))) }, [cloneEquipment.data])
   const selectedMachine = machines.data?.find(machine => machine.id === selectedMachineId && machine.projectId === projectId)

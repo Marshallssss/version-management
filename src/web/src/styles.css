@@ -1510,6 +1510,13 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 .component-profile dt { color: #657d78; font-size: 12px; }
 .component-profile dd { margin: 4px 0 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 .component-profile-notes { grid-column: 1 / -1; }
+.version-chamber-impact { margin: 18px 0; }
+.version-chamber-impact h4 { margin: 12px 0 8px; font-size: 14px; color: #294a47; }
+.version-chamber-impact .component-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 12px 0; }
+.version-chamber-impact .component-row > div { display: grid; min-width: 0; gap: 4px; }
+.version-chamber-impact .component-row strong, .version-chamber-impact .component-row span { white-space: normal; overflow-wrap: anywhere; }
+.version-chamber-impact .ant-btn-link { justify-self: start; max-width: 100%; height: auto; padding: 0; color: #17706a; text-align: left; }
+.version-chamber-impact summary { padding: 10px 0; border-top: 1px solid #d6e2df; color: #526a66; font-size: 13px; cursor: pointer; }
 .composer-parent { padding-bottom: 6px; border-bottom: 1px solid #d6e2df; }
 .composer-parent strong { min-width: 0; overflow-wrap: anywhere; }
 .composer-node input[type=checkbox] { width: 16px; height: 16px; flex-shrink: 0; }
