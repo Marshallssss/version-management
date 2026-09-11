@@ -154,8 +154,20 @@ export const getMachineConfiguration = (machineId: string) => request<Array<{ co
 export const getMachineConfigurationAt = (machineId: string, at: string) => request<{ asOf: string; items: Array<{ componentId: string; componentName: string; versionId: string | null; versionNumber: string | null; state: string; stateEffectiveAt: string; recordedAt: string; knownInstalledAt: string | null }> }>(`/api/v1/machines/${machineId}/configuration-at?at=${encodeURIComponent(at)}`)
 export const getMachineFacts = (machineId: string) => request<Array<{ id: string; operationType: string; coverage: string; sourceType: string; sourceBaselineId: string | null; sourceBaselineCode: string | null; correctsDeploymentBatchId: string | null; recordedAt: string; effectiveAt: string; itemCount: number }>>(`/api/v1/machines/${machineId}/facts`)
 export const getMachineDrift = (machineId: string) => request<{ matchStatus: string; riskSeverity: string; items: Array<{ componentId: string; componentName: string; status: string; expectedVersionId: string | null; expectedVersionNumber: string | null; actualVersionId: string | null; actualVersionNumber: string | null }> }>(`/api/v1/machines/${machineId}/drift`)
-export const compareMachineToBaseline = (machineId: string, baselineId: string) => request<{ machineId: string; baselineId: string; baselineCode: string; matchStatus: string; riskSeverity: string; items: Array<{ componentId: string; componentName: string; status: string; expectedVersionId: string | null; expectedVersionNumber: string | null; actualVersionId: string | null; actualVersionNumber: string | null }> }>(`/api/v1/machines/${machineId}/compare-baseline/${baselineId}`)
-export const compareMachines = (leftMachineId: string, rightMachineId: string) => request<{ matchStatus: string; riskSeverity: string; items: Array<{ componentId: string; componentName: string; status: string; leftVersionId: string | null; leftVersionNumber: string | null; rightVersionId: string | null; rightVersionNumber: string | null }> }>(`/api/v1/machines/${leftMachineId}/compare/${rightMachineId}`)
+export type ChamberComparisonState = 'Present' | 'Absent' | 'Unknown' | 'NotInstalled'
+export type ChamberComparisonSource = 'Machine' | 'Override' | 'Baseline' | 'NotInstalled'
+export type ChamberComparisonItem = {
+  componentId: string; componentName: string
+  status: 'Matched' | 'Mismatch' | 'LeftOnly' | 'RightOnly' | 'Unknown'
+  leftVersionId: string | null; leftVersionNumber: string | null; leftState: ChamberComparisonState; leftSource: ChamberComparisonSource
+  rightVersionId: string | null; rightVersionNumber: string | null; rightState: ChamberComparisonState; rightSource: ChamberComparisonSource
+}
+export type ChamberComparison = {
+  number: number; leftInstalled: boolean; rightInstalled: boolean | null
+  matchStatus: 'Matched' | 'Mismatch' | 'Unknown'; riskSeverity: string; items: ChamberComparisonItem[]
+}
+export const compareMachineToBaseline = (machineId: string, baselineId: string) => request<{ machineId: string; baselineId: string; baselineCode: string; matchStatus: string; riskSeverity: string; chambers: ChamberComparison[]; items: Array<{ componentId: string; componentName: string; status: string; expectedVersionId: string | null; expectedVersionNumber: string | null; actualVersionId: string | null; actualVersionNumber: string | null }> }>(`/api/v1/machines/${machineId}/compare-baseline/${baselineId}`)
+export const compareMachines = (leftMachineId: string, rightMachineId: string) => request<{ matchStatus: string; riskSeverity: string; chambers: ChamberComparison[]; items: Array<{ componentId: string; componentName: string; status: string; leftVersionId: string | null; leftVersionNumber: string | null; rightVersionId: string | null; rightVersionNumber: string | null }> }>(`/api/v1/machines/${leftMachineId}/compare/${rightMachineId}`)
 export const compareMachineCurrentToHistory = (machineId: string, at: string) => request<{ matchStatus: string; riskSeverity: string; items: Array<{ componentId: string; componentName: string; status: string; currentVersionId: string | null; currentVersionNumber: string | null; historicalVersionId: string | null; historicalVersionNumber: string | null }> }>(`/api/v1/machines/${machineId}/compare-history?at=${encodeURIComponent(at)}`)
 export type ChamberVersionUsage = {
   machineId: string

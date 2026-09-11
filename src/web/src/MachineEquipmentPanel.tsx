@@ -31,6 +31,7 @@ export function MachineEquipmentPanel({ machineId, name, canWrite, isAdmin, proj
   const changed = async () => {
     await client.invalidateQueries({ queryKey: ['machines'] })
     await client.invalidateQueries({ queryKey: ['machine-equipment', machineId] })
+    await client.invalidateQueries({ queryKey: ['configuration-comparison'] })
     setDialog(null); onSuccess('机台配置已保存，历史已记录。')
   }
   const save = useMutation({ mutationFn: () => dialog === 'delete' ? deleteMachine(machineId, reason) : dialog === 'override' ? changeChamberOverrides(machineId, number, items, reason) : changeMachineEquipment(machineId, { owner, stage, chambers, reason }), onSuccess: async () => { const deleted = dialog === 'delete'; await changed(); if (deleted) onDeleted() } })

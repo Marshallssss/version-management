@@ -576,7 +576,8 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
             if (versionId is not null && versions[versionId.Value].Safety == VersionSafety.Blocked) critical = true;
             items.Add(new { componentId, componentName = wanted?.ComponentNameSnapshot ?? components[componentId], status, expectedVersionId = wanted?.ComponentVersionId, expectedVersionNumber = wanted?.VersionNumberSnapshot, actualVersionId = found?.ComponentVersionId, actualVersionNumber = found?.ComponentVersionId is null ? null : versions[found.ComponentVersionId.Value].VersionNumber });
         }
-        return new { machineId, baselineId, baselineCode = baseline.BaselineCode, matchStatus = mismatch ? "Mismatch" : "Matched", riskSeverity = critical ? "Critical" : "None", items };
+        var chambers = await BuildMachineBaselineChamberComparisonsAsync(db, machineId, expected, actual.Values, cancellationToken);
+        return new { machineId, baselineId, baselineCode = baseline.BaselineCode, matchStatus = mismatch ? "Mismatch" : "Matched", riskSeverity = critical ? "Critical" : "None", items, chambers };
     }
 
     private static async Task<IResult> GetMachineDriftSummaryAsync(Guid machineId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
@@ -610,7 +611,8 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         }).ToArray();
         var matchStatus = items.All(item => item.status == "Matched") ? "Matched" : "Mismatch";
         var riskSeverity = items.Any(item => (item.leftVersionId is not null && versions[item.leftVersionId.Value].Safety == VersionSafety.Blocked) || (item.rightVersionId is not null && versions[item.rightVersionId.Value].Safety == VersionSafety.Blocked)) ? "Critical" : "None";
-        return TypedResults.Ok(new { leftMachineId, rightMachineId, matchStatus, riskSeverity, items });
+        var chambers = await BuildMachineChamberComparisonsAsync(db, leftMachineId, rightMachineId, states, cancellationToken);
+        return TypedResults.Ok(new { leftMachineId, rightMachineId, matchStatus, riskSeverity, items, chambers });
     }
 
     private static async Task<IResult> CompareMachineCurrentToHistoryAsync(Guid machineId, DateTimeOffset? at, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)

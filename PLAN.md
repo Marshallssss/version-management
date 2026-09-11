@@ -4,6 +4,8 @@
 
 ### 2026-09-11 持续整改
 
+- 第五片 B 已验收：配置比对以整机 / PM 页签展示，支持机台与基线双向、同项目机台间按相同 PM 编号对比；基线与基线仍只比较冻结快照，不推断腔室安装情况。未覆盖组件沿用整机；清除、移除重装均不恢复旧特例。界面区分 PM 特例、沿用整机、基线快照、已确认缺失、尚未观察与未安装；未知项返回信息不足，不冒充匹配。PM 与整机的 Match/Risk 分开，Blocked 版本即使匹配仍显示严重风险，只看差异也不隐藏风险提示。
+- 第五片 B 验证：新增 pm-compare-acceptance 覆盖有效配置继承、Full/Partial、拆装/清除、Unknown、基线外组件、冻结名称、双向/跨项目/只读权限与已删除机台；pm-compare-ui-acceptance 覆盖方向交换、无 PM / 基线互比、独立 Match/Risk 与 1366/768/390 截图。前端构建、Release 0 warning / 0 error、真实 Migration 已最新、EF 无模型差异，catalog、background-job、Windows operations preflight、Web compatibility 均通过。本片无 Migration，仍是 PostgreSQL 17 本地验证，不代表 Production Integration Pending 已完成。
 - 第二片已验收：项目与机台沿用浅色风格，统一标题、控件和节点密度；机台详情按当前配置、目标与对比、阶段与腔室、历史分区，默认查看信息，录入/指派/批量操作按需打开。项目保持实验室两行、根节点并列及默认收合详情；合并实验室单行/两行冲突和机台列宽重复规则。
 - 机台实际配置采用当前组件父子结构，缺失与尚未观察分开显示，点击版本仍可进入详情，未知安装时间不使用观察时间填充；机台首次进入不默认选择，提供返回列表，切机台清理旧录入状态。
 - 第二片验证：全解决方案 Release 0 warning / 0 error，实际 Migration 确认数据库最新、EF 无模型差异，前端构建通过；workspace-layout（1366/768/390、长名称、缺失、按需弹窗）、workspace-ux、project-scope、workspace-context、machine-equipment、record-maintenance、startup-import、catalog-simplification、version-delete 均通过。无新增 Migration。
@@ -11,8 +13,8 @@
 - 第五片 A 已验收：版本影响新增独立 chamberImpact 当前/历史 PM 引用与最近事实；导出包含 PM 分区、CSV 转义和公式注入防护，保留原整机字段语义。当前引用按最后事实、腔室安装及机台未删除判定；清除/替换/移除重装/软删除不丢失历史。机台与基线、PM 与目标的预期组件名/版本号读取冻结快照，风险仍查实时 Safety。
 - 新增 pm-trace-acceptance 已通过，覆盖 PM 替换/清空/移除/重装/删除、历史引用删除保护、幂等与 Viewer 导出权限、快照名称维护后保持不变且 Blocked 仍 Critical；project-entry 页面真实录入与跳转通过。全解决方案 Release 0 warning / 0 error、真实 Migration 已最新、EF 无模型差异；catalog/background-job/preflight/web-compatibility 与既有 UI 回归通过。
 - PM 跳转验收发现机台列表可能仍使用进入项目时的缓存；机台工作区每次进入重新读取列表，保证搜索/影响中新出现的机台可定位。
-- PM 版本影响与导出分区、历史比较标签口径在第二片提交后完成独立 API/页面验收；整机配置比较中的 PM 分区展示仍属后续事项。
-- 剩余工作：统一整机/PM 的多方向配置比较展示、补丁标记贯穿所有配置视图、删除/撤回/超级维护的影响预览与引用跳转、维护开关关闭验收、其他页面视觉推广。本轮没有关闭调测维护，不将这些剩余项或 Windows Production Integration Pending 宣告完成。
+- PM 版本影响与导出分区、冻结比较标签、整机/PM 多方向配置比较已完成独立 API/页面验收。腔室修改会同步使比较缓存失效，进入比较页重新读取机台列表和当前结果。
+- 剩余工作：补丁标记贯穿所有配置视图、删除/撤回/超级维护的影响预览与引用跳转、维护开关关闭验收、其他页面视觉推广。本轮没有关闭调测维护，不将这些剩余项或 Windows Production Integration Pending 宣告完成。
 
 ### 2026-09-10 正式使用一致性整改
 
