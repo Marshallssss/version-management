@@ -142,6 +142,7 @@ export function ProjectWorkspace({ canWrite = true, detail, focusedVersionId, fo
       setSelectedId(component.id)
       setSelectedVersionId(focusedVersionId)
       setInspectorTab(focusPatch ? 'patches' : 'status')
+      if (focusPatch) setPatchGuide(Date.now())
       setInspectorCollapsed(false)
     }
   }, [detail.components, focusedVersionId, focusPatch])
@@ -295,6 +296,6 @@ export function ProjectWorkspace({ canWrite = true, detail, focusedVersionId, fo
       </section>
     </div>
     <LaboratoryHistory open={laboratoryHistoryOpen} onClose={() => setLaboratoryHistoryOpen(false)} detail={detail} />
-    <ProjectBaselineHistory canWrite={canWrite} composerRequest={composerRequest} detail={detail} isAdmin={isAdmin} isSuperAdmin={isSuperAdmin} focusedBaselineId={focusedBaselineId} onSuccess={onSuccess} />
+    <ProjectBaselineHistory canWrite={canWrite} composerRequest={composerRequest} detail={detail} isAdmin={isAdmin} isSuperAdmin={isSuperAdmin} focusedBaselineId={focusedBaselineId} onOpenPatches={openPatches} onSuccess={onSuccess} />
   </section>
 }

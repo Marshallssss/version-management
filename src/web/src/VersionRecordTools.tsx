@@ -1,16 +1,19 @@
 import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Modal, Popover } from 'antd'
+import { CloseOutlined } from '@ant-design/icons'
 import { getVersionDetail, getMaintenanceCapabilities, maintainVersion, managePatch, type ComponentVersion, type VersionPatch } from './catalog-api'
 
 const maturityNames: Record<string, string> = { Draft: '草稿', Testing: '实验室测试', Released: '已发布', Maintenance: '维护中', Deprecated: '已废弃' }
 const patchNames: Record<string, string> = { Draft: '草稿', Released: '已发布', Withdrawn: '已撤回' }
 function localTime(value: string) { const date = new Date(value); return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16) }
 
-export function PatchBadge({ version, onOpen }: { version: ComponentVersion; onOpen: () => void }) {
+export function PatchBadge({ version, onOpen, context = 'version', versionLabel }: { version?: ComponentVersion; onOpen: () => void; context?: 'version' | 'machine' | 'snapshot'; versionLabel?: string }) {
   const [open, setOpen] = useState(false)
-  if (!version.patchCount) return null
-  return <Popover open={open} onOpenChange={setOpen} trigger={['hover', 'focus']} title={version.versionNumber} content={<div className="patch-hover-content">{version.patches.map(patch => <p key={patch.patchCode}><strong>{patch.patchCode}</strong> · {patch.title}<small>{patchNames[patch.status]}</small></p>)}<button type="button" onClick={() => { setOpen(false); onOpen() }}>查看全部修复记录</button></div>}><button type="button" className="patch-badge patch-open" onClick={event => { event.stopPropagation(); setOpen(false); onOpen() }}>补丁 {version.patchCount}</button></Popover>
+  const [dismissed, setDismissed] = useState(false)
+  const dismiss = () => { setDismissed(true); setOpen(false) }
+  if (!version?.patchCount) return null
+  return <Popover open={open && !dismissed} onOpenChange={setOpen} trigger={['hover', 'focus']} title={<div className="patch-preview-heading"><strong>{versionLabel ?? version.versionNumber}</strong><button type="button" aria-label="收起补丁预览" title="收起补丁预览" onClick={dismiss}><CloseOutlined aria-hidden /></button></div>} content={<div className="patch-hover-content" onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); dismiss() } }}><p className="patch-record-notice">{context === 'snapshot' ? '当前补丁记录，非当时快照。' : context === 'machine' ? '此版本当前补丁记录，不代表机台已安装。' : '当前补丁记录，不代表已安装。'}</p>{version.patches.map(patch => <p key={patch.patchCode}><strong>{patch.patchCode}</strong> · {patch.title}<small>{patchNames[patch.status] ?? '未知状态'}</small></p>)}{version.patchCount > version.patches.length && <p className="patch-record-notice">共 {version.patchCount} 条，预览最近 {version.patches.length} 条。</p>}<button type="button" onClick={() => { setOpen(false); onOpen() }}>查看全部修复记录</button></div>}><button type="button" className="patch-badge patch-open" onPointerEnter={() => setDismissed(false)} onFocus={() => setDismissed(false)} aria-label={`${versionLabel ?? version.versionNumber} 的补丁记录 ${version.patchCount} 条`} onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); dismiss() } }} onClick={event => { event.stopPropagation(); setOpen(false); onOpen() }}>补丁记录 {version.patchCount}</button></Popover>
 }
 
 export function PatchActions({ patch, isAdmin, onSaved, canWrite = true }: { canWrite?: boolean; patch: VersionPatch; isAdmin: boolean; onSaved: () => Promise<void> }) {

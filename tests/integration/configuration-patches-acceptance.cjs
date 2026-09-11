@@ -1,0 +1,144 @@
+const { chromium } = require('playwright')
+const { readFileSync, mkdirSync } = require('node:fs')
+const { randomUUID } = require('node:crypto')
+const path = require('node:path')
+const assert = require('node:assert/strict')
+
+async function main() {
+  const config = JSON.parse(readFileSync(path.join(process.env.LOCALAPPDATA, 'ConfigHub/appsettings.local.json'), 'utf8').replace(/^\uFEFF/, ''))
+  const browser = await chromium.launch({ channel: 'msedge', headless: true })
+  const context = await browser.newContext({ baseURL: process.env.CONFIGHUB_TEST_URL || 'http://127.0.0.1:5080', viewport: { width: 1366, height: 900 } })
+  const output = path.resolve('artifacts/configuration-patches')
+  mkdirSync(output, { recursive: true })
+  const page = await context.newPage()
+  const errors = []
+  page.on('pageerror', error => errors.push(error.message))
+  const write = async (url, data, method = 'POST', client = context.request) => {
+    const response = await client.fetch(url, { method, data, headers: { 'Idempotency-Key': randomUUID() } })
+    assert(response.ok(), `${url}: ${await response.text()}`)
+    return response.status() === 204 ? null : response.json()
+  }
+  const get = async url => {
+    const response = await context.request.get(url)
+    assert(response.ok(), `${url}: ${await response.text()}`)
+    return response.json()
+  }
+  const nav = label => page.locator('.nav-item').filter({ hasText: label }).click()
+  const preview = async (badge, notice) => {
+    await badge.hover()
+    const popup = page.locator('.patch-hover-content:visible')
+    await popup.waitFor()
+    assert((await popup.innerText()).includes(notice))
+    return popup
+  }
+  const assertPatchPage = async version => {
+    await page.locator('.component-inspector .patch-list').waitFor()
+    assert.equal(await page.locator('.inspector-tabs .active').innerText(), '补丁')
+    assert((await page.locator('.component-inspector').innerText()).includes(version))
+    await page.locator('.patch-location-guide').waitFor()
+  }
+  let project; let machine
+  try {
+    await write('/api/v1/auth/login', { email: config.ConfigHub.BootstrapAdmin.Email, password: config.ConfigHub.BootstrapAdmin.Password })
+    project = await write('/api/v1/projects', { code: 'PATCHVIEW-' + randomUUID().slice(0, 8), name: '配置视图补丁记录验收', reason: '自动化验收' })
+    const root = await write(`/api/v1/projects/${project.id}/components`, { name: '工艺控制分类', reason: '验收' })
+    const component = await write(`/api/v1/projects/${project.id}/components`, { name: '控制器与工艺通信软件完整名称', parentComponentId: root.id, reason: '验收' })
+    const v1 = await write(`/api/v1/components/${component.id}/versions`, { versionNumber: 'V1.0-original', maturity: 'Released', reason: '验收' })
+    const baseline = await write(`/api/v1/projects/${project.id}/baselines`, { seriesCode: 'PATCHVIEW', baselineCode: 'BL-BEFORE-PATCH', publishImmediately: true, reason: '验收' })
+    const frozen = (await get(`/api/v1/baselines/${baseline.id}`)).items
+    await write(`/api/v1/projects/${project.id}/standard`, { configurationBaselineId: baseline.id, reason: '验收' })
+    const v2 = await write(`/api/v1/components/${component.id}/versions`, { versionNumber: 'V2.0-lab', maturity: 'Testing', reason: '验收' })
+    const patch = (version, code, status) => write(`/api/v1/component-versions/${version.id}/patches`, {
+      patchCode: code, title: code + ' 通信稳定性修复', issueDescription: '偶发通信中断', resolutionDescription: '增加超时恢复', status,
+    })
+    await patch(v1, 'HF.1', 'Released')
+    await patch(v1, 'HF.2', 'Draft')
+    await patch(v1, 'HF.3', 'Withdrawn')
+    await patch(v2, 'LAB.1', 'Released')
+    machine = await write('/api/v1/machines', { projectId: project.id, serialNumber: randomUUID(), name: '补丁记录实验室机台', stage: 'Lab', chambers: [{ number: 1, stage: 'Lab' }], reason: '验收' })
+    await write(`/api/v1/machines/${machine.id}/facts`, { operationType: 'InitialSnapshot', coverage: 'Full', sourceType: 'Manual', reason: '验收', items: [{ componentId: component.id, versionId: v1.id, absent: false, knownInstalledAt: null }] })
+    await write(`/api/v1/machines/${machine.id}/chambers/1/configuration`, { items: [{ componentId: component.id, versionId: v2.id }], reason: 'PM 独立版本' }, 'PUT')
+    await page.goto('/')
+    await page.evaluate(id => localStorage.setItem('confighub.selected-project-id', id), project.id)
+    await page.reload()
+    await nav('机台')
+    await page.locator('.machine-list-item').filter({ hasText: '补丁记录实验室机台' }).click()
+    const actualBadge = page.locator('.actual-configuration-tree .patch-open')
+    await actualBadge.waitFor()
+    assert.equal(await actualBadge.count(), 1, 'Structural nodes must not show a patch marker.')
+    assert.equal(await actualBadge.innerText(), '补丁记录 3', 'Count includes existing withdrawn/draft records, not installed patches.')
+    let popup = await preview(actualBadge, '不代表机台已安装')
+    for (const status of ['已发布', '草稿', '已撤回']) assert((await popup.innerText()).includes(status))
+    await page.getByRole('button', { name: '收起补丁预览', exact: true }).click()
+    await popup.waitFor({ state: 'hidden' })
+    await actualBadge.click()
+    await assertPatchPage('V1.0-original')
+    await nav('机台')
+    await page.locator('.machine-list-item').filter({ hasText: '补丁记录实验室机台' }).click()
+    await page.getByRole('navigation', { name: '机台详情' }).getByRole('button', { name: '阶段与腔室' }).click()
+    const pmBadge = page.locator('.chamber-overrides .patch-open')
+    await preview(pmBadge, '不代表机台已安装')
+    await pmBadge.click()
+    await assertPatchPage('V2.0-lab')
+
+    await nav('配置比对')
+    await page.getByLabel('左侧配置', { exact: true }).selectOption(machine.id)
+    await page.getByLabel('右侧配置', { exact: true }).selectOption(baseline.id)
+    await page.locator('.comparison-table .patch-open').first().waitFor()
+    assert.equal(await page.locator('.comparison-table .patch-open').count(), 2)
+    await preview(page.locator('.comparison-table td .patch-open').nth(1), '当前补丁记录，非当时快照')
+    await page.getByRole('tab', { name: 'PM1', exact: true }).click()
+    await page.locator('.chamber-comparison-table .patch-open').first().waitFor()
+    const leftBadge = page.locator('.chamber-comparison-table td .patch-open').first()
+    assert.equal(await leftBadge.innerText(), '补丁记录 1')
+    await preview(leftBadge, '不代表机台已安装')
+    await page.mouse.move(0, 0)
+    await page.locator('.ant-popover:visible').waitFor({ state: 'hidden' })
+    for (const width of [1366, 768, 390]) {
+      await page.setViewportSize({ width, height: 900 })
+      await page.waitForFunction(() => document.documentElement.scrollWidth <= innerWidth + 1)
+      await preview(leftBadge, '不代表机台已安装')
+      const bounds = await page.locator('.ant-popover:visible').boundingBox()
+      assert(bounds && bounds.x >= 0 && bounds.x + bounds.width <= width + 1, 'Popover must fit the viewport.')
+      await page.screenshot({ path: path.join(output, `pm-patches-${width}.png`), fullPage: true, animations: 'disabled' })
+      await page.mouse.move(0, 0)
+      await page.locator('.ant-popover:visible').waitFor({ state: 'hidden' })
+    }
+    await page.setViewportSize({ width: 1366, height: 900 })
+    await leftBadge.click()
+    await assertPatchPage('V2.0-lab')
+    await page.locator('.baseline-timeline button').filter({ hasText: 'BL-BEFORE-PATCH' }).click()
+    const snapshotBadge = page.locator('.snapshot-tree .patch-open')
+    await preview(snapshotBadge, '当前补丁记录，非当时快照')
+    await snapshotBadge.click()
+    await assertPatchPage('V1.0-original')
+    assert.deepEqual((await get(`/api/v1/baselines/${baseline.id}`)).items, frozen)
+
+    const viewerName = 'patchview' + randomUUID().slice(0, 8); const password = randomUUID()
+    await write('/api/v1/admin/users', { userName: viewerName, displayName: '补丁只读验收', password, role: 'Viewer', reason: '验收' })
+    const viewer = await browser.newContext({ baseURL: process.env.CONFIGHUB_TEST_URL || 'http://127.0.0.1:5080' })
+    try {
+      await write('/api/v1/auth/login', { userName: viewerName, password }, 'POST', viewer.request)
+      const view = await viewer.newPage()
+      await view.goto('/')
+      await view.evaluate(id => localStorage.setItem('confighub.selected-project-id', id), project.id)
+      await view.reload()
+      await view.locator('.nav-item').filter({ hasText: '机台' }).click()
+      await view.locator('.machine-list-item').filter({ hasText: '补丁记录实验室机台' }).click()
+      await view.locator('.actual-configuration-tree .patch-open').click()
+      await view.locator('.component-inspector .patch-list').waitFor()
+      assert.equal(await view.locator('.component-inspector form:visible, .patch-record-actions:visible').count(), 0)
+      assert.equal(await view.getByRole('button', { name: '登记补丁', exact: true }).count(), 0)
+    } finally { await viewer.close() }
+    assert.deepEqual(errors, [])
+    console.log('Configuration patch acceptance passed: actual/PM/compare/snapshot markers, status-aware current-record previews, dismiss/navigation, frozen history, Viewer read-only and responsive popovers.')
+  } catch (error) {
+    await page.screenshot({ path: path.join(output, 'failure.png'), fullPage: true }).catch(() => {})
+    throw error
+  } finally {
+    if (machine) await write(`/api/v1/machines/${machine.id}`, { reason: '验收清理' }, 'DELETE').catch(() => {})
+    if (project) await write(`/api/v1/projects/${project.id}/archive`, { reason: '验收清理' }).catch(() => {})
+    await browser.close()
+  }
+}
+main().catch(error => { console.error(error.stack); process.exitCode = 1 })

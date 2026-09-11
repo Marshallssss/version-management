@@ -1,10 +1,12 @@
 import { useState } from 'react'
+import { PatchBadge } from './VersionRecordTools'
+import type { ConfigurationComponent } from './catalog-api'
 import { useQuery } from '@tanstack/react-query'
 import { SwapOutlined } from '@ant-design/icons'
 import { compareBaselines, compareMachines, compareMachineToBaseline, getBaselines, getMachines, type ChamberComparison, type ChamberComparisonItem, type ChamberComparisonState, type ChamberComparisonSource } from './catalog-api'
 
 type Side = { kind: 'Machine' | 'Baseline'; id: string }
-type Row = { componentId: string; componentName: string; left: string | null; right: string | null; matched: boolean }
+type Row = { componentId: string; componentName: string; left: string | null; right: string | null; leftVersionId: string | null; rightVersionId: string | null; matched: boolean }
 type Chamber = Omit<ChamberComparison, 'leftInstalled'> & { leftInstalled: boolean | null }
 type Comparison = { rows: Row[]; risk: string | null; chambers: Chamber[] }
 const riskNames: Record<string, string> = { None: '无', High: '高', Critical: '严重', Unknown: '未知' }
@@ -37,7 +39,7 @@ function chamberResult(item: ChamberComparisonItem) {
   return '版本不同'
 }
 
-export function ConfigurationCompare({ projectId }: { projectId: string }) {
+export function ConfigurationCompare({ projectId, components, onOpenPatches }: { projectId: string; components: ConfigurationComponent[]; onOpenPatches: (versionId: string) => void }) {
   const [left, setLeft] = useState<Side>({ kind: 'Machine', id: '' })
   const [right, setRight] = useState<Side>({ kind: 'Baseline', id: '' })
   const [onlyDifferences, setOnlyDifferences] = useState(false)
@@ -61,7 +63,7 @@ export function ConfigurationCompare({ projectId }: { projectId: string }) {
       }
       const machineOnLeft = left.kind === 'Machine'
       const data = await compareMachineToBaseline(machineOnLeft ? left.id : right.id, machineOnLeft ? right.id : left.id)
-      return { risk: data.riskSeverity, chambers: orientChambers(data.chambers, !machineOnLeft), rows: data.items.map(item => ({ ...item, left: machineOnLeft ? item.actualVersionNumber : item.expectedVersionNumber, right: machineOnLeft ? item.expectedVersionNumber : item.actualVersionNumber, matched: item.status === 'Matched' })) }
+      return { risk: data.riskSeverity, chambers: orientChambers(data.chambers, !machineOnLeft), rows: data.items.map(item => ({ ...item, leftVersionId: machineOnLeft ? item.actualVersionId : item.expectedVersionId, rightVersionId: machineOnLeft ? item.expectedVersionId : item.actualVersionId, left: machineOnLeft ? item.actualVersionNumber : item.expectedVersionNumber, right: machineOnLeft ? item.expectedVersionNumber : item.actualVersionNumber, matched: item.status === 'Matched' })) }
     },
   })
   const selectSide = (side: Side, setSide: (side: Side) => void, label: string) => <div className="compare-side"><div className="compare-side-heading"><strong>{label}</strong><div className="compare-kind" role="group" aria-label={label + '类型'}>{(['Machine', 'Baseline'] as const).map(kind => <button type="button" aria-pressed={side.kind === kind} key={kind} onClick={() => { if (kind === side.kind) return; setSide({ kind, id: '' }); const other = label === '左侧' ? right : left; if (kind === 'Machine' && other.kind === 'Baseline' && other.id && !baselines.data?.some(baseline => baseline.id === other.id && baseline.state === 'Released')) (label === '左侧' ? setRight : setLeft)({ ...other, id: '' }) }}>{kind === 'Machine' ? '机台' : '基线'}</button>)}</div></div><select aria-label={label + '配置'} value={side.id} onChange={event => setSide({ ...side, id: event.target.value })}><option value="">选择{side.kind === 'Machine' ? '机台' : '基线'}</option>{side.kind === 'Machine' ? projectMachines.map(machine => <option key={machine.id} value={machine.id}>{machine.name} · {machine.serialNumber}</option>) : baselines.data?.filter(baseline => left.kind === 'Machine' || right.kind === 'Machine' ? baseline.state === 'Released' : true).map(baseline => <option key={baseline.id} value={baseline.id}>{baseline.code} · 修订 {baseline.revisionNo}{baseline.state === 'Draft' ? ' · 草稿' : baseline.state === 'Deprecated' ? ' · 已撤回' : ''}</option>)}</select></div>
@@ -71,6 +73,8 @@ export function ConfigurationCompare({ projectId }: { projectId: string }) {
   const scopeLabel = left.kind === 'Baseline' && right.kind === 'Baseline' ? '基线' : '整机'
   const nameOf = (side: Side) => side.kind === 'Machine' ? projectMachines.find(machine => machine.id === side.id)?.name : baselines.data?.find(baseline => baseline.id === side.id)?.code
   const leftName = nameOf(left); const rightName = nameOf(right)
+  const versions = new Map(components.flatMap(component => component.versions.map(version => [version.id, version] as const)))
+  const patchBadge = (versionId: string | null, label: string | null, side: Side) => versionId ? <PatchBadge version={versions.get(versionId)} versionLabel={label ?? undefined} context={side.kind === 'Baseline' ? 'snapshot' : 'machine'} onOpen={() => onOpenPatches(versionId)} /> : null
   const ready = !!comparison.data && !!left.id && !!right.id && !same && !comparison.isError
   if (!projectId) return <section className="configuration-compare"><p className="empty-state">请先在顶部选择项目。</p></section>
   return <section className="configuration-compare">
@@ -91,10 +95,10 @@ export function ConfigurationCompare({ projectId }: { projectId: string }) {
       </div>
       {!chamber ? <div role="tabpanel" id="compare-whole-panel" aria-label={`${scopeLabel}配置对比`}>
         <div className="compare-summary"><span>版本匹配：{comparison.data!.rows.length === 0 ? '无可比配置' : comparison.data!.rows.every(row => row.matched) ? '匹配' : '不匹配'}</span><span className={comparison.data!.risk === 'Critical' ? 'compare-critical' : ''}>风险：{comparison.data!.risk === null ? '此对比不评估风险' : riskNames[comparison.data!.risk] ?? '未知'}</span></div>
-        <div className="comparison-table-wrap"><table className="comparison-table"><thead><tr><th scope="col">组件</th><th scope="col">左侧版本<small>{leftName}</small></th><th scope="col">右侧版本<small>{rightName}</small></th><th scope="col">结果</th></tr></thead><tbody>{rows.map(row => <tr key={row.componentId} className={row.matched ? '' : 'changed'}><th scope="row">{row.componentName}</th><td>{row.left ?? '未配置'}</td><td>{row.right ?? '未配置'}</td><td>{row.matched ? '相同' : row.left === null ? '仅右侧' : row.right === null ? '仅左侧' : '版本不同'}</td></tr>)}</tbody></table>{rows.length === 0 && <p className="empty-state">{onlyDifferences ? '没有配置差异。' : '暂无可对比的组件配置。'}</p>}</div>
+        <div className="comparison-table-wrap"><table className="comparison-table"><thead><tr><th scope="col">组件</th><th scope="col">左侧版本<small>{leftName}</small></th><th scope="col">右侧版本<small>{rightName}</small></th><th scope="col">结果</th></tr></thead><tbody>{rows.map(row => <tr key={row.componentId} className={row.matched ? '' : 'changed'}><th scope="row">{row.componentName}</th><td>{row.left ?? '未配置'}{patchBadge(row.leftVersionId, row.left, left)}</td><td>{row.right ?? '未配置'}{patchBadge(row.rightVersionId, row.right, right)}</td><td>{row.matched ? '相同' : row.left === null ? '仅右侧' : row.right === null ? '仅左侧' : '版本不同'}</td></tr>)}</tbody></table>{rows.length === 0 && <p className="empty-state">{onlyDifferences ? '没有配置差异。' : '暂无可对比的组件配置。'}</p>}</div>
       </div> : <div role="tabpanel" id={`compare-pm-${chamber.number}`} aria-label={`PM${chamber.number} 配置对比`}>
         <div className="chamber-comparison-summary"><strong>PM{chamber.number}</strong><span>版本匹配：{matchNames[chamber.matchStatus]}</span><span className={chamber.riskSeverity === 'Critical' ? 'compare-critical' : ''}>风险：{riskNames[chamber.riskSeverity] ?? '未知'}</span></div>
-        <table className="chamber-comparison-table"><thead><tr><th scope="col">组件</th><th scope="col">左侧版本<small>{leftName} · {chamber.leftInstalled === null ? '基线快照' : chamber.leftInstalled ? `PM${chamber.number} 已安装` : '未安装'}</small></th><th scope="col">右侧版本<small>{rightName} · {chamber.rightInstalled === null ? '基线快照' : chamber.rightInstalled ? `PM${chamber.number} 已安装` : '未安装'}</small></th><th scope="col">结果</th></tr></thead><tbody>{chamberRows.map(item => <tr key={item.componentId} className={item.status === 'Matched' ? '' : item.status === 'Unknown' ? 'unconfirmed' : 'changed'}><th scope="row">{item.componentName}</th><td><ChamberValue version={item.leftVersionNumber} state={item.leftState} source={item.leftSource} /></td><td><ChamberValue version={item.rightVersionNumber} state={item.rightState} source={item.rightSource} /></td><td>{chamberResult(item)}</td></tr>)}</tbody></table>
+        <table className="chamber-comparison-table"><thead><tr><th scope="col">组件</th><th scope="col">左侧版本<small>{leftName} · {chamber.leftInstalled === null ? '基线快照' : chamber.leftInstalled ? `PM${chamber.number} 已安装` : '未安装'}</small></th><th scope="col">右侧版本<small>{rightName} · {chamber.rightInstalled === null ? '基线快照' : chamber.rightInstalled ? `PM${chamber.number} 已安装` : '未安装'}</small></th><th scope="col">结果</th></tr></thead><tbody>{chamberRows.map(item => <tr key={item.componentId} className={item.status === 'Matched' ? '' : item.status === 'Unknown' ? 'unconfirmed' : 'changed'}><th scope="row">{item.componentName}</th><td><ChamberValue version={item.leftVersionNumber} state={item.leftState} source={item.leftSource} />{patchBadge(item.leftVersionId, item.leftVersionNumber, left)}</td><td><ChamberValue version={item.rightVersionNumber} state={item.rightState} source={item.rightSource} />{patchBadge(item.rightVersionId, item.rightVersionNumber, right)}</td><td>{chamberResult(item)}</td></tr>)}</tbody></table>
         {chamberRows.length === 0 && <p className="empty-state">{chamber.items.length ? '此腔室没有配置差异。' : chamber.leftInstalled === false || chamber.rightInstalled === false ? '两侧腔室安装情况不同，暂无组件配置记录。' : '尚无组件配置记录，无法确认版本是否匹配。'}</p>}
       </div>}
     </>}

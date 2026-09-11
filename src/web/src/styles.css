@@ -1445,6 +1445,14 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 .patch-hover-content { width: 280px; max-width: calc(100vw - 70px); overflow-wrap: anywhere; }
 .patch-hover-content p { margin: 0 0 10px; }
 .patch-hover-content small { display: block; color: #657d78; }
+.patch-preview-heading { display: flex; align-items: flex-start; gap: 12px; justify-content: space-between; max-width: 280px; overflow-wrap: anywhere; }
+.patch-preview-heading button { flex: 0 0 26px; width: 26px; height: 26px; padding: 0; border: 0; background: transparent; color: #657d78; cursor: pointer; }
+.patch-hover-content .patch-record-notice { color: #657d78; font-size: 12px; }
+.actual-node-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.actual-node-row > .actual-node { flex: 1; min-width: 0; }
+.actual-node-row > .patch-open { flex: 0 0 auto; margin-left: 0; }
+.comparison-table .patch-open, .chamber-comparison-table .patch-open { display: block; margin: 6px 0 0; max-width: 100%; white-space: normal; }
+.snapshot-tree-item .patch-open { margin: 6px 0 0; }
 .patch-open { font: inherit; font-size: 11px; cursor: pointer; border: 1px solid #c8d9d5; border-radius: 4px; padding: 3px 6px; background: #edf5f2; color: #365d55; }
 .patch-record-actions { margin-top: 8px; }
 .patch-record-actions form { display: grid; gap: 8px; margin-top: 8px; }

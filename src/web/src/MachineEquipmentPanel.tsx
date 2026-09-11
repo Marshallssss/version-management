@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Modal } from 'antd'
+import { PatchBadge } from './VersionRecordTools'
 import { DeleteOutlined, EditOutlined, HistoryOutlined, PlusOutlined, CloseOutlined } from '@ant-design/icons'
 import { changeChamberOverrides, changeMachineEquipment, deleteMachine, getMachineEquipment, type ChamberInput, type ProjectDetail } from './catalog-api'
 
@@ -15,7 +16,7 @@ export function ChamberFields({ value, onChange }: { value: ChamberInput[]; onCh
 const eventNames: Record<string, string> = { MachineStageOwnerChanged: '整机阶段 / 负责人变更', ChamberInstalled: '腔室加入', ChamberRemoved: '腔室移除', ChamberStageChanged: '腔室阶段变更', ChamberOverridesChanged: '特例配置变更', MachineDeleted: '机台删除' }
 const matches: Record<string, string> = { Matched: '匹配', Mismatch: '版本不同', Extra: '目标之外', Unknown: '未指派目标' }
 
-export function MachineEquipmentPanel({ machineId, name, canWrite, isAdmin, project, onDeleted, onSuccess }: { machineId: string; name: string; canWrite: boolean; isAdmin: boolean; project?: ProjectDetail; onDeleted: () => void; onSuccess: (message: string) => void }) {
+export function MachineEquipmentPanel({ machineId, name, canWrite, isAdmin, project, onOpenPatches, onDeleted, onSuccess }: { machineId: string; name: string; canWrite: boolean; isAdmin: boolean; project?: ProjectDetail; onOpenPatches: (versionId: string) => void; onDeleted: () => void; onSuccess: (message: string) => void }) {
   const client = useQueryClient()
   const equipment = useQuery({ queryKey: ['machine-equipment', machineId], queryFn: () => getMachineEquipment(machineId) })
   const [dialog, setDialog] = useState<'edit' | 'history' | 'delete' | 'override' | null>(null)
@@ -58,7 +59,7 @@ export function MachineEquipmentPanel({ machineId, name, canWrite, isAdmin, proj
     {equipment.isError && <p className="error-strip">{equipment.error.message}</p>}
     <div className="chamber-summary">{equipment.data?.chambers.filter(x => x.installed).map(chamber => <article key={chamber.number}>
       <header><strong>PM{chamber.number}</strong><span>{chamber.stage}</span>{canWrite && <button type="button" onClick={() => { setNumber(chamber.number); setItems(chamber.overrides.map(x => ({ componentId: x.componentId, versionId: x.versionId }))); setComponentId(''); setVersionId(''); open('override') }}>特例{chamber.overrides.length ? ` (${chamber.overrides.length})` : ''}</button>}</header>
-      {chamber.overrides.length ? <div className="chamber-overrides">{chamber.overrides.map(item => <div key={item.componentId}><strong>{item.componentName}</strong><span>{item.versionNumber}</span><small>目标 {item.expectedVersionNumber ?? '无'} · {matches[item.match]}{item.risk === 'Critical' ? ' · 严重风险：已阻止' : ''}</small></div>)}</div> : <p>沿用整机配置</p>}
+      {chamber.overrides.length ? <div className="chamber-overrides">{chamber.overrides.map(item => <div key={item.componentId}><strong>{item.componentName}</strong><span>{item.versionNumber}<PatchBadge context="machine" version={components.find(component => component.id === item.componentId)?.versions.find(version => version.id === item.versionId)} onOpen={() => onOpenPatches(item.versionId)} /></span><small>目标 {item.expectedVersionNumber ?? '无'} · {matches[item.match]}{item.risk === 'Critical' ? ' · 严重风险：已阻止' : ''}</small></div>)}</div> : <p>沿用整机配置</p>}
     </article>)}</div>
     {equipment.data && !equipment.data.chambers.some(x => x.installed) && <p className="empty-state">尚未登记腔室。</p>}
     <Modal className="equipment-dialog" title={dialog === 'edit' ? '阶段、腔室与负责人' : dialog === 'history' ? `${name} · 设备历史` : dialog === 'delete' ? '确认删除机台' : `PM${number} · 特例配置`} open={dialog !== null} onCancel={() => { if (!save.isPending) setDialog(null) }} footer={null} width={720} destroyOnHidden>

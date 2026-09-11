@@ -4,6 +4,8 @@
 
 ### 2026-09-11 持续整改
 
+- 第五片 C 已验收：复用补丁浮窗接入机台实际树、PM 特例、全局比较及基线历史，统一称“补丁记录”并显示中文状态；数量包含仍存在的草稿/已发布/已撤回记录，不能当作安装数量。冻结快照仅关联当前补丁记录，不改写快照名称、版本号或历史内容；点击定位项目内对应版本补丁页并给出短暂提示，Viewer 只读。项目与机台共用项目详情缓存，避免补丁变更后标记滞后；浮窗支持收起与 Escape，修复关闭后被悬停事件重开的交互问题。
+- 第五片 C 验证：新增 configuration-patches-acceptance 覆盖四种入口、中文状态、收起/跳转、冻结快照不变、Viewer 只读，以及 1366/768/390 浮窗截图；其余 PM/项目/机台/导入/维护/删除 UI 与 API 回归均通过。Release 重验在停止本地 Host/Worker 后为 0 warning / 0 error（运行时 DLL 占用已通过重启解除）；真实 Migration 已最新、EF 无模型差异，前端构建、catalog/background-job、Windows operations preflight、Web compatibility 通过。服务已重新运行，无新增 Migration。
 - 第五片 B 已验收：配置比对以整机 / PM 页签展示，支持机台与基线双向、同项目机台间按相同 PM 编号对比；基线与基线仍只比较冻结快照，不推断腔室安装情况。未覆盖组件沿用整机；清除、移除重装均不恢复旧特例。界面区分 PM 特例、沿用整机、基线快照、已确认缺失、尚未观察与未安装；未知项返回信息不足，不冒充匹配。PM 与整机的 Match/Risk 分开，Blocked 版本即使匹配仍显示严重风险，只看差异也不隐藏风险提示。
 - 第五片 B 验证：新增 pm-compare-acceptance 覆盖有效配置继承、Full/Partial、拆装/清除、Unknown、基线外组件、冻结名称、双向/跨项目/只读权限与已删除机台；pm-compare-ui-acceptance 覆盖方向交换、无 PM / 基线互比、独立 Match/Risk 与 1366/768/390 截图。前端构建、Release 0 warning / 0 error、真实 Migration 已最新、EF 无模型差异，catalog、background-job、Windows operations preflight、Web compatibility 均通过。本片无 Migration，仍是 PostgreSQL 17 本地验证，不代表 Production Integration Pending 已完成。
 - 第二片已验收：项目与机台沿用浅色风格，统一标题、控件和节点密度；机台详情按当前配置、目标与对比、阶段与腔室、历史分区，默认查看信息，录入/指派/批量操作按需打开。项目保持实验室两行、根节点并列及默认收合详情；合并实验室单行/两行冲突和机台列宽重复规则。
@@ -14,7 +16,7 @@
 - 新增 pm-trace-acceptance 已通过，覆盖 PM 替换/清空/移除/重装/删除、历史引用删除保护、幂等与 Viewer 导出权限、快照名称维护后保持不变且 Blocked 仍 Critical；project-entry 页面真实录入与跳转通过。全解决方案 Release 0 warning / 0 error、真实 Migration 已最新、EF 无模型差异；catalog/background-job/preflight/web-compatibility 与既有 UI 回归通过。
 - PM 跳转验收发现机台列表可能仍使用进入项目时的缓存；机台工作区每次进入重新读取列表，保证搜索/影响中新出现的机台可定位。
 - PM 版本影响与导出分区、冻结比较标签、整机/PM 多方向配置比较已完成独立 API/页面验收。腔室修改会同步使比较缓存失效，进入比较页重新读取机台列表和当前结果。
-- 剩余工作：补丁标记贯穿所有配置视图、删除/撤回/超级维护的影响预览与引用跳转、维护开关关闭验收、其他页面视觉推广。本轮没有关闭调测维护，不将这些剩余项或 Windows Production Integration Pending 宣告完成。
+- 剩余工作：旧式目标差异摘要/历史配置表的补丁入口、删除/撤回/超级维护的影响预览与引用跳转、维护开关关闭验收、其他页面视觉推广。本轮没有关闭调测维护，不将这些剩余项或 Windows Production Integration Pending 宣告完成。
 
 ### 2026-09-10 正式使用一致性整改
 

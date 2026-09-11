@@ -1,10 +1,11 @@
+import { PatchBadge } from './VersionRecordTools'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { getMaintenanceCapabilities, assignProjectStandard, compareBaselines, createBaseline, decideBaselineReview, getBaselineDetail, getBaselines, getProjectStandard, maintainBaselineDraft, releaseBaseline, requestBaselineReview, undoBaselineCreation, withdrawBaselineRelease, type ProjectDetail } from './catalog-api'
 
 function formatTime(value: string | null | undefined) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '—' }
 
-export function ProjectBaselineHistory({ canWrite = true, detail, isAdmin, isSuperAdmin, focusedBaselineId, composerRequest = 0, onSuccess }: { canWrite?: boolean; detail: ProjectDetail; isAdmin: boolean; isSuperAdmin: boolean; focusedBaselineId?: string; composerRequest?: number; onSuccess: (message: string) => void }) {
+export function ProjectBaselineHistory({ canWrite = true, detail, isAdmin, isSuperAdmin, focusedBaselineId, composerRequest = 0, onOpenPatches, onSuccess }: { canWrite?: boolean; detail: ProjectDetail; isAdmin: boolean; isSuperAdmin: boolean; focusedBaselineId?: string; composerRequest?: number; onOpenPatches: (componentId: string, versionId: string) => void; onSuccess: (message: string) => void }) {
   const queryClient = useQueryClient()
   const maintenanceCapabilities = useQuery({ queryKey: ['maintenance-capabilities'], queryFn: getMaintenanceCapabilities })
   const [selectedBaselineId, setSelectedBaselineId] = useState('')
@@ -65,7 +66,7 @@ export function ProjectBaselineHistory({ canWrite = true, detail, isAdmin, isSup
     for (const [parentId, entries] of map) entries.sort((left, right) => (parentId === null ? (currentOrder.get(left.componentId) ?? left.sortOrder) - (currentOrder.get(right.componentId) ?? right.sortOrder) : left.sortOrder - right.sortOrder) || left.componentName.localeCompare(right.componentName, 'zh-CN'))
     return map
   }, [baselineDetail.data?.items, detail.components])
-  const renderItems = (parentId: string | null, depth = 0): ReactNode[] => (itemsByParent.get(parentId) ?? []).map(item => <section className={depth === 0 ? 'snapshot-root-column' : 'snapshot-child-branch'} key={item.id}><article className={depth === 0 ? 'snapshot-tree-item snapshot-root' : 'snapshot-tree-item'}><div><strong>{item.componentName}</strong><small>{item.versionNumber ?? '结构分类节点'}{item.versionId && item.requirement === 'Optional' && ' · 可选'}</small></div></article>{(itemsByParent.get(item.id)?.length ?? 0) > 0 && <div className="snapshot-children">{renderItems(item.id, depth + 1)}</div>}</section>)
+  const renderItems = (parentId: string | null, depth = 0): ReactNode[] => (itemsByParent.get(parentId) ?? []).map(item => <section className={depth === 0 ? 'snapshot-root-column' : 'snapshot-child-branch'} key={item.id}><article className={depth === 0 ? 'snapshot-tree-item snapshot-root' : 'snapshot-tree-item'}><div><strong>{item.componentName}</strong><small>{item.versionNumber ?? '结构分类节点'}{item.versionId && item.requirement === 'Optional' && ' · 可选'}</small>{item.versionId && <PatchBadge context="snapshot" versionLabel={item.versionNumber ?? undefined} version={detail.components.find(component => component.id === item.componentId)?.versions.find(version => version.id === item.versionId)} onOpen={() => onOpenPatches(item.componentId, item.versionId!)} />}</div></article>{(itemsByParent.get(item.id)?.length ?? 0) > 0 && <div className="snapshot-children">{renderItems(item.id, depth + 1)}</div>}</section>)
   const selectedIsStandard = currentStandard.data?.baselineId === selectedBaselineId
   const undoSecondsRemaining = selected ? Math.max(0, 180 - Math.floor((now - new Date(selected.releasedAt ?? selected.createdAt).getTime()) / 1000)) : 0
   const canUndoCreation = selected?.state === 'Draft'
