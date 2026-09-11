@@ -55,7 +55,7 @@ button {
   background: #e66d3f;
   font-family: Bahnschrift, "Arial Narrow", sans-serif;
   font-weight: 800;
-  letter-spacing: -1px;
+  letter-spacing: 0;
 }
 
 .brand-block strong,
@@ -69,7 +69,7 @@ h3 {
 .brand-block strong {
   display: block;
   font-size: 17px;
-  letter-spacing: 0.4px;
+  letter-spacing: 0;
 }
 
 .brand-block small {
@@ -77,7 +77,7 @@ h3 {
   margin-top: 4px;
   color: #6e8588;
   font-size: 9px;
-  letter-spacing: 1.35px;
+  letter-spacing: 0;
 }
 
 .rail nav {
@@ -127,7 +127,7 @@ h3 {
   color: #718487;
   font-family: Bahnschrift, monospace;
   font-size: 10px;
-  letter-spacing: 1.1px;
+  letter-spacing: 0;
 }
 
 .signal-dot {
@@ -141,7 +141,7 @@ h3 {
 
 main {
   min-width: 0;
-  padding: 0 38px 48px;
+  padding: 0 24px 32px;
 }
 
 .topbar {
@@ -157,13 +157,13 @@ main {
   color: #75898b;
   font-family: Bahnschrift, monospace;
   font-size: 10px;
-  letter-spacing: 1.45px;
+  letter-spacing: 0;
 }
 
 h1 {
   margin: 5px 0 0;
-  font-size: clamp(28px, 3vw, 42px);
-  letter-spacing: -0.8px;
+  font-size: 24px;
+  letter-spacing: 0;
 }
 
 .connection-state {
@@ -175,7 +175,7 @@ h1 {
   color: #87999b;
   font-family: Bahnschrift, monospace;
   font-size: 10px;
-  letter-spacing: 1px;
+  letter-spacing: 0;
 }
 
 .connection-state strong {
@@ -195,7 +195,7 @@ h1 {
   grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.65fr);
   gap: 18px;
   max-width: 1440px;
-  margin: 26px auto 0;
+  margin: 18px auto 0;
 }
 
 .hero-panel,
@@ -220,7 +220,7 @@ h1 {
   margin: 16px 0;
   font-size: clamp(34px, 4.2vw, 62px);
   line-height: 0.98;
-  letter-spacing: -1.8px;
+  letter-spacing: 0;
 }
 
 .hero-copy p {
@@ -244,7 +244,7 @@ h1 {
   color: #a9b7b8;
   font-family: Bahnschrift, monospace;
   font-size: 10px;
-  letter-spacing: 0.8px;
+  letter-spacing: 0;
   text-align: center;
 }
 
@@ -310,7 +310,7 @@ h1 {
 .foundation-row b {
   font-family: Bahnschrift, monospace;
   font-size: 10px;
-  letter-spacing: 0.8px;
+  letter-spacing: 0;
 }
 
 .foundation-row .ready {
@@ -332,7 +332,7 @@ h1 {
   background: transparent;
   font-family: Bahnschrift, monospace;
   font-size: 10px;
-  letter-spacing: 0.7px;
+  letter-spacing: 0;
   cursor: pointer;
 }
 
@@ -791,7 +791,7 @@ h1 {
   color: #708587;
   font-family: Bahnschrift, monospace;
   font-size: 10px;
-  letter-spacing: 1px;
+  letter-spacing: 0;
 }
 
 @media (max-width: 1050px) {
@@ -953,14 +953,14 @@ select option { color: #213231; background: #fff; }
 .rail-collapsed .nav-item { grid-template-columns: 1fr; justify-items: center; padding: 12px 4px; }
 .rail-collapsed .nav-item.active { border-left-width: 2px; }
 
-.machine-workspace { display: grid; grid-template-columns: minmax(250px, 0.36fr) minmax(0, 0.64fr); gap: 18px; grid-column: span 2; align-items: start; }
+.machine-workspace { display: grid; grid-template-columns: minmax(220px, 260px) minmax(0, 1fr); gap: 16px; grid-column: span 2; align-items: start; }
 .machine-registry-panel { grid-column: span 2; }
 .machine-heading { margin-bottom: 10px; }
 .machine-create, .machine-edit, .machine-detail-sections > details { border-top: 1px solid #d6e2df; }
 .machine-create > summary, .machine-edit > summary, .machine-detail-sections > details > summary { padding: 13px 0; color: #294a47; font-family: Bahnschrift, "Microsoft YaHei UI", sans-serif; font-weight: 600; cursor: pointer; }
 .machine-create[open] > summary, .machine-edit[open] > summary, .machine-detail-sections > details[open] > summary { color: #8e3d2e; }
 .machine-create .catalog-form, .machine-edit .catalog-form { padding: 4px 0 16px; }
-.machine-list-panel { max-height: calc(100vh - 206px); overflow: auto; }
+.machine-list-panel { position: sticky; top: 16px; max-height: calc(100vh - 150px); overflow: auto; }
 .machine-list-controls { display: flex; align-items: end; justify-content: space-between; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #d6e2df; color: #657d78; font-size: 12px; }
 .machine-list-controls label { display: grid; flex: 1; gap: 6px; color: #3d5752; }
 .machine-list-controls select { min-height: 36px; border: 1px solid #aabfba; color: #213231; background: #fff; font: inherit; }
@@ -1020,9 +1020,9 @@ select option { color: #213231; background: #fff; }
 .workspace-heading h2 { margin: 6px 0; font-size: 28px; }
 .workspace-heading p { margin: 0; color: #526a66; font-size: 13px; line-height: 1.6; }
 .workspace-heading .primary-action { margin-top: 0; white-space: nowrap; }
-.workspace-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(380px, 440px); align-items: start; min-height: 520px; }
+.workspace-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 390px); align-items: start; }
 .workspace-layout.inspector-collapsed { grid-template-columns: minmax(0, 1fr) 48px; }
-.component-tree-panel { min-width: 0; padding: 24px; overflow: visible; border-right: 1px solid #d6e2df; background: #f5f9f7; }
+.component-tree-panel { min-width: 0; padding: 16px; overflow: visible; border-right: 1px solid #d6e2df; background: #f5f9f7; }
 .tree-toolbar { display: grid; gap: 4px; margin-bottom: 14px; }
 .tree-toolbar-line { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
 .tree-toolbar-line > div { display: grid; min-width: 0; gap: 4px; }
@@ -1042,7 +1042,7 @@ select option { color: #213231; background: #fff; }
 .root-order-actions button:hover:not(:disabled) { border-color: #bd563f; color: #8e3d2e; }
 .root-node span:first-child { display: grid; gap: 3px; min-width: 0; }
 .root-node small { color: #55726d; font-size: 10px; }
-.root-node strong { overflow: hidden; font-family: Bahnschrift, "Microsoft YaHei UI", sans-serif; font-size: 16px; text-overflow: ellipsis; white-space: nowrap; }
+.root-node strong { overflow: hidden; font-family: inherit; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
 .root-node em { overflow: hidden; color: #42615b; font-size: 11px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
 .root-node:hover { background: #dcebe6; }
 .root-node.selected { color: #7c3529; background: #fbe9e4; box-shadow: inset 0 3px #bd563f; }
@@ -1051,7 +1051,7 @@ select option { color: #213231; background: #fff; }
 .tree-node:hover { border-color: #7ea79c; background: #f0f7f4; }
 .tree-node.selected { border-color: #bd563f; color: #7c3529; background: #fbe9e4; box-shadow: inset 0 3px #bd563f; }
 .tree-node-copy { display: grid; min-width: 0; gap: 3px; }
-.tree-node-copy strong { overflow: hidden; font-family: Bahnschrift, "Microsoft YaHei UI", sans-serif; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.tree-node-copy strong { overflow: hidden; font-family: inherit; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .tree-node-copy small { overflow: hidden; color: #657d78; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .baseline-version { overflow: hidden; margin-top: 2px; color: #17706a !important; font-family: Bahnschrift, "Microsoft YaHei UI", sans-serif; font-size: 11px !important; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 .tree-node-count { display: grid; place-items: center; width: 22px; height: 22px; color: #365650; background: #dcebe6; font-family: Bahnschrift, monospace; font-size: 10px; }
@@ -1108,12 +1108,12 @@ select option { color: #213231; background: #fff; }
 .testing-count small { color: #7c5329; font-family: "Microsoft YaHei UI", sans-serif; font-size: 9px; }
 .testing-count b { font-size: 12px; }
 .baseline-tree { margin-top: 24px; padding-top: 20px; border-top: 1px solid #c8d9d5; }
-.component-inspector { position: sticky; top: 16px; min-width: 0; max-height: calc(100vh - 32px); padding: 24px; overflow-y: auto; background: #fff; }
+.component-inspector { position: sticky; top: 16px; min-width: 0; max-height: calc(100vh - 32px); padding: 16px; overflow-y: auto; background: #fff; }
 .component-inspector.collapsed { display: grid; place-items: start center; min-height: 180px; padding: 10px 5px; overflow: hidden; }
 .inspector-toggle { display: grid; place-items: center; width: 28px; min-width: 28px; height: 30px; padding: 0; border: 1px solid #9bb8b1; color: #294a47; background: #fff; font: 22px/1 Bahnschrift, sans-serif; cursor: pointer; }
 .inspector-toggle:hover { border-color: #bd563f; color: #8e3d2e; }
 .inspector-heading, .subsection-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-.inspector-heading h3, .subsection-heading h3 { margin: 6px 0 0; font-size: 22px; }
+.inspector-heading h3, .subsection-heading h3 { margin: 4px 0 0; font-size: 18px; }
 .inspector-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .inspector-actions button, .form-actions button { padding: 8px 11px; border: 1px solid #9bb8b1; color: #294a47; background: #fff; cursor: pointer; }
 .inspector-actions button:hover, .form-actions button:hover { border-color: #bd563f; color: #8e3d2e; }
@@ -1287,7 +1287,8 @@ select option { color: #213231; background: #fff; }
 .toolbar-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .tree-toolbar-line > .toolbar-actions { display: flex; flex-direction: row; }
 .toolbar-actions button, .sort-toggle, .maintenance-action > button,
-.machine-workspace button:not(.machine-list-item):not(.configuration-version-link),
+.machine-workspace .subsection-heading > button, .machine-workspace .equipment-actions button, .machine-workspace .chamber-summary button,
+.machine-dialog button:not(.ant-modal-close),
 .project-baseline-history .compact-form button {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   min-height: 34px; padding: 6px 12px; border: 1px solid #b9cfca; border-radius: 4px;
@@ -1318,20 +1319,51 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 .laboratory-history-list strong span { margin-left: 8px; color: #657d78; font-weight: 400; }
 .laboratory-history-list p { margin: 6px 0; overflow-wrap: anywhere; }
 .history-event-state { font-size: 12px; color: #426c61; }
-.machine-workspace { grid-template-columns: minmax(220px, 270px) minmax(0, 1fr); gap: 16px; }
-.machine-workspace > section { min-width: 0; padding: 20px; background: #fff; }
-.machine-workspace .catalog-form { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; gap: 12px; }
-.machine-workspace .catalog-form label { min-width: 0; font-size: 13px; }
-.machine-workspace input, .machine-workspace select, .machine-workspace textarea { min-width: 0; width: 100%; min-height: 36px; padding: 7px 9px; border: 1px solid #b9cfca; border-radius: 4px; color: #213231; background: #fff; font: inherit; font-size: 13px; }
+.machine-workspace > section { min-width: 0; padding: 16px; background: #fff; }
+.machine-workspace .catalog-form, .machine-dialog .catalog-form { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; gap: 12px; }
+.machine-workspace .catalog-form label, .machine-dialog .catalog-form label { min-width: 0; font-size: 13px; }
+.machine-workspace input, .machine-workspace select, .machine-workspace textarea, .machine-dialog input:not([type=checkbox]), .machine-dialog select, .machine-dialog textarea { min-width: 0; width: 100%; min-height: 36px; padding: 7px 9px; border: 1px solid #b9cfca; border-radius: 4px; color: #213231; background: #fff; font: inherit; font-size: 13px; }
 .machine-workspace input[type="checkbox"] { width: 16px; min-height: 16px; accent-color: #426c61; }
 .machine-workspace .catalog-form > button { justify-self: start; }
-.machine-workspace .primary-action, .project-baseline-history button.primary-action { color: #fff; background: #bd563f; border-color: #bd563f; }
+.machine-workspace .primary-action, .machine-dialog .primary-action, .project-baseline-history button.primary-action { color: #fff; background: #bd563f; border-color: #bd563f; }
 .machine-workspace .component-row { grid-template-columns: minmax(0, 1fr) minmax(130px, 1fr); align-items: center; gap: 14px; padding: 12px 0; background: transparent; }
 .machine-workspace .component-row > div { min-width: 0; }
 .machine-workspace .version-tags { min-width: 0; }
 .configuration-version-link { border: 0; background: transparent; padding: 0; }
-.machine-list-panel { position: sticky; top: 16px; }
 .machine-list-item strong { font-size: 15px; }
+.workspace-count { margin-left: 8px; color: #657d78; font-size: 13px; font-weight: 400; }
+.workspace-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 18px; border-bottom: 1px solid #d6e2df; }
+.workspace-tabs button { display: inline-flex; align-items: center; gap: 7px; min-height: 40px; padding: 8px 12px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #617570; font: inherit; font-size: 14px; cursor: pointer; }
+.workspace-tabs button[aria-pressed=true] { border-bottom-color: #426c61; color: #294a47; font-weight: 600; }
+.workspace-tabs button:hover { background: #f5f9f7; }
+.machine-section { padding: 18px 0 4px; }
+.machine-section .subsection-heading { align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+.machine-section .subsection-heading h3 { margin: 0; font-size: 16px; }
+.machine-section .machine-drift-preview { margin-top: 16px; }
+.machine-section .machine-drift-preview > summary { font-size: 14px; }
+.machine-dialog .machine-tools { border: 0; }
+.machine-dialog .machine-tools > section { padding: 0; }
+.machine-dialog .catalog-form > button { justify-self: start; }
+.machine-dialog .ant-modal-body { max-height: 75vh; overflow-y: auto; overflow-x: hidden; padding-right: 4px; }
+.machine-dialog .wide-field { grid-column: 1 / -1; }
+.actual-configuration-tree { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 12px; align-items: start; }
+.actual-root-column, .actual-child-branch { min-width: 0; }
+.actual-node { display: grid; gap: 4px; width: 100%; min-height: 54px; padding: 8px 10px; border: 1px solid #d6e2df; border-radius: 4px; background: #fff; text-align: left; font: inherit; cursor: pointer; }
+.actual-node strong, .actual-node span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.actual-node strong { color: #294a47; font-size: 13px; }
+.actual-node span { color: #17706a; font-size: 12px; }
+.actual-node.actual-root { border-top: 3px solid #5d8d80; background: #edf4f1; }
+.actual-node:disabled { opacity: 1; cursor: default; }
+.actual-node:hover:not(:disabled) { border-color: #789d94; background: #f5f9f7; }
+.actual-node.absent span { color: #a34335; }
+.actual-children { display: grid; gap: 8px; margin-top: 8px; }
+.actual-child-branch .actual-children { padding-left: 10px; border-left: 1px solid #c8d9d5; }
+@media (max-width: 720px) {
+  .machine-dialog .catalog-form { grid-template-columns: 1fr; }
+  .machine-dialog .wide-field { grid-column: 1; }
+  .workspace-tabs { gap: 0; }
+  .workspace-tabs button { padding: 8px; font-size: 13px; }
+}
 .machine-workspace.machine-unselected { grid-template-columns: minmax(0, 1fr); }
 .machine-unselected .machine-list-panel { position: static; max-height: none; }
 .machine-workspace [hidden] { display: none !important; }
@@ -1340,7 +1372,7 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 .machine-list-item strong { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
 .machine-list-item em { font-size: 12px; font-weight: 400; font-style: normal; color: #426c61; }
 .machine-list-item span, .machine-list-item small { white-space: normal; overflow-wrap: anywhere; }
-.machine-equipment { border-top: 1px solid #d6e2df; padding: 18px 0; margin-top: 18px; }
+.machine-equipment { padding: 0; margin: 0; }
 .equipment-heading, .equipment-actions, .chamber-summary header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
 .equipment-heading > div:first-child { display: grid; gap: 6px; }
 .equipment-heading span { color: #657d78; font-size: 13px; }
@@ -1435,10 +1467,10 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 .topbar .project-switch strong { font-size: 16px; font-weight: 600; line-height: 1.5; }
 .topbar .project-switch .project-intro { font-size: 12px; line-height: 1.6; color: #617570; }
 .topbar .connection-state { background: transparent; border: 0; padding: 4px 0; }
-.laboratory-tree .lab-node { min-height: 36px; padding: 6px 9px; gap: 8px; }
-.laboratory-tree .lab-node > span:first-child { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 10px; min-width: 0; flex: 1; }
-.laboratory-tree .lab-node strong { font-size: 13px; overflow-wrap: anywhere; }
-.laboratory-tree .lab-node > span:first-child > small { font-size: 12px; overflow-wrap: anywhere; }
+.laboratory-tree .lab-node { min-height: 54px; padding: 8px 10px; gap: 8px; align-items: center; }
+.laboratory-tree .lab-node > span:first-child { display: grid; grid-template-rows: auto auto; gap: 4px; min-width: 0; flex: 1; }
+.laboratory-tree .lab-node strong { font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.laboratory-tree .lab-node > span:first-child > small { font-size: 12px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .laboratory-tree .testing-count { display: inline-flex; align-items: center; flex-shrink: 0; gap: 4px; padding: 3px 5px; min-width: 0; }
 .laboratory-tree .testing-count small, .laboratory-tree .testing-count b { display: inline; font-size: 11px; }
 .component-tree-panel > .laboratory-tree:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
@@ -1474,10 +1506,6 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
   .compare-swap { justify-self: center; height: 30px; }
   .comparison-table th, .comparison-table td { padding: 9px 5px; font-size: 12px; }
 }
-.laboratory-tree .lab-node > span:first-child { display: grid; grid-template-rows: auto auto; gap: 4px; }
-.laboratory-tree .lab-node strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.laboratory-tree .lab-node > span:first-child > small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.laboratory-tree .lab-node { min-height: 54px; padding: 8px 10px; align-items: center; }
 .component-profile { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 16px 0; font-size: 13px; }
 .component-profile dt { color: #657d78; font-size: 12px; }
 .component-profile dd { margin: 4px 0 0; overflow-wrap: anywhere; white-space: pre-wrap; }
