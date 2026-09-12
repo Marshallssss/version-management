@@ -57,6 +57,7 @@ async function main() {
     await maintenanceForm.getByLabel('版本号', { exact: true }).fill('V2-test-edited')
     await maintenanceForm.getByLabel('维护原因').fill('界面维护保存验收')
     await maintenanceForm.getByRole('button', { name: '保存调测修改' }).click()
+    await page.getByRole('dialog', { name: '确认维护版本', exact: true }).getByRole('button', { name: '确认维护版本', exact: true }).click()
     await maintenanceForm.waitFor({ state: 'detached' })
     await page.locator('.laboratory-tree').getByText('V2-test-edited', { exact: true }).waitFor()
     await page.locator('.baseline-timeline button').filter({ hasText: 'HISTORY-V1' }).click()

@@ -21,11 +21,15 @@ var hostArguments = args
         && !string.Equals(argument, "--bootstrap-admin-only", StringComparison.OrdinalIgnoreCase))
     .ToArray();
 var builder = WebApplication.CreateBuilder(hostArguments);
-var localConfigurationPath = Path.Combine(
-    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-    "ConfigHub",
-    "appsettings.local.json");
-builder.Configuration.AddJsonFile(localConfigurationPath, optional: true, reloadOnChange: true);
+var localConfigurationOverride = Environment.GetEnvironmentVariable("CONFIGHUB_LOCAL_CONFIG_PATH");
+var hasLocalConfigurationOverride = !string.IsNullOrWhiteSpace(localConfigurationOverride);
+var localConfigurationPath = hasLocalConfigurationOverride
+    ? Path.GetFullPath(localConfigurationOverride!)
+    : Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "ConfigHub",
+        "appsettings.local.json");
+builder.Configuration.AddJsonFile(localConfigurationPath, optional: !hasLocalConfigurationOverride, reloadOnChange: true);
 
 var connectionName = migrateRequested ? "ConfigHubMigration" : "ConfigHub";
 var connectionString = builder.Configuration.GetConnectionString(connectionName);

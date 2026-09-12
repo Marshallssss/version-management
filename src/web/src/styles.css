@@ -1446,6 +1446,30 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 .patch-hover-content p { margin: 0 0 10px; }
 .patch-hover-content small { display: block; color: #657d78; }
 .patch-preview-heading { display: flex; align-items: flex-start; gap: 12px; justify-content: space-between; max-width: 280px; overflow-wrap: anywhere; }
+.operation-impact-preview { border-top: 1px solid #d6e1dc; border-bottom: 1px solid #d6e1dc; margin: 16px 0; padding: 12px 0; min-width: 0; }
+.operation-impact-preview > header { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.operation-impact-preview > header button { width: 28px; height: 28px; padding: 0; border: 0; border-radius: 4px; color: #527769; background: transparent; cursor: pointer; }
+.operation-impact-preview details { margin: 8px 0; }
+.operation-impact-preview summary { cursor: pointer; padding: 6px 0; color: #365d55; }
+.operation-impact-preview summary span { margin-left: 10px; color: #657d78; font-size: 12px; }
+.operation-impact-preview ul { max-height: 210px; overflow-y: auto; padding: 0 8px 0 0; margin: 4px 0; list-style: none; }
+.operation-impact-preview li { padding: 8px 0; border-bottom: 1px solid #edf1ef; overflow-wrap: anywhere; }
+.operation-impact-preview li > strong { font-size: 13px; font-weight: 500; }
+.operation-impact-preview li > small { display: block; margin-top: 3px; color: #657d78; }
+.impact-reference-link { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0; width: 100%; border: 0; background: transparent; color: #276a68; font: inherit; text-align: left; cursor: pointer; }
+.impact-reference-link span { overflow-wrap: anywhere; min-width: 0; }
+.impact-reference-link:hover span { text-decoration: underline; }
+.impact-footnote, .impact-truncated, .impact-empty { margin: 8px 0 0; color: #657d78; font-size: 12px; }
+.operation-effect, .operation-reason, .operation-time-change { overflow-wrap: anywhere; white-space: pre-wrap; }
+.operation-reason { border-top: 1px solid #e2e9e6; padding-top: 12px; color: #526b62; }
+.operation-change-list { margin: 12px 0; }
+.operation-change-list > div { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 12px; padding: 6px 0; }
+.operation-change-list dt { color: #657d78; }
+.operation-change-list dd { margin: 0; overflow-wrap: anywhere; }
+.operation-changes { max-height: 230px; overflow-y: auto; }
+.operation-changes table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 13px; }
+.operation-changes th, .operation-changes td { padding: 8px; text-align: left; border-bottom: 1px solid #e2e9e6; overflow-wrap: anywhere; }
+.operation-changes thead { background: #f3f6f4; }
 .patch-preview-heading button { flex: 0 0 26px; width: 26px; height: 26px; padding: 0; border: 0; background: transparent; color: #657d78; cursor: pointer; }
 .patch-hover-content .patch-record-notice { color: #657d78; font-size: 12px; }
 .actual-node-row { display: flex; align-items: center; gap: 6px; min-width: 0; }

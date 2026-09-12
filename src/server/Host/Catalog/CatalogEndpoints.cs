@@ -14,6 +14,7 @@ public static partial class CatalogEndpoints
     {
         endpoints.MapPost("/api/v1/version-patches/{patchId:guid}/manage", ManageVersionPatchAsync).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/component-versions/{versionId:guid}/maintenance", MaintainVersionAsync).RequireAuthorization("SuperAdmin");
+        endpoints.MapGet("/api/v1/component-versions/{versionId:guid}/operation-impact", GetVersionOperationImpactAsync).RequireAuthorization("SuperAdmin");
         endpoints.MapDelete("/api/v1/component-versions/{versionId:guid}", async (Guid versionId, [FromBody] DeleteVersionRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken) =>
             await DeleteVersionAsync(versionId, request, context, factory, cancellationToken)).RequireAuthorization("SuperAdmin");
         endpoints.MapGet("/api/v1/maintenance-capabilities", (IConfiguration configuration) => Results.Ok(new { enabled = configuration.GetValue<bool>("ConfigHub:TestDataMaintenanceEnabled") })).RequireAuthorization();
@@ -45,6 +46,7 @@ public static partial class CatalogEndpoints
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/review/reject", RejectBaselineReviewAsync).RequireAuthorization("Admin");
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/undo-creation", UndoBaselineCreationAsync).RequireAuthorization("SeniorEngineer");
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/withdraw-release", WithdrawBaselineReleaseAsync).RequireAuthorization("SeniorEngineer");
+        endpoints.MapGet("/api/v1/baselines/{baselineId:guid}/operation-impact", GetBaselineOperationImpactAsync).RequireAuthorization("SeniorEngineer");
         endpoints.MapGet("/api/v1/baselines/{baselineId:guid}", GetBaselineDetailAsync).RequireAuthorization();
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/items/{itemId:guid}/requirement", SetBaselineItemRequirementAsync).RequireAuthorization("SeniorEngineer");
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/maintenance", MaintainBaselineDraftAsync).RequireAuthorization("SuperAdmin");

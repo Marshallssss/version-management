@@ -88,6 +88,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const getMaintenanceCapabilities = () => request<{ enabled: boolean }>('/api/v1/maintenance-capabilities')
+export type OperationImpactReference = { id: string; label: string; detail: string | null; machineId: string | null; baselineId: string | null; deleted: boolean }
+export type OperationImpactGroup = { kind: string; label: string; total: number; items: OperationImpactReference[] }
+export type VersionOperationImpact = { versionId: string; versionNumber: string; componentId: string; componentName: string; canDelete: boolean; maintenanceEnabled: boolean; cleanupCounts: { patches: number; lifecycleTransitions: number; recommendations: number }; groups: OperationImpactGroup[] }
+export type BaselineOperationImpact = { baselineId: string; baselineCode: string; state: string; canWithdraw: boolean; withdrawUntil: string | null; blockedReasons: string[]; maintenanceEnabled: boolean; groups: OperationImpactGroup[] }
+export const getVersionOperationImpact = (versionId: string) => request<VersionOperationImpact>(`/api/v1/component-versions/${versionId}/operation-impact`)
+export const getBaselineOperationImpact = (baselineId: string) => request<BaselineOperationImpact>(`/api/v1/baselines/${baselineId}/operation-impact`)
 export const maintainVersion = (versionId: string, input: { versionNumber: string; maturity: string; createdAt: string; releasedAt?: string | null; reason: string; maintenanceMode: boolean }) => request<{ id: string }>(`/api/v1/component-versions/${versionId}/maintenance`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': createIdempotencyKey() }, body: JSON.stringify(input) })
 export const managePatch = (patchId: string, action: 'withdraw' | 'delete', reason: string) => request<{ id: string }>(`/api/v1/version-patches/${patchId}/manage`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': createIdempotencyKey() }, body: JSON.stringify({ action, reason }) })
 export const getProjects = () => request<ProjectSummary[]>('/api/v1/projects')

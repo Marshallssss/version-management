@@ -3,11 +3,15 @@ using ConfigHub.Worker.Jobs;
 using Microsoft.EntityFrameworkCore;
 
 var builder = Host.CreateApplicationBuilder(args);
-var localConfigurationPath = Path.Combine(
-    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-    "ConfigHub",
-    "appsettings.local.json");
-builder.Configuration.AddJsonFile(localConfigurationPath, optional: true, reloadOnChange: true);
+var localConfigurationOverride = Environment.GetEnvironmentVariable("CONFIGHUB_LOCAL_CONFIG_PATH");
+var hasLocalConfigurationOverride = !string.IsNullOrWhiteSpace(localConfigurationOverride);
+var localConfigurationPath = hasLocalConfigurationOverride
+    ? Path.GetFullPath(localConfigurationOverride!)
+    : Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "ConfigHub",
+        "appsettings.local.json");
+builder.Configuration.AddJsonFile(localConfigurationPath, optional: !hasLocalConfigurationOverride, reloadOnChange: true);
 
 builder.Services.AddWindowsService(options =>
 {
