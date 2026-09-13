@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { DownOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons'
+import { AppstoreOutlined, ControlOutlined, DownOutlined, MenuFoldOutlined, MenuUnfoldOutlined, DashboardOutlined, ToolOutlined, DesktopOutlined, HistoryOutlined, SwapOutlined, SearchOutlined, ImportOutlined, TeamOutlined, PlusOutlined, UserOutlined, CloseOutlined, ArrowRightOutlined, ReloadOutlined } from '@ant-design/icons'
+import { Modal } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { archiveProject, assignProjectMember, assignProjectStandard, changeUserRole, changeVersionMaturity, changeVersionSafety, cloneProject, createBaseline, createComponent, createComponentVersion, createProject, createUser, decideBaselineReview, getBaselineDetail, getBaselines, getCurrentUser, getDashboard, getMachineFacts, getMachines, getProject, getProjectMembers, getProjectStandard, getProjects, getUsers, getVersionDetail, getVersionExposureSnapshots, getVersionImpact, login, logout, moveComponent, recommendVersion, releaseBaseline, requestBaselineReview, searchCatalog, setBaselineItemRequirement } from './catalog-api'
 import { enqueueNoopJob, getSystemStatus, getSystemVersion, type BackgroundJobStatus } from './system-api'
@@ -10,15 +11,15 @@ import { MachineWorkspace } from './MachineWorkspace'
 import { ProjectWorkspace } from './ProjectWorkspace'
 
 const navigation = [
-  { id: 'overview', label: '运行总览', available: true },
-  { id: 'operations', label: '系统运维', available: true, adminOnly: true },
-  { id: 'projects', label: '项目', available: true },
-  { id: 'machines', label: '机台', available: true },
-  { id: 'deployments', label: '部署记录', available: true },
-  { id: 'compare', label: '配置比对', available: true },
-  { id: 'search', label: '搜索', available: true },
-  { id: 'imports', label: '导入', available: true },
-  { id: 'users', label: '用户与角色', available: true, adminOnly: true },
+  { id: 'overview', icon: DashboardOutlined, label: '运行总览', available: true },
+  { id: 'operations', icon: ToolOutlined, label: '系统运维', available: true, adminOnly: true },
+  { id: 'projects', icon: AppstoreOutlined, label: '项目', available: true },
+  { id: 'machines', icon: DesktopOutlined, label: '机台', available: true },
+  { id: 'deployments', icon: HistoryOutlined, label: '部署记录', available: true },
+  { id: 'compare', icon: SwapOutlined, label: '配置比对', available: true },
+  { id: 'search', icon: SearchOutlined, label: '搜索', available: true },
+  { id: 'imports', icon: ImportOutlined, label: '导入', available: true },
+  { id: 'users', icon: TeamOutlined, label: '用户与角色', available: true, adminOnly: true },
 ]
 
 const statusText: Record<BackgroundJobStatus, string> = {
@@ -29,6 +30,7 @@ const statusText: Record<BackgroundJobStatus, string> = {
   Retry: '等待重试',
 }
 
+const roleText: Record<string, string> = { Viewer: '只读用户', Engineer: '工程师', SeniorEngineer: '高级工程师', Admin: '管理员', SuperAdmin: '超级管理员' }
 const connectivityText = { online: '已连接', offline: '未连接', checking: '检测中' }
 const jobTypeText: Record<string, string> = {
   'system.noop': '连通性任务',
@@ -99,6 +101,8 @@ function App() {
   const [focusPatch, setFocusPatch] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [searchAllProjects, setSearchAllProjects] = useState(false)
+  const [userDialog, setUserDialog] = useState<'create' | 'role' | null>(null)
+  const [userFilter, setUserFilter] = useState('')
   const [newUserEmail, setNewUserEmail] = useState('')
   const [newUserName, setNewUserName] = useState('')
   const [newUserPassword, setNewUserPassword] = useState('')
@@ -119,8 +123,8 @@ function App() {
   const projects = useQuery({ queryKey: ['projects'], queryFn: getProjects, enabled: isAuthenticated })
   const selectedProject = projects.data?.find(project => project.id === selectedProjectId)
   const users = useQuery({ queryKey: ['users'], queryFn: getUsers, enabled: isAdmin })
-  const addUser = useMutation({ mutationFn: createUser, onSuccess: async () => { setNewUserEmail(''); setNewUserName(''); setNewUserPassword(''); setNewUserReason(''); await queryClient.invalidateQueries({ queryKey: ['users'] }) } })
-  const updateUserRole = useMutation({ mutationFn: () => changeUserRole(roleUserId, { role: roleValue, reason: roleReason }), onSuccess: async () => { setRoleReason(''); await queryClient.invalidateQueries({ queryKey: ['users'] }) } })
+  const addUser = useMutation({ mutationFn: createUser, onSuccess: async () => { setNewUserEmail(''); setNewUserName(''); setNewUserPassword(''); setNewUserReason(''); await queryClient.invalidateQueries({ queryKey: ['users'] }); setUserDialog(null); setSuccessMessage('用户已创建。') } })
+  const updateUserRole = useMutation({ mutationFn: () => changeUserRole(roleUserId, { role: roleValue, reason: roleReason }), onSuccess: async () => { setRoleReason(''); await queryClient.invalidateQueries({ queryKey: ['users'] }); setUserDialog(null); setSuccessMessage('用户角色已更新。') } })
   const projectDetail = useQuery({ queryKey: ['project', selectedProjectId], queryFn: () => getProject(selectedProjectId!), enabled: isAuthenticated && selectedProjectId !== null })
   const projectMembers = useQuery({ queryKey: ['project-members', selectedProjectId], queryFn: () => getProjectMembers(selectedProjectId!), enabled: isAuthenticated && selectedProjectId !== null && isAdmin })
   const baselines = useQuery({ queryKey: ['baselines', baselineProjectId], queryFn: () => getBaselines(baselineProjectId), enabled: isAuthenticated && baselineProjectId !== '' })
@@ -221,6 +225,14 @@ function App() {
   const connectivity = system.isSuccess ? 'online' : system.isError ? 'offline' : 'checking'
   const visibleNavigation = navigation.filter((item) => (!item.adminOnly || isAdmin) && (canWrite || item.id !== 'imports'))
   const selectedNavigation = visibleNavigation.find((item) => item.id === activePage) ?? navigation[0]
+  const searchCaption = (item: Awaited<ReturnType<typeof searchCatalog>>[number]) => {
+    const kind = { Project: '项目', Component: '组件', Version: '版本', Patch: '补丁', Baseline: '基线', Machine: '机台' }[item.type] ?? '记录'
+    const projectName = projects.data?.find(project => project.id === item.projectId)?.name
+    const component = projectDetail.data?.project.id === item.projectId
+      ? projectDetail.data.components.find(component => item.type === 'Component' ? component.id === item.id : component.versions.some(version => version.id === (item.versionId ?? item.id)))
+      : undefined
+    return [kind, projectName, component?.name].filter(Boolean).join(' · ')
+  }
   const queueCount = (jobStatus: BackgroundJobStatus) => status.data?.queue.find((item) => item.status === jobStatus)?.count ?? 0
 
   useEffect(() => {
@@ -234,17 +246,17 @@ function App() {
   }, [railCollapsed])
 
   return (
-    <div className={railCollapsed ? 'app-shell rail-collapsed' : 'app-shell'}>
+    <div className={railCollapsed ? 'app-shell rail-collapsed' : 'app-shell'} data-page={activePage}>
       <aside className="rail">
         <div className="brand-block">
-          <span className="brand-mark">CH</span>
+          <span className="brand-mark" aria-hidden><ControlOutlined /></span>
           <div className="brand-copy"><strong>ConfigHub</strong><small>工程配置管理</small></div>
           <button className="rail-toggle" type="button" aria-label={railCollapsed ? '展开导航' : '收起导航'} title={railCollapsed ? '展开导航' : '收起导航'} onClick={() => setRailCollapsed(current => !current)}>{railCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}</button>
         </div>
         <nav aria-label="主导航">
-          {visibleNavigation.map((item, index) => (
-            <button className={item.id === activePage ? 'nav-item active' : 'nav-item'} key={item.id} type="button" onClick={() => { setSuccessMessage(''); if (item.id === 'machines') setSelectedMachineId(''); setActivePage(!isAuthenticated && item.id !== 'projects' ? 'projects' : item.id) }}>
-              <span className="nav-index">{String(index + 1).padStart(2, '0')}</span><span className="nav-label">{item.label}</span>{!item.available && <em>待实现</em>}
+          {visibleNavigation.map(item => (
+            <button className={item.id === activePage ? 'nav-item active' : 'nav-item'} key={item.id} type="button" title={item.label} aria-label={railCollapsed ? item.label : undefined} aria-current={item.id === activePage ? 'page' : undefined} onClick={() => { setSuccessMessage(''); if (item.id === 'machines') setSelectedMachineId(''); setActivePage(!isAuthenticated && item.id !== 'projects' ? 'projects' : item.id) }}>
+              <span className="nav-index" aria-hidden><item.icon /></span><span className="nav-label">{item.label}</span>{!item.available && <em>待实现</em>}
             </button>
           ))}
         </nav>
@@ -253,41 +265,32 @@ function App() {
 
       <main>
         <header className="topbar">
-          <div><span className="eyebrow">工程运行 / 基础设施</span><h1>{selectedNavigation.label}</h1></div>
+          <div className="page-identity"><span className="eyebrow">配置管理工作台</span><h1>{selectedNavigation.label}</h1></div>
           <div className="topbar-controls">
-            {isAuthenticated ? <><button type="button" className="topbar-control project-switch" title="切换当前项目" onClick={() => setProjectDialog('switch')}><span>当前项目</span><strong>{selectedProject?.name ?? '选择项目'}</strong><DownOutlined aria-hidden style={{ fontSize: 11, color: '#647b76' }} />{selectedProject?.description && <small className="project-intro">{selectedProject.description}</small>}</button>{canWrite && <button type="button" className="topbar-control" onClick={() => setProjectDialog('create')}>新建项目</button>}<button type="button" className="topbar-control" onClick={() => setProjectDialog('account')}>{currentUser.data?.name ?? '账户'}</button></> : <button type="button" className="topbar-control" onClick={() => setProjectDialog('login')}>登录</button>}
+            {isAuthenticated ? <><button type="button" className="topbar-control project-switch" title="切换当前项目" onClick={() => setProjectDialog('switch')}><span>当前项目</span><strong>{selectedProject?.name ?? '选择项目'}</strong><DownOutlined className="project-switch-chevron" aria-hidden />{selectedProject?.description && <small className="project-intro">{selectedProject.description}</small>}</button>{canWrite && <button type="button" className="topbar-control" onClick={() => setProjectDialog('create')}><PlusOutlined aria-hidden />新建项目</button>}<button type="button" className="topbar-control account-control" onClick={() => setProjectDialog('account')}><UserOutlined aria-hidden />{currentUser.data?.name ?? '账户'}</button></> : <button type="button" className="topbar-control" onClick={() => setProjectDialog('login')}><UserOutlined aria-hidden />登录</button>}
             <div className={`connection-state ${connectivity}`}><strong>{connectivityText[connectivity]}</strong></div>
           </div>
         </header>
 
-        {projectDialog && <div className="workspace-modal-backdrop" role="presentation" onMouseDown={() => setProjectDialog(null)}><section className="workspace-modal" role="dialog" aria-modal="true" aria-label="项目操作" onMouseDown={(event) => event.stopPropagation()}>
-          <div className="panel-heading"><div><span className="section-index">{projectDialog === 'login' ? '身份验证' : projectDialog === 'switch' ? '项目切换' : projectDialog === 'create' ? '项目目录' : '当前身份'}</span><h3>{projectDialog === 'login' ? '登录' : projectDialog === 'switch' ? '选择项目' : projectDialog === 'create' ? '新建项目' : currentUser.data?.name}</h3></div><button type="button" aria-label="关闭" onClick={() => setProjectDialog(null)}>关闭</button></div>
+        {projectDialog && <Modal open centered footer={null} closable={false} onCancel={() => setProjectDialog(null)} width={600} className="workspace-modal" aria-label="项目操作">
+          <div className="panel-heading"><div><span className="section-index">{projectDialog === 'login' ? '身份验证' : projectDialog === 'switch' ? '项目切换' : projectDialog === 'create' ? '项目目录' : '当前身份'}</span><h3>{projectDialog === 'login' ? '登录' : projectDialog === 'switch' ? '选择项目' : projectDialog === 'create' ? '新建项目' : currentUser.data?.name}</h3></div><button type="button" className="icon-button" aria-label="关闭" title="关闭" onClick={() => setProjectDialog(null)}><CloseOutlined /></button></div>
           {projectDialog === 'login' && <form className="catalog-form" onSubmit={(event) => { event.preventDefault(); signIn.mutate({ userName, password }) }}><label>用户名<input value={userName} onChange={(event) => setUserName(event.target.value)} required /></label><label>密码<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label><button className="primary-action" type="submit" disabled={signIn.isPending}>{signIn.isPending ? '正在登录' : '登录'}</button>{signIn.isError && <p className="error-strip wide-field">登录失败，请检查凭据。</p>}</form>}
           {projectDialog === 'switch' && <div className="catalog-form"><label>项目<select aria-label="项目" value={selectedProjectId ?? ''} onChange={(event) => { setSelectedProjectId(event.target.value); localStorage.setItem('confighub.selected-project-id', event.target.value); setFocusedVersionId(''); setFocusedBaselineId(''); setProjectDialog(null) }}><option value="">请选择项目</option>{projects.data?.map(project => <option key={project.id} value={project.id}>{project.name}（{project.code}，{project.componentCount} 个组件）</option>)}</select></label><p className="form-hint wide-field">已选择的项目会保持到你手动切换或退出登录。</p>{isAdmin && selectedProject && <><label className="wide-field">归档原因<input value={archiveReason} maxLength={500} onChange={event => setArchiveReason(event.target.value)} placeholder="确认后项目从日常列表移除，历史不会删除" /></label><button type="button" className="danger-action" disabled={!archiveReason || archiveSelectedProject.isPending} onClick={() => archiveSelectedProject.mutate()}>{archiveSelectedProject.isPending ? '正在归档' : '归档当前项目'}</button>{archiveSelectedProject.isError && <p className="error-strip wide-field">{archiveSelectedProject.error.message}</p>}</>}</div>}
           {projectDialog === 'create' && <form className="catalog-form" onSubmit={(event) => { event.preventDefault(); addProject.mutate({ code: projectCode, name: projectName, description: projectDescription, reason: projectReason }) }}><label>项目编码<input value={projectCode} maxLength={50} placeholder="例如：LINE-A" onChange={(event) => setProjectCode(event.target.value)} required /></label><label>项目名称<input value={projectName} maxLength={200} placeholder="例如：产线 A 配置" onChange={(event) => setProjectName(event.target.value)} required /></label><label className="wide-field">创建方式<select value={cloneSourceProjectId} onChange={(event) => setCloneSourceProjectId(event.target.value)}><option value="">创建空白项目</option>{projects.data?.map(project => <option key={project.id} value={project.id}>从 {project.code} · {project.name} 复制组件树</option>)}</select></label>{cloneSourceProjectId ? <p className="form-hint wide-field">只复制组件树，不复制软件版本、基线、机台或历史记录。</p> : <label className="wide-field">说明<textarea value={projectDescription} maxLength={2000} onChange={(event) => setProjectDescription(event.target.value)} /></label>}<label className="wide-field">创建原因<input value={projectReason} maxLength={500} onChange={(event) => setProjectReason(event.target.value)} required /></label><button className="primary-action" type="submit" disabled={addProject.isPending}>{addProject.isPending ? '正在创建' : cloneSourceProjectId ? '创建克隆项目' : '创建项目'}</button>{addProject.isError && <p className="error-strip wide-field">{addProject.error.message}</p>}</form>}
-          {projectDialog === 'account' && <div className="catalog-form"><p className="form-hint wide-field">{currentUser.data?.name} · {currentUser.data?.roles.join('、')}</p><button type="button" className="danger-action" onClick={() => signOut.mutate()} disabled={signOut.isPending}>{signOut.isPending ? '正在退出' : '退出登录'}</button></div>}
-        </section></div>}
+          {projectDialog === 'account' && <div className="catalog-form"><p className="form-hint wide-field">{currentUser.data?.name} · {currentUser.data?.roles.map(role => roleText[role] ?? role).join('、')}</p><button type="button" className="danger-action" onClick={() => signOut.mutate()} disabled={signOut.isPending}>{signOut.isPending ? '正在退出' : '退出登录'}</button></div>}
+        </Modal>}
 
-        {successMessage && <p className="success-strip">{successMessage}</p>}
+        {successMessage && <p className="success-strip" role="status">{successMessage}</p>}
 
         {selectedNavigation.available ? (
           <div className="content-grid">
             {activePage === 'overview' && <>
-              <section className="hero-panel">
-                <div className="hero-copy">
-                  <span className="section-index">本机基础设施</span>
-                  <h2>系统已经就绪</h2>
-                  <p>此处用于查看服务身份、配置状态与运行拓扑。后台队列仅在系统运维中供管理员诊断和验收。</p>
-                  {isAdmin && <button className="primary-action" type="button" onClick={() => setActivePage('operations')}>打开系统运维</button>}
-                </div>
-                <div className="topology" aria-label="当前运行拓扑">
-                  <div className="topology-node primary">ConfigHub 服务端</div><div className="topology-line" />
-                  <div className="topology-row"><div className="topology-node">React 界面</div><div className="topology-node">API v1</div></div><div className="topology-line" />
-                  <div className="topology-row"><div className="topology-node">PostgreSQL</div><div className="topology-node">后台 Worker</div></div>
-                </div>
+              <section className="overview-heading">
+                <div><span className="section-index">运行状态</span><h2>{connectivity === 'online' ? '服务已连接' : connectivity === 'offline' ? '服务暂不可用' : '正在连接服务'}</h2><p>{selectedProject?.name ?? '尚未选择项目'}<span className="overview-divider" />{formatTime(system.data?.serverTime)}</p></div>
+                <div className="overview-actions"><button type="button" onClick={() => { setActivePage('projects'); if (isAuthenticated && !selectedProjectId) setProjectDialog('switch') }}><AppstoreOutlined aria-hidden />进入项目<ArrowRightOutlined aria-hidden /></button>{isAdmin && <button type="button" onClick={() => setActivePage('operations')}><ToolOutlined aria-hidden />系统运维</button>}</div>
               </section>
               <section className="status-panel">
-                <div className="panel-heading"><div><span className="section-index">实时运行信息</span><h3>服务身份</h3></div><button type="button" onClick={() => void system.refetch()} disabled={system.isFetching}>{system.isFetching ? '正在刷新' : '刷新'}</button></div>
+                <div className="panel-heading"><div><span className="section-index">实时运行信息</span><h3>服务身份</h3></div><button type="button" onClick={() => void system.refetch()} disabled={system.isFetching} aria-label="刷新服务信息" title="刷新服务信息"><ReloadOutlined spin={system.isFetching} /></button></div>
                 <dl className="runtime-list"><div><dt>产品</dt><dd>{system.data?.product ?? '—'}</dd></div><div><dt>版本</dt><dd>{system.data?.version ?? '—'}</dd></div><div><dt>接口版本</dt><dd>{system.data?.apiVersion ?? '—'}</dd></div><div><dt>服务时间</dt><dd>{formatTime(system.data?.serverTime)}</dd></div></dl>
               </section>
               <section className="status-panel">
@@ -295,7 +298,7 @@ function App() {
                 <dl className="runtime-list"><div><dt>机台总数</dt><dd>{dashboard.data?.machineCount ?? '—'}</dd></div><div><dt>配置匹配</dt><dd>{dashboard.data?.matchedCount ?? '—'}</dd></div><div><dt>配置不匹配</dt><dd>{dashboard.data?.mismatchCount ?? '—'}</dd></div><div><dt>状态未知</dt><dd>{dashboard.data?.unknownCount ?? '—'}</dd></div><div><dt>严重风险</dt><dd>{dashboard.data?.criticalRiskCount ?? '—'}</dd></div></dl>
               </section>
               {isAdmin && <section className="telemetry-panel queue-panel">
-                <div className="panel-heading"><div><span className="section-index">队列概览</span><h3>后台任务</h3></div><span className="count">{status.data?.jobs.length ?? 0}</span></div>
+                <div className="panel-heading"><div><span className="section-index">队列概览</span><h3>后台任务</h3></div><span className="section-index">全部任务</span></div>
                 <div className="queue-summary"><div><span>等待执行</span><b>{queueCount('Pending')}</b></div><div><span>执行中</span><b>{queueCount('Running')}</b></div><div><span>等待重试</span><b>{queueCount('Retry')}</b></div><div><span>已完成</span><b>{queueCount('Succeeded')}</b></div><div><span>失败</span><b>{queueCount('Failed')}</b></div></div>
               </section>}
             </>}
@@ -406,7 +409,7 @@ function App() {
               <label>项目版本<select value={impactVersionId} onChange={(event) => setImpactVersionId(event.target.value)} disabled={!selectedProjectId || projectDetail.isLoading}><option value="">{selectedProjectId ? '请选择版本' : '请先选择项目'}</option>{projectDetail.data?.components.flatMap((component) => component.versions.map((version) => <option key={version.id} value={version.id}>{component.name} · {version.versionNumber}</option>))}</select></label>
               {impactVersionId && <><dl className="runtime-list"><div><dt>组件</dt><dd>{versionDetail.data?.version.componentName ?? '—'}</dd></div><div><dt>序列</dt><dd>{versionDetail.data?.version.sequenceNo ?? '—'}</dd></div><div><dt>成熟度</dt><dd>{maturityText[versionDetail.data?.version.maturity ?? ''] ?? '—'}</dd></div><div><dt>安全状态</dt><dd>{safetyText[versionDetail.data?.version.safety ?? ''] ?? '—'}</dd></div><div><dt>推荐</dt><dd>{versionDetail.data?.recommended ? '是' : '否'}</dd></div></dl><dl className="runtime-list"><div><dt>已使用基线</dt><dd>{versionImpact.data?.usedBaselineIds.length ?? 0}</dd></div><div><dt>当前机台</dt><dd>{versionImpact.data?.currentMachineIds.length ?? 0}</dd></div><div><dt>目标机台</dt><dd>{versionImpact.data?.targetMachineIds.length ?? 0}</dd></div><div><dt>历史机台</dt><dd>{versionImpact.data?.historicalMachineIds.length ?? 0}</dd></div></dl><div className="component-list">{versionExposure.data?.map(snapshot => <article className="component-row" key={snapshot.id}><div><strong>阻断时影响快照</strong><span>当前 {snapshot.currentMachineCount} · 目标 {snapshot.targetMachineCount} · 历史 {snapshot.historicalMachineCount} · 基线 {snapshot.baselineCount}</span></div><small>{formatTime(snapshot.blockedAt)}<br />{snapshot.blockedBy} · {snapshot.reason}</small></article>)}{versionDetail.data?.transitions.map((item, index) => <article className="component-row" key={`${item.occurredAt}-${index}`}><div><strong>{lifecycleAxisText[item.axis] ?? item.axis}</strong><span>{maturityText[item.fromState] ?? safetyText[item.fromState] ?? item.fromState} → {maturityText[item.toState] ?? safetyText[item.toState] ?? item.toState} · {item.reason}</span></div><small>{item.actor} · {formatTime(item.occurredAt)}</small></article>)}{versionImpact.data?.recentFacts.map((fact, index) => <article className="component-row" key={`${fact.machineId}-${index}`}><div><strong>{operationText[fact.operationType] ?? fact.operationType}</strong><span>已有一条关联机台事实</span></div><small>{formatTime(fact.effectiveAt)}</small></article>)}</div></>}</section>}
 
-            {activePage === 'search' && <section className="status-panel catalog-panel"><div className="panel-heading"><div><span className="section-index">{searchAllProjects ? '全部项目' : selectedProject?.name ?? '当前项目'}</span><h3>项目、组件、版本、补丁、基线和机台</h3></div></div><div className="catalog-form"><label>搜索范围<select aria-label="搜索范围" value={searchAllProjects ? 'all' : 'current'} onChange={event => setSearchAllProjects(event.target.value === 'all')}><option value="current">当前项目</option><option value="all">全部项目</option></select></label><label>搜索词<input value={searchTerm} minLength={2} onChange={(event) => setSearchTerm(event.target.value)} placeholder="至少输入两个字符" /></label></div>{!searchAllProjects && !selectedProjectId && <p className="empty-state">尚未选择项目。</p>}{catalogSearch.isFetching && <p role="status">正在搜索。</p>}{catalogSearch.isSuccess && catalogSearch.data.length === 0 && <p className="empty-state">没有找到匹配的记录。</p>}{searchTerm.trim().length >= 2 && <div className="catalog-list">{catalogSearch.data?.map((item) => <button type="button" className="component-row" key={`${item.type}-${item.id}`} onClick={() => { if (item.type === 'Project' || item.type === 'Component' || item.type === 'Version' || item.type === 'Patch') { setSelectedProjectId(item.projectId); localStorage.setItem('confighub.selected-project-id', item.projectId); setFocusedBaselineId(''); setFocusedComponentId(item.type === 'Component' ? item.id : ''); setFocusPatch(item.type === 'Patch'); setFocusedVersionId(item.type === 'Patch' ? item.versionId ?? '' : item.type === 'Version' ? item.id : ''); setActivePage('projects') } else if (item.type === 'Baseline') { setSelectedProjectId(item.projectId); localStorage.setItem('confighub.selected-project-id', item.projectId); setFocusedVersionId(''); setFocusedBaselineId(item.id); setActivePage('projects') } else { setSelectedProjectId(item.projectId); setSelectedMachineId(item.id); setActivePage('machines') } }}><div><strong>{item.label}</strong><span>{item.type === 'Project' ? '项目' : item.type === 'Component' ? '组件' : item.type === 'Version' ? '版本' : item.type === 'Patch' ? '补丁' : item.type === 'Baseline' ? '基线' : '机台'}</span></div><small>打开</small></button>)}</div>}{catalogSearch.isError && <p className="error-strip">{catalogSearch.error.message}</p>}</section>}
+            {activePage === 'search' && <section className="status-panel catalog-panel"><div className="panel-heading"><div><span className="section-index">{searchAllProjects ? '全部项目' : selectedProject?.name ?? '当前项目'}</span><h3>项目、组件、版本、补丁、基线和机台</h3></div></div><div className="catalog-form"><label>搜索范围<select aria-label="搜索范围" value={searchAllProjects ? 'all' : 'current'} onChange={event => setSearchAllProjects(event.target.value === 'all')}><option value="current">当前项目</option><option value="all">全部项目</option></select></label><label>搜索词<input value={searchTerm} minLength={2} onChange={(event) => setSearchTerm(event.target.value)} placeholder="至少输入两个字符" /></label></div>{!searchAllProjects && !selectedProjectId && <p className="empty-state">尚未选择项目。</p>}{catalogSearch.isFetching && <p role="status">正在搜索。</p>}{catalogSearch.isSuccess && catalogSearch.data.length === 0 && <p className="empty-state">没有找到匹配的记录。</p>}{searchTerm.trim().length >= 2 && <div className="catalog-list">{catalogSearch.data?.map((item) => <button type="button" className="component-row" key={`${item.type}-${item.id}`} onClick={() => { if (item.type === 'Project' || item.type === 'Component' || item.type === 'Version' || item.type === 'Patch') { setSelectedProjectId(item.projectId); localStorage.setItem('confighub.selected-project-id', item.projectId); setFocusedBaselineId(''); setFocusedComponentId(item.type === 'Component' ? item.id : ''); setFocusPatch(item.type === 'Patch'); setFocusedVersionId(item.type === 'Patch' ? item.versionId ?? '' : item.type === 'Version' ? item.id : ''); setActivePage('projects') } else if (item.type === 'Baseline') { setSelectedProjectId(item.projectId); localStorage.setItem('confighub.selected-project-id', item.projectId); setFocusedVersionId(''); setFocusedBaselineId(item.id); setActivePage('projects') } else { setSelectedProjectId(item.projectId); setSelectedMachineId(item.id); setActivePage('machines') } }}><div><strong>{item.label}</strong><span>{searchCaption(item)}</span></div><small>打开</small></button>)}</div>}{catalogSearch.isError && <p className="error-strip">{catalogSearch.error.message}</p>}</section>}
 
             {activePage === 'compare' && <ConfigurationCompare key={selectedProjectId ?? ''} projectId={selectedProjectId ?? ''} components={projectDetail.data?.components ?? []} onOpenPatches={versionId => { setFocusedComponentId(''); setFocusedBaselineId(''); setFocusedVersionId(versionId); setFocusPatch(true); setActivePage('projects'); setSuccessMessage('') }} />}
 
@@ -414,7 +417,18 @@ function App() {
 
             {activePage === 'imports' && canWrite && (selectedProjectId ? <ImportWorkspace key={selectedProjectId} projectId={selectedProjectId} projectName={selectedProject?.name ?? ''} /> : <p className="empty-state">尚未选择项目。</p>)}
 
-            {activePage === 'users' && <section className="status-panel catalog-panel"><div className="panel-heading"><div><span className="section-index">身份管理</span><h3>用户与角色</h3></div><span className="count">{users.data?.length ?? 0}</span></div>{isAdmin ? <><form className="catalog-form" onSubmit={(event) => { event.preventDefault(); addUser.mutate({ userName: newUserEmail, displayName: newUserName, password: newUserPassword, role: newUserRole, reason: newUserReason }) }}><label>用户名<input value={newUserEmail} onChange={(event) => setNewUserEmail(event.target.value)} required /></label><label>显示名<input value={newUserName} onChange={(event) => setNewUserName(event.target.value)} required /></label><label>初始密码<input type="password" minLength={6} value={newUserPassword} onChange={(event) => setNewUserPassword(event.target.value)} required /></label><label>角色<select value={newUserRole} onChange={(event) => setNewUserRole(event.target.value)}><option>Viewer</option><option>Engineer</option><option>SeniorEngineer</option><option>Admin</option></select></label><label className="wide-field">创建原因<input value={newUserReason} onChange={(event) => setNewUserReason(event.target.value)} required /></label><button type="submit" disabled={addUser.isPending}>{addUser.isPending ? '正在创建' : '创建用户'}</button></form><form className="catalog-form" onSubmit={(event) => { event.preventDefault(); updateUserRole.mutate() }}><label>用户<select value={roleUserId} onChange={(event) => setRoleUserId(event.target.value)} required><option value="">请选择用户</option>{users.data?.map(user => <option key={user.id} value={user.id}>{user.displayName} · {user.userName ?? user.email ?? ''}</option>)}</select></label><label>新角色<select value={roleValue} onChange={(event) => setRoleValue(event.target.value)}><option>Viewer</option><option>Engineer</option><option>SeniorEngineer</option><option>Admin</option></select></label><label>变更原因<input value={roleReason} onChange={(event) => setRoleReason(event.target.value)} required /></label><button type="submit" disabled={updateUserRole.isPending}>{updateUserRole.isPending ? '正在变更' : '变更角色'}</button></form>{(addUser.isError || updateUserRole.isError) && <p className="error-strip">{addUser.error?.message ?? updateUserRole.error?.message}</p>}<div className="catalog-list">{users.data?.map(user => <article className="component-row" key={user.id}><div><strong>{user.displayName}</strong><span>{user.userName ?? user.email ?? ''}</span></div><small>{user.roles.join('、') || '未分配角色'}</small></article>)}</div></> : <p className="empty-state">仅管理员可查看用户与角色。</p>}{users.isError && <p className="error-strip">{users.error.message}</p>}</section>}
+            {activePage === 'users' && <section className="status-panel catalog-panel users-workspace">
+              <div className="panel-heading"><div><span className="section-index">身份管理</span><h3>用户与角色 <span className="workspace-count">{users.data?.length ?? 0} 人</span></h3></div>{isAdmin && <div className="toolbar-actions"><button type="button" className="primary-action" onClick={() => { addUser.reset(); updateUserRole.reset(); setUserDialog('create') }}><PlusOutlined aria-hidden />新增用户</button><button type="button" onClick={() => { addUser.reset(); updateUserRole.reset(); setUserDialog('role') }}><TeamOutlined aria-hidden />调整角色</button></div>}</div>
+              {isAdmin ? <><div className="user-directory-toolbar"><label><SearchOutlined aria-hidden /><input aria-label="筛选用户" placeholder="搜索姓名、用户名或角色" value={userFilter} onChange={event => setUserFilter(event.target.value)} /></label></div>
+                <div className="catalog-list user-directory">{users.data?.filter(user => [user.displayName, user.userName ?? user.email ?? '', ...user.roles.map(role => roleText[role] ?? role)].join(' ').toLocaleLowerCase().includes(userFilter.trim().toLocaleLowerCase())).map(user => <article className="component-row" key={user.id}><div><strong>{user.displayName}</strong><span>{user.userName ?? user.email ?? ''}</span></div><small>{user.roles.map(role => roleText[role] ?? role).join('、') || '未分配角色'}</small></article>)}</div>
+                {users.data && !users.data.some(user => [user.displayName, user.userName ?? user.email ?? '', ...user.roles.map(role => roleText[role] ?? role)].join(' ').toLocaleLowerCase().includes(userFilter.trim().toLocaleLowerCase())) && <p className="empty-state">没有匹配的用户。</p>}
+                <Modal open={userDialog !== null} centered title={userDialog === 'create' ? '新增用户' : '调整角色'} onCancel={() => { if (!addUser.isPending && !updateUserRole.isPending) setUserDialog(null) }} footer={null} width={620} className="user-dialog">
+                  {userDialog === 'create' ? <form className="catalog-form" onSubmit={(event) => { event.preventDefault(); addUser.mutate({ userName: newUserEmail, displayName: newUserName, password: newUserPassword, role: newUserRole, reason: newUserReason }) }}><label>用户名<input value={newUserEmail} onChange={(event) => setNewUserEmail(event.target.value)} required /></label><label>显示名<input value={newUserName} onChange={(event) => setNewUserName(event.target.value)} required /></label><label>初始密码<input type="password" minLength={6} value={newUserPassword} onChange={(event) => setNewUserPassword(event.target.value)} required /></label><label>角色<select value={newUserRole} onChange={(event) => setNewUserRole(event.target.value)}>{['Viewer', 'Engineer', 'SeniorEngineer', 'Admin'].map(role => <option key={role} value={role}>{roleText[role]}</option>)}</select></label><label className="wide-field">创建原因<input value={newUserReason} onChange={(event) => setNewUserReason(event.target.value)} required /></label><button type="submit" disabled={addUser.isPending}>{addUser.isPending ? '正在创建' : '创建用户'}</button></form> : userDialog === 'role' ? <form className="catalog-form" onSubmit={(event) => { event.preventDefault(); updateUserRole.mutate() }}><label>用户<select aria-label="用户" value={roleUserId} onChange={(event) => setRoleUserId(event.target.value)} required><option value="">请选择用户</option>{users.data?.map(user => <option key={user.id} value={user.id}>{user.displayName} · {user.userName ?? user.email ?? ''}</option>)}</select></label><label>新角色<select aria-label="新角色" value={roleValue} onChange={(event) => setRoleValue(event.target.value)}>{['Viewer', 'Engineer', 'SeniorEngineer', 'Admin'].map(role => <option key={role} value={role}>{roleText[role]}</option>)}</select></label><label>变更原因<input value={roleReason} onChange={(event) => setRoleReason(event.target.value)} required /></label><button type="submit" disabled={updateUserRole.isPending}>{updateUserRole.isPending ? '正在变更' : '变更角色'}</button></form> : null}
+                  {(addUser.isError || updateUserRole.isError) && <p className="error-strip">{addUser.error?.message ?? updateUserRole.error?.message}</p>}
+                </Modal>
+              </> : <p className="empty-state">仅管理员可查看用户与角色。</p>}
+              {users.isError && <p className="error-strip">{users.error.message}</p>}
+            </section>}
 
             {activePage === 'machines' && <MachineWorkspace key={selectedProjectId ?? ''} projectId={selectedProjectId ?? ''} canWrite={canWrite} isAdmin={isAdmin} selectedMachineId={selectedMachineId} onSelectMachine={setSelectedMachineId} onOpenVersion={(projectId, versionId, patches = false) => { setSelectedProjectId(projectId); localStorage.setItem('confighub.selected-project-id', projectId); setFocusedComponentId(''); setFocusedBaselineId(''); setFocusedVersionId(versionId); setFocusPatch(patches); setActivePage('projects'); setSuccessMessage('') }} onSuccess={setSuccessMessage} />}
           </div>
