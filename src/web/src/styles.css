@@ -1568,3 +1568,28 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 .version-delete-button:hover, .version-delete-button:focus-visible { color: #a34335; background: #f9ece8; }
 .version-delete-form label { display: grid; gap: 6px; margin: 18px 0 8px; font-size: 13px; }
 .version-delete-form input { width: 100%; box-sizing: border-box; border: 1px solid #bdcec7; border-radius: 4px; padding: 8px 10px; font: inherit; background: #fff; color: #294a47; }
+
+.machine-version-comparison { min-width: 0; margin-top: 12px; }
+.comparison-summary { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin: 12px 0; font-size: 13px; }
+.comparison-summary > div { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+.comparison-summary > label { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.comparison-summary input { width: 15px; height: 15px; margin: 0; accent-color: #39756c; }
+.comparison-summary .compare-critical { color: #a23e36; font-weight: 600; }
+.machine-version-table, .history-configuration-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 13px; }
+.machine-version-table th, .machine-version-table td, .history-configuration-table th, .history-configuration-table td { padding: 12px 10px; text-align: left; vertical-align: top; border-bottom: 1px solid #e0e8e3; overflow-wrap: anywhere; }
+.machine-version-table thead, .history-configuration-table thead { background: #f1f5f3; color: #61796e; }
+.machine-version-table th:last-child { width: 16%; }
+.machine-version-table tr.changed { background: #fffaf2; }
+.comparison-version-number { display: block; color: #356078; line-height: 1.6; }
+.machine-version-table .patch-badge, .history-configuration-table .patch-badge { margin: 5px 0 0; max-width: 100%; white-space: normal; }
+.historical-configuration { min-width: 0; padding: 20px 0; border-top: 1px solid #d6e1dc; }
+.historical-configuration .subsection-heading { align-items: center; flex-wrap: wrap; gap: 12px; }
+.history-time-filter { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 13px; }
+.history-time-filter input { width: 220px; max-width: 100%; min-width: 0; padding: 7px 8px; border: 1px solid #bdcec7; border-radius: 4px; background: #fff; color: #294a47; font: inherit; box-sizing: border-box; }
+.historical-fact-times span { display: block; color: #657d78; font-size: 12px; line-height: 1.7; }
+.history-comparison { margin-top: 24px; }
+.history-comparison h4 { font-size: 15px; margin: 0 0 12px; }
+@media (max-width: 760px) {
+  .machine-version-table th, .machine-version-table td, .history-configuration-table th, .history-configuration-table td { padding: 9px 5px; font-size: 12px; }
+  .history-time-filter { width: 100%; }
+}
