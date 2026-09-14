@@ -5,6 +5,9 @@ import { ConfigProvider } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import App from './App'
 import './styles.css'
+import './future-theme.css'
+import './project-future.css'
+import './machine-future.css'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -21,17 +24,20 @@ createRoot(document.getElementById('root')!).render(
       locale={zhCN}
       theme={{
         token: {
-          colorPrimary: '#bd563f',
-          colorInfo: '#3b93a5',
-          colorSuccess: '#58a47b',
-          colorWarning: '#d39a3b',
-          colorError: '#d9514e',
-          colorText: '#213231',
-          colorTextSecondary: '#526a66',
+          colorPrimary: '#285de5',
+          colorInfo: '#087f91',
+          colorSuccess: '#147967',
+          colorWarning: '#ac660d',
+          colorError: '#c6424d',
+          colorText: '#17212e',
+          colorTextSecondary: '#637083',
+          colorBorder: '#dce2ea',
           colorBgBase: '#ffffff',
           colorBgContainer: '#ffffff',
-          borderRadius: 4,
-          fontFamily: 'Aptos, Microsoft YaHei UI, Microsoft YaHei, sans-serif',
+          borderRadius: 6,
+          controlHeight: 38,
+          fontSize: 14,
+          fontFamily: 'Segoe UI, Microsoft YaHei UI, Microsoft YaHei, sans-serif',
         },
       }}
     >

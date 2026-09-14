@@ -1,0 +1,126 @@
+.machine-workspace { grid-column: 1 / -1; grid-template-columns: 275px minmax(0, 1fr); gap: 20px; }
+.machine-workspace > section { padding: 22px; border: 0; border-radius: 0; background: var(--ui-surface); }
+.machine-workspace .machine-registry-panel { padding: 0 0 18px; border-bottom: 1px solid var(--ui-line); background: transparent; }
+.machine-heading { align-items: center; margin: 0; gap: 16px; }
+.machine-heading > strong { color: var(--ui-ink); font-size: 18px; }
+.workspace-count { color: var(--ui-muted); font-size: 13px; }
+.machine-workspace .machine-list-panel { padding: 20px 16px; scrollbar-width: thin; scrollbar-color: #c8d1df transparent; }
+.machine-list-controls { padding-top: 0; border-color: var(--ui-line); color: var(--ui-muted); font-size: 12px; background: var(--ui-surface); }
+.machine-list-controls strong { color: var(--ui-ink); font-size: 14px; font-weight: 600; }
+.machine-location-group h4 { display: flex; align-items: center; gap: 7px; margin: 22px 0 12px; padding-bottom: 10px; color: var(--ui-muted); border-color: var(--ui-line); font-size: 13px; font-weight: 500; }
+.machine-location-group h4 .anticon { color: var(--ui-primary); }
+.machine-workspace .machine-list { gap: 12px; }
+.machine-unselected .machine-list { grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr)); gap: 16px; }
+.machine-workspace .machine-list-item {
+  gap: 5px; min-width: 0; padding: 16px; border: 1px solid var(--ui-line);
+  border-radius: 6px; color: var(--ui-ink); background: var(--ui-surface);
+}
+.machine-workspace .machine-list-item:hover { padding: 16px; border-color: #a7bdf2; background: #f8faff; }
+.machine-workspace .machine-list-item.selected { padding: 16px; border-color: #a7bdf2; background: var(--ui-primary-soft); box-shadow: inset 3px 0 var(--ui-primary); }
+.machine-list-item > strong { align-items: start; gap: 8px; font-family: inherit; font-size: 16px; line-height: 1.5; }
+.machine-list-item em { flex-shrink: 0; padding: 2px 6px; border-radius: 4px; color: var(--ui-cyan); background: #e7f2f5; font-size: 11px; }
+.machine-list-item span, .machine-list-item small { white-space: normal; overflow-wrap: anywhere; color: var(--ui-muted); font-size: 12px; line-height: 1.7; }
+.machine-list-item .machine-list-identity { color: var(--ui-ink); font-variant-numeric: tabular-nums; }
+.machine-list-item .machine-list-metadata { display: grid; gap: 5px; margin-top: 10px; padding-top: 11px; border-top: 1px solid var(--ui-line); }
+.machine-list-metadata > span { display: flex; align-items: flex-start; gap: 8px; }
+.machine-list-metadata .anticon { padding-top: 4px; flex: 0 0 14px; color: #8797af; }
+.machine-list-metadata b { color: var(--ui-ink); font-weight: 500; }
+.machine-workspace .machine-detail-panel { min-height: 480px; padding: 24px; }
+.machine-detail-header { align-items: start; border-color: var(--ui-line); gap: 16px; }
+.machine-detail-header h3 { font-size: 22px; overflow-wrap: anywhere; }
+.machine-detail-header p { color: var(--ui-muted); font-size: 13px; overflow-wrap: anywhere; }
+.machine-statuses { gap: 6px; }
+.machine-statuses span { white-space: normal; overflow-wrap: anywhere; color: var(--ui-muted); background: var(--ui-surface-muted); font-size: 12px; }
+.machine-statuses [data-risk="Critical"] { color: var(--ui-danger); background: #fcecef; font-weight: 600; }
+.machine-statuses [data-risk="High"], .machine-statuses [data-match="Mismatch"] { color: var(--ui-lab); background: var(--ui-lab-soft); }
+.machine-statuses [data-match="Matched"] { color: var(--ui-success); background: #e6f4ef; }
+.machine-detail-sections > details > summary { color: var(--ui-muted); font-family: inherit; font-size: 14px; }
+.machine-detail-sections > details[open] > summary { color: var(--ui-primary); }
+.workspace-tabs { gap: 4px; border-color: var(--ui-line); }
+.workspace-tabs button { padding: 10px 12px; color: var(--ui-muted); font-size: 14px; }
+.workspace-tabs button[aria-pressed=true] { border-bottom-color: var(--ui-primary); color: var(--ui-primary); }
+.workspace-tabs button:hover { background: var(--ui-primary-soft); }
+.machine-workspace .subsection-heading h3 { font-size: 17px; color: var(--ui-ink); }
+.machine-section { padding: 22px 0 4px; }
+.machine-workspace :is(.subsection-heading > button, .equipment-actions button, .chamber-summary button) { border-color: var(--ui-line); color: var(--ui-ink); background: var(--ui-surface); border-radius: 6px; }
+.machine-workspace :is(.subsection-heading > button, .equipment-actions button, .chamber-summary button):hover { border-color: #a7bdf2; color: var(--ui-primary); background: var(--ui-primary-soft); }
+.machine-workspace .actual-configuration-tree { gap: 14px; }
+.machine-workspace .actual-node { min-height: 62px; padding: 10px 12px; border: 1px solid var(--ui-line); border-radius: 6px; background: var(--ui-surface); }
+.machine-workspace .actual-node.actual-root { border-left: 3px solid var(--ui-primary); background: var(--ui-surface-muted); }
+.machine-workspace .actual-node strong { font-size: 14px; color: var(--ui-ink); }
+.machine-workspace .actual-node span { font-size: 12px; color: var(--ui-cyan); }
+.machine-workspace .actual-node.absent span { color: var(--ui-danger); }
+.machine-workspace .actual-node:hover:not(:disabled) { border-color: #a7bdf2; background: var(--ui-primary-soft); }
+.machine-workspace .actual-node-row { flex-wrap: wrap; }
+.machine-workspace .actual-node-row .actual-node { flex-basis: 100%; }
+.machine-workspace .actual-child-branch .actual-children { border-color: var(--ui-line); }
+.machine-workspace .machine-drift-preview { border-color: var(--ui-line); border-top-style: solid; }
+.machine-workspace .machine-drift-preview > summary { color: var(--ui-primary); }
+.equipment-heading span, .equipment-history small { color: var(--ui-muted); }
+.chamber-summary > article { padding: 16px; border: 1px solid var(--ui-line); border-top: 2px solid #8eaccf; border-radius: 6px; background: var(--ui-surface); }
+.chamber-summary header span { color: var(--ui-cyan); }
+.chamber-summary p, .chamber-overrides small { color: var(--ui-muted); line-height: 1.7; }
+.chamber-overrides > div { gap: 8px; border-color: var(--ui-line); }
+.chamber-options { gap: 12px; }
+.chamber-options > div { padding: 10px; border: 1px solid var(--ui-line); border-radius: 6px; background: var(--ui-surface-muted); }
+.chamber-options input[type=checkbox] { accent-color: var(--ui-primary); }
+.equipment-history article, .equipment-override-list > div { border-color: var(--ui-line); }
+.machine-tools { border-color: var(--ui-line); }
+.machine-tool-tabs { border-color: var(--ui-line); }
+.machine-workspace .machine-tool-tabs button[aria-pressed=true] { color: var(--ui-primary); background: var(--ui-primary-soft); }
+.historical-configuration { border-color: var(--ui-line); }
+.historical-fact-times span { color: var(--ui-muted); }
+
+.configuration-compare { padding: 26px; border: 0; border-radius: 0; background: var(--ui-surface); }
+.compare-selectors { gap: 24px; padding-bottom: 26px; }
+.compare-side-heading { color: var(--ui-ink); }
+.compare-kind { padding: 4px; gap: 3px; border-radius: 6px; background: var(--ui-surface-muted); }
+.compare-kind button { min-height: 30px; padding: 5px 15px; color: var(--ui-muted); font-size: 13px; border-radius: 4px; }
+.compare-kind button[aria-pressed=true] { color: var(--ui-primary); background: var(--ui-surface); box-shadow: 0 1px 3px #17212e14; }
+.compare-swap { color: var(--ui-primary); border: 1px solid var(--ui-line); border-radius: 6px; }
+.compare-swap:hover { background: var(--ui-primary-soft); }
+.compare-results-heading, .compare-scope-tabs { border-color: var(--ui-line); }
+.compare-results-heading strong { font-size: 17px; }
+.compare-results-heading span, .compare-results-heading label { color: var(--ui-muted); }
+.compare-summary, .chamber-comparison-summary { color: var(--ui-muted); }
+.compare-scope-tabs button { color: var(--ui-muted); }
+.compare-scope-tabs button[aria-selected=true] { border-bottom-color: var(--ui-primary); color: var(--ui-primary); }
+.compare-scope-tabs button:hover { background: var(--ui-primary-soft); }
+.compare-attention { color: var(--ui-lab); }
+.configuration-compare .compare-critical, .comparison-summary .compare-critical { color: var(--ui-danger); }
+:is(.comparison-table, .chamber-comparison-table, .machine-version-table, .history-configuration-table) { color: var(--ui-ink); font-size: 13px; }
+:is(.comparison-table, .chamber-comparison-table, .machine-version-table, .history-configuration-table) :is(td, th) { padding: 14px 12px; border-color: var(--ui-line); line-height: 1.7; }
+:is(.comparison-table, .chamber-comparison-table, .machine-version-table, .history-configuration-table) thead { color: var(--ui-muted); background: var(--ui-surface-muted); }
+:is(.comparison-table, .chamber-comparison-table) thead small { color: var(--ui-muted); font-size: 12px; }
+:is(.comparison-table, .chamber-comparison-table, .machine-version-table) tr.changed { background: #f1f6ff; }
+:is(.comparison-table, .chamber-comparison-table, .machine-version-table) tr.changed th { box-shadow: inset 3px 0 var(--ui-primary); }
+:is(.comparison-table, .chamber-comparison-table) tr.changed td:last-child { color: var(--ui-primary); }
+.chamber-comparison-table tr.unconfirmed { color: var(--ui-muted); background: #f7f8fa; }
+.compare-source { color: var(--ui-muted); }
+.compare-source.is-override, .comparison-version-number { color: var(--ui-cyan); }
+.machine-dialog .ant-modal-body, .equipment-dialog .ant-modal-body { scrollbar-width: thin; scrollbar-color: #c8d1df transparent; }
+
+@media (max-width: 1200px) {
+  .machine-workspace { grid-template-columns: 235px minmax(0, 1fr); gap: 16px; }
+  .machine-workspace .machine-detail-panel { padding: 20px 16px; }
+  .machine-detail-header { flex-wrap: wrap; }
+  .machine-workspace .machine-list-panel { padding: 18px 12px; }
+}
+@media (max-width: 960px) {
+  .machine-workspace, .machine-workspace.machine-unselected { grid-template-columns: minmax(0, 1fr); }
+  .machine-workspace > section { grid-column: 1; }
+  .machine-workspace.has-selection .machine-list-panel { position: static; max-height: 280px; }
+  .machine-workspace .machine-list { grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); }
+}
+@media (max-width: 600px) {
+  .machine-workspace > section, .configuration-compare { padding: 20px 14px; }
+  .machine-workspace .machine-list-panel, .machine-workspace .machine-detail-panel { padding: 18px 14px; }
+  .machine-workspace .machine-registry-panel { padding: 0 0 16px; }
+  .machine-workspace .catalog-form, .machine-dialog .catalog-form { grid-template-columns: minmax(0, 1fr); }
+  .machine-workspace .catalog-form .wide-field, .machine-dialog .catalog-form .wide-field { grid-column: 1 / -1; }
+  .machine-detail-header { flex-direction: column; }
+  .compare-selectors { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .compare-swap { justify-self: center; }
+  :is(.comparison-table, .chamber-comparison-table, .machine-version-table, .history-configuration-table) :is(td, th) { padding: 10px 6px; font-size: 12px; }
+  .workspace-tabs button { padding: 9px 8px; }
+}
