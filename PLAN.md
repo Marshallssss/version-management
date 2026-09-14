@@ -2,6 +2,14 @@
 
 ## Final Architecture and Product Plan
 
+### 2026-09-14 新版 UI 合入主干与版本废弃
+
+- 用户明确确认将新版 UI 合入主干；已将 `codex/futuristic-ui` 合入 `main`，合并提交 `55c8934` 已推送 GitHub，后续在主干演进。保留原 UI 分支，不改无关本地文件。
+- 修正成熟度转换规则：草稿、测试中、已发布、维护中均可直接转为已废弃，不再要求问题版本先发布。界面沿用现有“废弃”入口；高级项目权限、原因、审计、事务与幂等保护不变。
+- 废弃撤销该版本的有效推荐，实验室树按测试状态自动撤下；Safety 独立，不能用废弃冒充阻断，冻结基线与机台事实不重写。已废弃不新增重复状态记录，也不因此开放恢复转换。
+- README、生命周期 ADR 和 UI 验收记录同步主干状态；新增 `version-deprecation-acceptance.cjs` 已通过四种成熟度与两种 Safety 的八组废弃、推荐撤销、原因/幂等/关联审计、匿名/Viewer/项目高级工程师授权、冻结基线/标准/目标/事实/实际配置不变。真实页面废弃、实验室撤下及保留开始/废弃历史通过，截图已检查，测试项目已归档。
+- 主干重新验收通过：Release 0 warning / 0 error、前端构建无大包警告、真实 Migration 已最新、EF 无模型差异；catalog、background-job、Windows operations preflight（13 脚本）、web compatibility、新版 UI（9 页/35 截图）、catalog-simplification、project-entry、record-maintenance 均通过。Host/Worker 已重启，live/ready 均 200 Healthy。本片无模型或 Migration 变更，PostgreSQL 17 / Windows Production Integration Pending 边界不变。
+
 ### 2026-09-13 独立分支 UI 升级
 
 - 用户授权创建 `codex/futuristic-ui`，已从当前主分支建立并推送；仅在此分支升级 UI，不合并主分支，不修改模型、Migration 或业务权限。

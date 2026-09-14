@@ -1995,8 +1995,8 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
     private static bool IsAllowedMaturityTransition(VersionMaturity current, VersionMaturity next) =>
         (current, next) switch
         {
-            (VersionMaturity.Draft, VersionMaturity.Testing) => true,
-            (VersionMaturity.Testing, VersionMaturity.Draft or VersionMaturity.Released) => true,
+            (VersionMaturity.Draft, VersionMaturity.Testing or VersionMaturity.Deprecated) => true,
+            (VersionMaturity.Testing, VersionMaturity.Draft or VersionMaturity.Released or VersionMaturity.Deprecated) => true,
             (VersionMaturity.Released, VersionMaturity.Testing or VersionMaturity.Maintenance or VersionMaturity.Deprecated) => true,
             (VersionMaturity.Maintenance, VersionMaturity.Deprecated) => true,
             _ => false
