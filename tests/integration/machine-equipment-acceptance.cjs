@@ -126,7 +126,7 @@ async function main() {
     await page.getByRole('dialog').getByLabel('记录范围').selectOption('5')
     assert((await page.locator('.equipment-history').innerText()).includes('STR'))
     await page.screenshot({ path: 'artifacts/machine-equipment/history.png' }); await page.locator('.ant-modal-close').click()
-    await page.locator('.nav-item').filter({ hasText: '项目' }).click(); await page.locator('.nav-item').filter({ hasText: '机台' }).click()
+    await page.locator('.nav-item').filter({ hasText: '版本' }).click(); await page.locator('.nav-item').filter({ hasText: '机台' }).click()
     assert.equal(await page.locator('.machine-detail-panel:visible').count(), 0)
     await page.getByRole('button', { name: /一号工艺机/ }).click()
     await page.getByRole('navigation', { name: '机台详情' }).getByRole('button', { name: '阶段与腔室' }).click()

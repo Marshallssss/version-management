@@ -7,7 +7,6 @@ import { PatchBadge, PatchActions, VersionMaintenance } from './VersionRecordToo
 import type { OperationImpactReference } from './catalog-api'
 import { DeleteVersionButton } from './DeleteVersionButton'
 import { LaboratoryHistory } from './LaboratoryHistory'
-import { ProjectBaselineHistory } from './ProjectBaselineHistory'
 import { VersionChamberImpact } from './VersionChamberImpact'
 
 type FormMode = 'idle' | 'create-root' | 'create-child' | 'edit' | 'delete'
@@ -30,13 +29,12 @@ function formatTime(value: string) {
   return new Date(value).toLocaleString('zh-CN', { hour12: false })
 }
 
-export function ProjectWorkspace({ canWrite = true, detail, focusedVersionId, focusedBaselineId, focusedComponentId, focusPatch, isAdmin, isSuperAdmin, onOpenMachine, onSuccess }: { canWrite?: boolean; detail: ProjectDetail; focusedVersionId?: string; focusedBaselineId?: string; focusedComponentId?: string; focusPatch?: boolean; onOpenMachine?: (machineId: string) => void; isAdmin: boolean; isSuperAdmin: boolean; onSuccess: (message: string) => void }) {
+export function ProjectWorkspace({ canWrite = true, detail, focusedVersionId, focusedComponentId, focusPatch, isAdmin, isSuperAdmin, onOpenMachine, onOpenBaseline, onCreateBaseline, onSuccess }: { canWrite?: boolean; detail: ProjectDetail; focusedVersionId?: string; focusedComponentId?: string; focusPatch?: boolean; onOpenMachine?: (machineId: string) => void; onOpenBaseline: (baselineId: string) => void; onCreateBaseline: () => void; isAdmin: boolean; isSuperAdmin: boolean; onSuccess: (message: string) => void }) {
   const queryClient = useQueryClient()
-  const [requestedBaseline, setRequestedBaseline] = useState<{ id: string } | null>(null)
   const openReference = (reference: OperationImpactReference) => {
     if (reference.deleted) return
     if (reference.machineId) onOpenMachine?.(reference.machineId)
-    else if (reference.baselineId) { setRequestedBaseline({ id: reference.baselineId }); setInspectorCollapsed(true) }
+    else if (reference.baselineId) onOpenBaseline(reference.baselineId)
   }
   const [selectedId, setSelectedId] = useState<string | null>(detail.components[0]?.id ?? null)
   const [draggingId, setDraggingId] = useState<string | null>(null)
@@ -67,7 +65,6 @@ export function ProjectWorkspace({ canWrite = true, detail, focusedVersionId, fo
   const [laboratoryHistoryOpen, setLaboratoryHistoryOpen] = useState(false)
   const [patchGuide, setPatchGuide] = useState(0)
   useEffect(() => { if (!patchGuide) return; const scroll = window.setTimeout(() => { const inspector = document.getElementById('component-inspector'); inspector?.scrollTo({ top: 0, behavior: 'smooth' }); inspector?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }) }, 50); const timer = window.setTimeout(() => setPatchGuide(0), 4500); return () => { window.clearTimeout(scroll); window.clearTimeout(timer) } }, [patchGuide])
-  const [composerRequest, setComposerRequest] = useState(0)
   const selected = detail.components.find(component => component.id === selectedId) ?? null
   const selectedVersion = selected?.versions.find(version => version.id === selectedVersionId) ?? null
   const projectStandard = useQuery({ queryKey: ['workspace-project-standard', detail.project.id], queryFn: () => getProjectStandard(detail.project.id) })
@@ -122,7 +119,6 @@ export function ProjectWorkspace({ canWrite = true, detail, focusedVersionId, fo
     setInspectorTab('versions')
     setInspectorCollapsed(true)
     setSorting(false)
-    setComposerRequest(0)
     setLaboratoryHistoryOpen(false)
     setPatchGuide(0)
     const savedWidth = Number(window.localStorage.getItem(`confighub.root-column-width:${detail.project.id}`))
@@ -271,7 +267,7 @@ export function ProjectWorkspace({ canWrite = true, detail, focusedVersionId, fo
         <section className="laboratory-tree">
           <div className="tree-toolbar tree-toolbar-line"><div><strong><ExperimentOutlined className="section-symbol" aria-hidden />实验室测试版本</strong><small>测试中的版本与组件层级</small></div><div className="toolbar-actions">
             <button type="button" onClick={() => setLaboratoryHistoryOpen(true)}><HistoryOutlined aria-hidden /> 测试历史</button>
-            <button hidden={!canWrite} type="button" className="baseline-create-action" onClick={() => setComposerRequest(value => value + 1)} disabled={!detail.components.some(component => testingVersions.get(component.id)?.length)}>从测试版本创建基线</button>
+            <button hidden={!canWrite} type="button" className="baseline-create-action" onClick={onCreateBaseline} disabled={!detail.components.some(component => testingVersions.get(component.id)?.length)}>从测试版本创建基线</button>
           </div></div>
           <div className="lab-root-grid">{children.get(null)?.map(root => <section className="lab-root-column" key={root.id}>{renderTestingNode(root, 0)}</section>)}</div>
         </section>
@@ -303,6 +299,5 @@ export function ProjectWorkspace({ canWrite = true, detail, focusedVersionId, fo
       </section>
     </div>
     <LaboratoryHistory open={laboratoryHistoryOpen} onClose={() => setLaboratoryHistoryOpen(false)} detail={detail} />
-    <ProjectBaselineHistory requestedBaseline={requestedBaseline} onOpenReference={openReference} canWrite={canWrite} composerRequest={composerRequest} detail={detail} isAdmin={isAdmin} isSuperAdmin={isSuperAdmin} focusedBaselineId={focusedBaselineId} onOpenPatches={openPatches} onSuccess={onSuccess} />
   </section>
 }

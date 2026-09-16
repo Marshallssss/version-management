@@ -23,7 +23,7 @@ async function main() {
     await page.goto('/')
     await page.evaluate(id => localStorage.setItem('confighub.selected-project-id', id), project.id)
     await page.reload()
-    await page.locator('.nav-item').filter({ hasText: '项目' }).click()
+    await page.locator('.nav-item').filter({ hasText: '版本' }).click()
     await page.locator('.root-node').first().click()
     const inspector = page.locator('.component-inspector')
     assert.equal(await inspector.locator('form:visible').count(), 0)

@@ -32,6 +32,8 @@ public static partial class CatalogEndpoints
         endpoints.MapPost("/api/v1/components/{componentId:guid}/reorder", ReorderComponentAsync).RequireAuthorization("Engineer");
         projects.MapPost("/{projectId:guid}/clone", CloneAsync).RequireAuthorization("Engineer");
         projects.MapGet("/{projectId:guid}/baselines", ListBaselinesAsync);
+        projects.MapGet("/{projectId:guid}/baseline-history-index", GetBaselineHistoryIndexAsync);
+        projects.MapGet("/{projectId:guid}/machine-registry", ListMachineRegistryAsync);
         projects.MapGet("/{projectId:guid}/members", ListProjectMembersAsync).RequireAuthorization();
         projects.MapPost("/{projectId:guid}/members", AssignProjectMemberAsync).RequireAuthorization("Admin");
         projects.MapPost("/{projectId:guid}/baselines", CreateBaselineAsync).RequireAuthorization("SeniorEngineer");
@@ -1087,7 +1089,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
         await database.Database.ExecuteSqlRawAsync("SET LOCAL confighub.baseline_maintenance = 'on';", cancellationToken);
         database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) });
-        if (request.CreatedAt is not null) baseline.CreatedAt = request.CreatedAt.Value;
+        if (request.CreatedAt is not null) baseline.CreatedAt = request.CreatedAt.Value.ToUniversalTime();
         foreach (var selection in selections)
         {
             var item = items.Single(item => item.ConfigurationComponentId == selection.ComponentId);

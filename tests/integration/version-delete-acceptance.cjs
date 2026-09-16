@@ -43,7 +43,7 @@ async function main() {
         await otherPage.goto('/')
         await otherPage.evaluate(id => localStorage.setItem('confighub.selected-project-id', id), project.id)
         await otherPage.reload()
-        await otherPage.locator('.nav-item').filter({ hasText: '项目' }).click()
+        await otherPage.locator('.nav-item').filter({ hasText: '版本' }).click()
         await otherPage.locator('.root-node').first().click()
         assert.equal(await otherPage.locator('.version-delete-button').count(), 0)
       }
@@ -64,7 +64,7 @@ async function main() {
     await page.goto('/')
     await page.evaluate(id => localStorage.setItem('confighub.selected-project-id', id), project.id)
     await page.reload()
-    await page.locator('.nav-item').filter({ hasText: '项目' }).click()
+    await page.locator('.nav-item').filter({ hasText: '版本' }).click()
     await page.locator('.root-node').first().click()
     await page.getByRole('button', { name: '删除版本 V3-ui-delete', exact: true }).click()
     let dialog = page.getByRole('dialog')

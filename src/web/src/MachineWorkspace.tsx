@@ -1,5 +1,5 @@
 import { Modal } from 'antd'
-import { PlusOutlined, EditOutlined, ArrowLeftOutlined, HistoryOutlined, SettingOutlined, SwapOutlined, UnorderedListOutlined, EnvironmentOutlined, UserOutlined, DatabaseOutlined, AppstoreOutlined, CloudUploadOutlined, AimOutlined } from '@ant-design/icons'
+import { PlusOutlined, EditOutlined, ArrowLeftOutlined, HistoryOutlined, SettingOutlined, SwapOutlined, UnorderedListOutlined, EnvironmentOutlined, CloudUploadOutlined, AimOutlined, SearchOutlined, ClearOutlined } from '@ant-design/icons'
 import { MachineVersionComparison } from './MachineVersionComparison'
 import { ConfigurationTree } from './ConfigurationTree'
 import { ChamberFields, MachineEquipmentPanel, stages } from './MachineEquipmentPanel'
@@ -11,7 +11,8 @@ import { BulkBaselineUpgradePanel } from './BulkBaselineUpgradePanel'
 import { FullConfigurationPanel } from './FullConfigurationPanel'
 import { HistoricalConfigurationPanel } from './HistoricalConfigurationPanel'
 import { RollbackFactPanel } from './RollbackFactPanel'
-import { assignMachineTarget, compareMachineToBaseline, createMachine, getBaselines, getMachineConfiguration, getMachineDrift, getMachineEquipment, getMachineFacts, getMachineTarget, getMachineTargetHistory, getMachines, getProject, getProjectStandard, recordMachineFacts, updateMachine } from './catalog-api'
+import { getMachineRegistry, type MachineAttention } from './machine-registry-api'
+import { assignMachineTarget, compareMachineToBaseline, createMachine, getBaselines, getMachineConfiguration, getMachineDrift, getMachineEquipment, getMachineFacts, getMachineTarget, getMachineTargetHistory, getProject, getProjectStandard, recordMachineFacts, updateMachine } from './catalog-api'
 
 const sourceText: Record<string, string> = { 'manual-ui': '人工录入', Manual: '人工录入', 'bulk-ui': '批量录入', 'agent-automation': '机台代理' }
 const machineStatusText: Record<string, string> = { Active: '在用', Archived: '已归档', ShortTermCip: '短期 CIP', LongTermCip: '长期 CIP', NoProduction: '暂未过货' }
@@ -23,7 +24,7 @@ function formatTime(value: string | null | undefined) {
   return value ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value)) : '—'
 }
 
-export function MachineWorkspace({ projectId, canWrite = true, isAdmin = false, selectedMachineId, onSelectMachine, onOpenVersion, onSuccess }: { projectId: string; canWrite?: boolean; isAdmin?: boolean; selectedMachineId: string; onSelectMachine: (machineId: string) => void; onOpenVersion: (projectId: string, versionId: string, patches?: boolean) => void; onSuccess: (message: string) => void }) {
+export function MachineWorkspace({ projectId, canWrite = true, isAdmin = false, selectedMachineId, initialAttention = '', onSelectMachine, onOpenVersion, onSuccess }: { projectId: string; canWrite?: boolean; isAdmin?: boolean; selectedMachineId: string; initialAttention?: MachineAttention; onSelectMachine: (machineId: string) => void; onOpenVersion: (projectId: string, versionId: string, patches?: boolean) => void; onSuccess: (message: string) => void }) {
   const queryClient = useQueryClient()
   const [toolTab, setToolTab] = useState<string | null>(null)
   const [detailTab, setDetailTab] = useState('configuration')
@@ -51,12 +52,33 @@ export function MachineWorkspace({ projectId, canWrite = true, isAdmin = false, 
   const [factReason, setFactReason] = useState('')
   const [targetBaselineId, setTargetBaselineId] = useState('')
   const [targetReason, setTargetReason] = useState('')
+  const [search, setSearch] = useState('')
+  const [locationFilter, setLocationFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [stageFilter, setStageFilter] = useState('')
+  const [baselineFilter, setBaselineFilter] = useState('')
+  const [actualComponentFilter, setActualComponentFilter] = useState('')
+  const [actualVersionFilter, setActualVersionFilter] = useState('')
+  const [attentionFilter, setAttentionFilter] = useState<MachineAttention>(initialAttention)
 
-  const machines = useQuery({ queryKey: ['machines'], queryFn: getMachines, refetchOnMount: 'always' })
+  const registry = useQuery({ queryKey: ['machines', 'registry', projectId], queryFn: () => getMachineRegistry(projectId), enabled: !!projectId, refetchOnMount: 'always' })
+  const machines = { ...registry, data: registry.data?.items }
   const cloneEquipment = useQuery({ queryKey: ['clone-equipment', cloneMachineId], queryFn: () => getMachineEquipment(cloneMachineId), enabled: !!cloneMachineId })
   useEffect(() => { if (cloneEquipment.data) setMachineChambers(cloneEquipment.data.chambers.filter(c => c.installed).map(c => ({ number: c.number, stage: c.stage }))) }, [cloneEquipment.data])
   const selectedMachine = machines.data?.find(machine => machine.id === selectedMachineId && machine.projectId === projectId)
-  const visibleMachines = useMemo(() => machines.data?.filter(machine => machine.projectId === projectId).sort((a, b) => (a.location || '\uffff').localeCompare(b.location || '\uffff', 'zh-CN', { numeric: true }) || a.name.localeCompare(b.name, 'zh-CN', { numeric: true })) ?? [], [machines.data, projectId])
+  const projectMachines = useMemo(() => machines.data?.filter(machine => machine.projectId === projectId).sort((a, b) => (a.location || '\uffff').localeCompare(b.location || '\uffff', 'zh-CN', { numeric: true }) || a.name.localeCompare(b.name, 'zh-CN', { numeric: true })) ?? [], [machines.data, projectId])
+  const visibleMachines = useMemo(() => projectMachines.filter(machine => {
+    const matchesText = !search.trim() || [machine.name, machine.serialNumber, machine.machineType, machine.owner].some(value => value?.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))
+    const matchesLocation = !locationFilter || (locationFilter === '__empty' ? !machine.location : machine.location === locationFilter)
+    const matchesBaseline = !baselineFilter || (baselineFilter === '__none' ? !machine.targetBaselineId : machine.targetBaselineId === baselineFilter)
+    const matchesActual = !actualComponentFilter && !actualVersionFilter || machine.actualVersions.some(version => (!actualComponentFilter || version.componentId === actualComponentFilter) && (!actualVersionFilter || version.versionId === actualVersionFilter))
+    const matchesAttention = !attentionFilter || (attentionFilter === 'mismatch' && machine.matchStatus === 'Mismatch') || (attentionFilter === 'critical' && machine.riskSeverity === 'Critical') || (attentionFilter === 'unknown' && (!machine.matchStatus || machine.matchStatus === 'Unknown')) || (attentionFilter === 'no-target' && !machine.targetBaselineId)
+    return matchesText && matchesLocation && matchesBaseline && matchesActual && matchesAttention && (!statusFilter || machine.status === statusFilter) && (!stageFilter || machine.stage === stageFilter)
+  }), [projectMachines, search, locationFilter, baselineFilter, actualComponentFilter, actualVersionFilter, attentionFilter, statusFilter, stageFilter])
+  const actualComponents = useMemo(() => [...new Map(registry.data?.actualVersions.map(version => [version.componentId, { id: version.componentId, name: version.componentName }]) ?? []).values()], [registry.data])
+  const hasFilters = !!(search || locationFilter || statusFilter || stageFilter || baselineFilter || actualComponentFilter || actualVersionFilter || attentionFilter)
+  const clearFilters = () => { setSearch(''); setLocationFilter(''); setStatusFilter(''); setStageFilter(''); setBaselineFilter(''); setActualComponentFilter(''); setActualVersionFilter(''); setAttentionFilter('') }
+  useEffect(() => { clearFilters(); setAttentionFilter(initialAttention) }, [projectId, initialAttention])
   const machineProject = useQuery({ queryKey: ['project', selectedMachine?.projectId], queryFn: () => getProject(selectedMachine!.projectId), enabled: selectedMachine !== undefined })
   const selectedFactComponent = machineProject.data?.components.find(component => component.id === factComponentId)
   const targetBaselines = useQuery({ queryKey: ['machine-target-baselines', selectedMachine?.projectId], queryFn: () => getBaselines(selectedMachine!.projectId), enabled: selectedMachine !== undefined })
@@ -144,12 +166,33 @@ export function MachineWorkspace({ projectId, canWrite = true, isAdmin = false, 
 
   return <div className={`machine-workspace${selectedMachine ? ' has-selection' : ' machine-unselected'}`}>
     <section className="machine-registry-panel">
-      <div className="panel-heading machine-heading"><strong>机台管理 <span className="workspace-count">{visibleMachines.length} 台</span></strong><div className="toolbar-actions">{canWrite && projectId && <><button type="button" className="primary-action" aria-label="新建机台 / 从已有机台复制资料" onClick={() => setCreateOpen(true)}><PlusOutlined aria-hidden />新建机台</button><button type="button" onClick={() => setToolTab('upgrade')}><CloudUploadOutlined aria-hidden />批量升级</button><button type="button" onClick={() => setToolTab('target')}><AimOutlined aria-hidden />批量目标</button></>}</div></div>
+      <div className="panel-heading machine-heading"><strong>机台管理 <span className="workspace-count">{projectMachines.length} 台</span></strong><div className="toolbar-actions">{canWrite && projectId && <><button type="button" className="primary-action" aria-label="新建机台 / 从已有机台复制资料" onClick={() => setCreateOpen(true)}><PlusOutlined aria-hidden />新建机台</button><button type="button" onClick={() => setToolTab('upgrade')}><CloudUploadOutlined aria-hidden />批量升级</button><button type="button" onClick={() => setToolTab('target')}><AimOutlined aria-hidden />批量目标</button></>}</div></div>
     </section>
     <section className="machine-list-panel">
-      <div className="machine-list-controls"><strong>当前项目机台</strong><span>{visibleMachines.length} 台</span></div>
-      {machines.isLoading && <p role="status">正在读取机台。</p>}{machines.isError && <p className="error-strip">{machines.error.message}</p>}{!machines.isLoading && visibleMachines.length === 0 && <p className="empty-state">暂无机台记录。</p>}
-      <div className="machine-location-groups">{[...new Set(visibleMachines.map(machine => machine.location || '未填写位置'))].map(location => <section className="machine-location-group" key={location}><h4><EnvironmentOutlined aria-hidden />{location}</h4><div className="machine-list">{visibleMachines.filter(machine => (machine.location || '未填写位置') === location).map(machine => <button type="button" className={machine.id === selectedMachineId ? 'machine-list-item selected' : 'machine-list-item'} key={machine.id} onClick={() => { onSelectMachine(machine.id); setFactComponentId(''); setFactVersionId('') }}><strong>{machine.name}<em>{machine.stage || '未登记阶段'}</em></strong><span className="machine-list-identity">{machine.serialNumber}</span><small className="machine-list-state">{machine.machineType || '未填机型'} · {machineStatusText[machine.status] ?? '未知状态'}{machine.expectedResumeAt && ` · 预计恢复 ${formatTime(machine.expectedResumeAt)}`}</small><span className="machine-list-metadata"><span className="machine-list-baseline"><DatabaseOutlined aria-hidden /><span>目标基线 <b>{machine.targetBaselineCode || '未指派'}</b></span></span><span><AppstoreOutlined aria-hidden /><span>{machine.chambers?.length ? machine.chambers.map(n => `PM${n}`).join(' · ') : '未登记腔室'}</span></span><span><UserOutlined aria-hidden /><span>负责人 {machine.owner || '未填写'}</span></span></span></button>)}</div></section>)}</div>
+      <div className="machine-list-controls"><strong>当前项目机台</strong><div className="machine-filter-summary"><span aria-live="polite">{visibleMachines.length} / {projectMachines.length} 台</span><button type="button" className="machine-clear-filters" disabled={!hasFilters} onClick={clearFilters} title="清空机台筛选" aria-label="清空机台筛选"><ClearOutlined aria-hidden /></button></div></div>
+      <div className="machine-registry-filters" role="group" aria-label="机台筛选">
+        <label className="machine-search-field"><span><SearchOutlined aria-hidden />查找机台</span><input type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="名称、序列号、机型、负责人" /></label>
+        <label>站点 / 位置<select aria-label="站点 / 位置" value={locationFilter} onChange={event => setLocationFilter(event.target.value)}><option value="">全部位置</option>{[...new Set(projectMachines.map(machine => machine.location).filter((value): value is string => !!value))].map(location => <option key={location} value={location}>{location}</option>)}{projectMachines.some(machine => !machine.location) && <option value="__empty">未填写位置</option>}</select></label>
+        <label>机台状态<select aria-label="机台状态" value={statusFilter} onChange={event => setStatusFilter(event.target.value)}><option value="">全部状态</option>{Object.entries(machineStatusText).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+        <label>机台阶段<select aria-label="机台阶段" value={stageFilter} onChange={event => setStageFilter(event.target.value)}><option value="">全部阶段</option>{stages.map(stage => <option key={stage} value={stage}>{stage}</option>)}</select></label>
+        <label>目标基线<select aria-label="目标基线" value={baselineFilter} onChange={event => setBaselineFilter(event.target.value)}><option value="">全部目标基线</option><option value="__none">未指派目标</option>{registry.data?.targetBaselines.map(baseline => <option key={baseline.id} value={baseline.id}>{baseline.code}</option>)}</select></label>
+        <label>实际组件<select aria-label="实际组件" value={actualComponentFilter} onChange={event => { setActualComponentFilter(event.target.value); setActualVersionFilter('') }}><option value="">全部实际组件</option>{actualComponents.map(component => <option key={component.id} value={component.id}>{component.name}</option>)}</select></label>
+        <label>整机实际版本<select aria-label="整机实际版本" value={actualVersionFilter} onChange={event => setActualVersionFilter(event.target.value)}><option value="">全部实际版本</option>{registry.data?.actualVersions.filter(version => !actualComponentFilter || version.componentId === actualComponentFilter).map(version => <option key={version.versionId} value={version.versionId}>{actualComponentFilter ? version.versionNumber : `${version.componentName} · ${version.versionNumber}`}</option>)}</select></label>
+        <label>关注项<select aria-label="关注项" value={attentionFilter} onChange={event => setAttentionFilter(event.target.value as MachineAttention)}><option value="">全部机台</option><option value="mismatch">配置不匹配</option><option value="critical">严重风险</option><option value="unknown">匹配情况未知</option><option value="no-target">未指派目标</option></select></label>
+      </div>
+      {machines.isLoading && <p role="status">正在读取机台。</p>}{machines.isError && <p className="error-strip">{machines.error.message}</p>}{!machines.isLoading && !machines.isError && visibleMachines.length === 0 && <p className="empty-state">{hasFilters ? '没有符合筛选条件的机台。' : '暂无机台记录。'}</p>}
+      <div className="machine-registry-scroll"><div className="machine-row-heading" aria-hidden="true"><span>机台 / 序列号</span><span>阶段 / 状态</span><span>位置 / 负责人</span><span>已配置腔室</span><span>目标基线 / 整机实际版本</span><span>匹配 / 风险</span></div>
+      <div className="machine-location-groups">{[...new Set(visibleMachines.map(machine => machine.location || '未填写位置'))].map(location => <section className="machine-location-group" key={location}><h4><EnvironmentOutlined aria-hidden />{location}</h4><div className="machine-list">{visibleMachines.filter(machine => (machine.location || '未填写位置') === location).map(machine => {
+        const actualSummary = machine.actualVersions.map(version => `${version.componentName} ${version.versionNumber}`).join(' · ')
+        return <button type="button" aria-pressed={machine.id === selectedMachineId} className={machine.id === selectedMachineId ? 'machine-list-item machine-registry-row selected' : 'machine-list-item machine-registry-row'} key={machine.id} onClick={() => { onSelectMachine(machine.id); setFactComponentId(''); setFactVersionId('') }}>
+          <span className="machine-row-identity"><strong>{machine.name}</strong><span className="machine-list-identity">{machine.serialNumber}{machine.machineType && ` · ${machine.machineType}`}</span></span>
+          <span className="machine-row-state"><b>{machine.stage || '未登记阶段'}</b><span>{machineStatusText[machine.status] ?? '未知状态'}</span>{machine.expectedResumeAt && <small>预计恢复 {formatTime(machine.expectedResumeAt)}</small>}</span>
+          <span className="machine-row-owner"><b>{machine.location || '未填写位置'}</b><span>负责人 {machine.owner || '未填写'}</span></span>
+          <span className="machine-row-chambers">{machine.chambers?.length ? machine.chambers.map(number => <span key={number}>PM{number}</span>) : <small>未登记腔室</small>}</span>
+          <span className="machine-row-versions"><b>目标 {machine.targetBaselineCode || '未指派'}</b><span title={actualSummary || undefined}>实际 {actualSummary || (machine.hasActualConfiguration ? '无在用版本' : '尚未录入')}</span></span>
+          <span className="machine-row-health"><span data-match={machine.matchStatus}>{machine.matchStatus === 'Matched' ? '配置匹配' : machine.matchStatus === 'Mismatch' ? '配置不匹配' : '匹配未知'}</span><span data-risk={machine.riskSeverity}>风险 {riskText[machine.riskSeverity ?? 'Unknown'] ?? '未知'}</span></span>
+        </button>
+      })}</div></section>)}</div></div>
     </section>
     <section hidden={!selectedMachine} className="machine-detail-panel">
       {selectedMachine && <>
@@ -179,7 +222,7 @@ export function MachineWorkspace({ projectId, canWrite = true, isAdmin = false, 
     <Modal title="新建机台" open={canWrite && createOpen} onCancel={() => { if (!addMachine.isPending) setCreateOpen(false) }} maskClosable={!addMachine.isPending} width={820} footer={null} className="machine-dialog" destroyOnHidden>
       <div className="machine-create">
         <form hidden={!canWrite} className="catalog-form" onSubmit={(event) => { event.preventDefault(); addMachine.mutate({ projectId: machineProjectId, serialNumber: machineSerial, name: machineName, machineType, location: machineLocation, owner: machineOwner, stage: machineStage, chambers: machineChambers, reason: machineReason }) }}>
-          <label>复制已有机台<select value={cloneMachineId} onChange={(event) => setCloneMachineId(event.target.value)}><option value="">不复制，手工录入</option>{visibleMachines.map(machine => <option key={machine.id} value={machine.id}>{machine.name} · {machine.serialNumber}</option>)}</select></label>
+          <label>复制已有机台<select value={cloneMachineId} onChange={(event) => setCloneMachineId(event.target.value)}><option value="">不复制，手工录入</option>{projectMachines.map(machine => <option key={machine.id} value={machine.id}>{machine.name} · {machine.serialNumber}</option>)}</select></label>
           <label>机台序列号<input value={machineSerial} onChange={(event) => setMachineSerial(event.target.value)} required /></label>
           <label>机台名称<input value={machineName} onChange={(event) => setMachineName(event.target.value)} required /></label>
           <label>机型<input value={machineType} onChange={(event) => setMachineType(event.target.value)} /></label>

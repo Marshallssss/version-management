@@ -107,6 +107,7 @@ async function main() {
     await page.setViewportSize({ width: 1366, height: 900 })
     await leftBadge.click()
     await assertPatchPage('V2.0-lab')
+    await nav('基线')
     await page.locator('.baseline-timeline button').filter({ hasText: 'BL-BEFORE-PATCH' }).click()
     const snapshotBadge = page.locator('.snapshot-tree .patch-open')
     await preview(snapshotBadge, '当前补丁记录，非当时快照')

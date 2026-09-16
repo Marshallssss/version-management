@@ -1,19 +1,21 @@
 import { useEffect, useState } from 'react'
-import { AppstoreOutlined, ControlOutlined, DownOutlined, MenuFoldOutlined, MenuUnfoldOutlined, DashboardOutlined, ToolOutlined, DesktopOutlined, HistoryOutlined, SwapOutlined, SearchOutlined, ImportOutlined, TeamOutlined, PlusOutlined, UserOutlined, CloseOutlined, ArrowRightOutlined, ReloadOutlined } from '@ant-design/icons'
+import { BranchesOutlined, DatabaseOutlined, ControlOutlined, DownOutlined, MenuFoldOutlined, MenuUnfoldOutlined, DashboardOutlined, DesktopOutlined, HistoryOutlined, SwapOutlined, SearchOutlined, ImportOutlined, TeamOutlined, PlusOutlined, UserOutlined, CloseOutlined } from '@ant-design/icons'
 import { Modal } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { archiveProject, assignProjectMember, assignProjectStandard, changeUserRole, changeVersionMaturity, changeVersionSafety, cloneProject, createBaseline, createComponent, createComponentVersion, createProject, createUser, decideBaselineReview, getBaselineDetail, getBaselines, getCurrentUser, getDashboard, getMachineFacts, getMachines, getProject, getProjectMembers, getProjectStandard, getProjects, getUsers, getVersionDetail, getVersionExposureSnapshots, getVersionImpact, login, logout, moveComponent, recommendVersion, releaseBaseline, requestBaselineReview, searchCatalog, setBaselineItemRequirement } from './catalog-api'
-import { enqueueNoopJob, getSystemStatus, getSystemVersion, type BackgroundJobStatus } from './system-api'
+import { archiveProject, assignProjectMember, changeUserRole, changeVersionMaturity, changeVersionSafety, cloneProject, createComponent, createComponentVersion, createProject, createUser, getCurrentUser, getMachineFacts, getMachines, getProject, getProjectMembers, getProjects, getUsers, getVersionDetail, getVersionExposureSnapshots, getVersionImpact, login, logout, moveComponent, recommendVersion, searchCatalog } from './catalog-api'
+import { getSystemVersion } from './system-api'
 import { BulkFactPanel } from './BulkFactPanel'
 import { ImportWorkspace } from './ImportWorkspace'
 import { ConfigurationCompare } from './ConfigurationCompare'
 import { MachineWorkspace } from './MachineWorkspace'
 import { ProjectWorkspace } from './ProjectWorkspace'
+import { ProjectBaselineHistory } from './ProjectBaselineHistory'
+import { OverviewWorkspace } from './OverviewWorkspace'
 
 const navigation = [
   { id: 'overview', icon: DashboardOutlined, label: '运行总览', available: true },
-  { id: 'operations', icon: ToolOutlined, label: '系统运维', available: true, adminOnly: true },
-  { id: 'projects', icon: AppstoreOutlined, label: '项目', available: true },
+  { id: 'projects', icon: BranchesOutlined, label: '版本', available: true },
+  { id: 'baselines', icon: DatabaseOutlined, label: '基线', available: true },
   { id: 'machines', icon: DesktopOutlined, label: '机台', available: true },
   { id: 'deployments', icon: HistoryOutlined, label: '部署记录', available: true },
   { id: 'compare', icon: SwapOutlined, label: '配置比对', available: true },
@@ -22,19 +24,8 @@ const navigation = [
   { id: 'users', icon: TeamOutlined, label: '用户与角色', available: true, adminOnly: true },
 ]
 
-const statusText: Record<BackgroundJobStatus, string> = {
-  Pending: '等待执行',
-  Running: '执行中',
-  Succeeded: '已完成',
-  Failed: '失败',
-  Retry: '等待重试',
-}
-
 const roleText: Record<string, string> = { Viewer: '只读用户', Engineer: '工程师', SeniorEngineer: '高级工程师', Admin: '管理员', SuperAdmin: '超级管理员' }
 const connectivityText = { online: '已连接', offline: '未连接', checking: '检测中' }
-const jobTypeText: Record<string, string> = {
-  'system.noop': '连通性任务',
-}
 const operationText: Record<string, string> = { Observation: '观察', Install: '安装', Upgrade: '升级', InitialSnapshot: '初始快照', Rollback: '回退', Correction: '更正' }
 const sourceText: Record<string, string> = { 'manual-ui': '人工录入', 'bulk-ui': '批量录入', 'agent-automation': '机台代理' }
 const maturityText: Record<string, string> = { Draft: '草稿', Testing: '测试中', Released: '已发布', Maintenance: '维护中', Deprecated: '已废弃' }
@@ -49,7 +40,6 @@ function App() {
   const [activePage, setActivePage] = useState('overview')
   const [railCollapsed, setRailCollapsed] = useState(() => localStorage.getItem('confighub.rail-collapsed') === 'true')
   const [successMessage, setSuccessMessage] = useState('')
-  const [note, setNote] = useState('')
   const [selectedProjectId, setProjectId] = useState<string | null>(null)
   const [projectCode, setProjectCode] = useState('')
   const [projectName, setProjectName] = useState('')
@@ -59,6 +49,8 @@ function App() {
   const [projectListCollapsed, setProjectListCollapsed] = useState(true)
   const [projectDialog, setProjectDialog] = useState<'login' | 'switch' | 'create' | 'account' | null>(null)
   const [focusedBaselineId, setFocusedBaselineId] = useState('')
+  const [baselineComposerRequest, setBaselineComposerRequest] = useState(0)
+  const [machineAttention, setMachineAttention] = useState<'' | 'mismatch' | 'critical' | 'unknown' | 'no-target'>('')
   const [archiveReason, setArchiveReason] = useState('')
   const [userName, setUserName] = useState('')
   const [password, setPassword] = useState('')
@@ -81,19 +73,6 @@ function App() {
   const [moveComponentId, setMoveComponentId] = useState('')
   const [moveParentId, setMoveParentId] = useState('')
   const [moveReason, setMoveReason] = useState('')
-  const [baselineProjectId, setBaselineProjectId] = useState('')
-  const [baselineSeriesCode, setBaselineSeriesCode] = useState('')
-  const [baselineCode, setBaselineCode] = useState('')
-  const [baselineDescription, setBaselineDescription] = useState('')
-  const [baselineReason, setBaselineReason] = useState('')
-  const [releaseReason, setReleaseReason] = useState('')
-  const [reviewReason, setReviewReason] = useState('')
-  const [selectedBaselineId, setSelectedBaselineId] = useState('')
-  const [baselineRequirementItemId, setBaselineRequirementItemId] = useState('')
-  const [baselineRequirement, setBaselineRequirement] = useState('Required')
-  const [baselineRequirementReason, setBaselineRequirementReason] = useState('')
-  const [standardBaselineId, setStandardBaselineId] = useState('')
-  const [standardReason, setStandardReason] = useState('')
   const [selectedMachineId, setSelectedMachineId] = useState('')
   const [impactVersionId, setImpactVersionId] = useState('')
   const [focusedVersionId, setFocusedVersionId] = useState('')
@@ -118,8 +97,6 @@ function App() {
   const canWrite = currentUser.data?.roles.some(role => ['Engineer', 'SeniorEngineer', 'Admin', 'SuperAdmin'].includes(role)) === true
   const isSuperAdmin = currentUser.data?.roles.includes('SuperAdmin') === true
   const isAdmin = currentUser.data?.roles.some(role => role === 'Admin' || role === 'SuperAdmin') === true
-  const status = useQuery({ queryKey: ['system-status'], queryFn: getSystemStatus, refetchInterval: 5_000, enabled: isAdmin })
-  const dashboard = useQuery({ queryKey: ['dashboard', selectedProjectId], queryFn: () => getDashboard(selectedProjectId!), refetchInterval: 5_000, enabled: isAuthenticated && !!selectedProjectId })
   const projects = useQuery({ queryKey: ['projects'], queryFn: getProjects, enabled: isAuthenticated })
   const selectedProject = projects.data?.find(project => project.id === selectedProjectId)
   const users = useQuery({ queryKey: ['users'], queryFn: getUsers, enabled: isAdmin })
@@ -127,9 +104,6 @@ function App() {
   const updateUserRole = useMutation({ mutationFn: () => changeUserRole(roleUserId, { role: roleValue, reason: roleReason }), onSuccess: async () => { setRoleReason(''); await queryClient.invalidateQueries({ queryKey: ['users'] }); setUserDialog(null); setSuccessMessage('用户角色已更新。') } })
   const projectDetail = useQuery({ queryKey: ['project', selectedProjectId], queryFn: () => getProject(selectedProjectId!), enabled: isAuthenticated && selectedProjectId !== null })
   const projectMembers = useQuery({ queryKey: ['project-members', selectedProjectId], queryFn: () => getProjectMembers(selectedProjectId!), enabled: isAuthenticated && selectedProjectId !== null && isAdmin })
-  const baselines = useQuery({ queryKey: ['baselines', baselineProjectId], queryFn: () => getBaselines(baselineProjectId), enabled: isAuthenticated && baselineProjectId !== '' })
-  const baselineDetail = useQuery({ queryKey: ['baseline-detail', selectedBaselineId], queryFn: () => getBaselineDetail(selectedBaselineId), enabled: isAuthenticated && selectedBaselineId !== '' })
-  const standard = useQuery({ queryKey: ['project-standard', baselineProjectId], queryFn: () => getProjectStandard(baselineProjectId), enabled: isAuthenticated && baselineProjectId !== '' })
   const machines = useQuery({ queryKey: ['machines'], queryFn: getMachines, enabled: isAuthenticated })
   const projectMachines = machines.data?.filter(machine => machine.projectId === selectedProjectId) ?? []
   const machineFacts = useQuery({ queryKey: ['machine-facts', selectedMachineId], queryFn: () => getMachineFacts(selectedMachineId), enabled: isAuthenticated && projectMachines.some(machine => machine.id === selectedMachineId) })
@@ -137,13 +111,6 @@ function App() {
   const versionExposure = useQuery({ queryKey: ['version-exposure', impactVersionId], queryFn: () => getVersionExposureSnapshots(impactVersionId), enabled: isAuthenticated && impactVersionId !== '' })
   const versionDetail = useQuery({ queryKey: ['version-detail', impactVersionId], queryFn: () => getVersionDetail(impactVersionId), enabled: isAuthenticated && impactVersionId !== '' })
   const catalogSearch = useQuery({ queryKey: ['catalog-search', searchTerm, searchAllProjects ? 'all' : selectedProjectId], queryFn: () => searchCatalog(searchTerm, searchAllProjects ? undefined : selectedProjectId!), enabled: isAuthenticated && (searchAllProjects || !!selectedProjectId) && searchTerm.trim().length >= 2 })
-  const enqueue = useMutation({
-    mutationFn: enqueueNoopJob,
-    onSuccess: async () => {
-      setNote('')
-      await queryClient.invalidateQueries({ queryKey: ['system-status'] })
-    },
-  })
   const addProject = useMutation({
     mutationFn: (input: { code: string; name: string; description: string; reason: string }) => cloneSourceProjectId ? cloneProject(cloneSourceProjectId, { code: input.code, name: input.name, reason: input.reason }) : createProject(input),
     onSuccess: async ({ id }) => {
@@ -199,12 +166,20 @@ function App() {
   })
   const clone = useMutation({ mutationFn: ({ projectId, code, name, reason }: { projectId: string; code: string; name: string; reason: string }) => cloneProject(projectId, { code, name, reason }), onSuccess: async ({ id }) => { setSelectedProjectId(id); setCloneCode(''); setCloneName(''); setCloneReason(''); await queryClient.invalidateQueries({ queryKey: ['projects'] }) } })
   const move = useMutation({ mutationFn: ({ componentId, parentComponentId, reason }: { componentId: string; parentComponentId: string | null; reason: string }) => moveComponent(componentId, { parentComponentId, reason }), onSuccess: async () => { setMoveReason(''); await queryClient.invalidateQueries({ queryKey: ['project', selectedProjectId] }) } })
-  const addBaseline = useMutation({ mutationFn: ({ projectId, seriesCode, code, description, reason }: { projectId: string; seriesCode: string; code: string; description: string; reason: string }) => createBaseline(projectId, { seriesCode, baselineCode: code, description, reason }), onSuccess: async () => { setBaselineCode(''); setBaselineDescription(''); setBaselineReason(''); await queryClient.invalidateQueries({ queryKey: ['baselines', baselineProjectId] }) } })
-  const release = useMutation({ mutationFn: ({ baselineId, reason }: { baselineId: string; reason: string }) => releaseBaseline(baselineId, reason), onSuccess: async () => { setReleaseReason(''); await queryClient.invalidateQueries({ queryKey: ['baselines', baselineProjectId] }) } })
-  const requestReview = useMutation({ mutationFn: () => requestBaselineReview(selectedBaselineId, reviewReason), onSuccess: async () => { setReviewReason(''); await queryClient.invalidateQueries({ queryKey: ['baseline-detail', selectedBaselineId] }) } })
-  const decideReview = useMutation({ mutationFn: (decision: 'approve' | 'reject') => decideBaselineReview(selectedBaselineId, decision, reviewReason), onSuccess: async () => { setReviewReason(''); await queryClient.invalidateQueries({ queryKey: ['baseline-detail', selectedBaselineId] }); await queryClient.invalidateQueries({ queryKey: ['baselines', baselineProjectId] }) } })
-  const setRequirement = useMutation({ mutationFn: () => setBaselineItemRequirement(selectedBaselineId, baselineRequirementItemId, { requirement: baselineRequirement, reason: baselineRequirementReason }), onSuccess: async () => { setBaselineRequirementReason(''); await queryClient.invalidateQueries({ queryKey: ['baseline-detail', selectedBaselineId] }) } })
-  const assignStandard = useMutation({ mutationFn: ({ projectId, baselineId, reason }: { projectId: string; baselineId: string; reason: string }) => assignProjectStandard(projectId, baselineId, reason), onSuccess: async () => { setStandardReason(''); await queryClient.invalidateQueries({ queryKey: ['project-standard', baselineProjectId] }) } })
+
+  function openMachine(machineId: string) {
+    setMachineAttention('')
+    setSelectedMachineId(machineId)
+    setActivePage('machines')
+    setSuccessMessage('')
+  }
+
+  function openBaseline(baselineId = '') {
+    setFocusedBaselineId(baselineId)
+    setBaselineComposerRequest(0)
+    setActivePage('baselines')
+    setSuccessMessage('')
+  }
 
   function setSelectedProjectId(projectId: string | null) {
     setProjectId(projectId)
@@ -218,8 +193,8 @@ function App() {
     setSuccessMessage('')
     setArchiveReason('')
     setImpactVersionId('')
-    setSelectedBaselineId('')
-    setBaselineProjectId(projectId ?? '')
+    setBaselineComposerRequest(0)
+    setMachineAttention('')
   }
 
   const connectivity = system.isSuccess ? 'online' : system.isError ? 'offline' : 'checking'
@@ -233,7 +208,6 @@ function App() {
       : undefined
     return [kind, projectName, component?.name].filter(Boolean).join(' · ')
   }
-  const queueCount = (jobStatus: BackgroundJobStatus) => status.data?.queue.find((item) => item.status === jobStatus)?.count ?? 0
 
   useEffect(() => {
     if (selectedProjectId || !projects.data?.length) return
@@ -255,7 +229,7 @@ function App() {
         </div>
         <nav aria-label="主导航">
           {visibleNavigation.map(item => (
-            <button className={item.id === activePage ? 'nav-item active' : 'nav-item'} key={item.id} type="button" title={item.label} aria-label={railCollapsed ? item.label : undefined} aria-current={item.id === activePage ? 'page' : undefined} onClick={() => { setSuccessMessage(''); if (item.id === 'machines') setSelectedMachineId(''); setActivePage(!isAuthenticated && item.id !== 'projects' ? 'projects' : item.id) }}>
+            <button className={item.id === activePage ? 'nav-item active' : 'nav-item'} key={item.id} type="button" title={item.label} aria-label={railCollapsed ? item.label : undefined} aria-current={item.id === activePage ? 'page' : undefined} onClick={() => { setSuccessMessage(''); if (item.id === 'machines') { setSelectedMachineId(''); setMachineAttention('') } if (item.id === 'baselines') setBaselineComposerRequest(0); setActivePage(!isAuthenticated && item.id !== 'projects' ? 'projects' : item.id) }}>
               <span className="nav-index" aria-hidden><item.icon /></span><span className="nav-label">{item.label}</span>{!item.available && <em>待实现</em>}
             </button>
           ))}
@@ -284,46 +258,12 @@ function App() {
 
         {selectedNavigation.available ? (
           <div className="content-grid">
-            {activePage === 'overview' && <>
-              <section className="overview-heading">
-                <div><span className="section-index">运行状态</span><h2>{connectivity === 'online' ? '服务已连接' : connectivity === 'offline' ? '服务暂不可用' : '正在连接服务'}</h2><p>{selectedProject?.name ?? '尚未选择项目'}<span className="overview-divider" />{formatTime(system.data?.serverTime)}</p></div>
-                <div className="overview-actions"><button type="button" onClick={() => { setActivePage('projects'); if (isAuthenticated && !selectedProjectId) setProjectDialog('switch') }}><AppstoreOutlined aria-hidden />进入项目<ArrowRightOutlined aria-hidden /></button>{isAdmin && <button type="button" onClick={() => setActivePage('operations')}><ToolOutlined aria-hidden />系统运维</button>}</div>
-              </section>
-              <section className="status-panel">
-                <div className="panel-heading"><div><span className="section-index">实时运行信息</span><h3>服务身份</h3></div><button type="button" onClick={() => void system.refetch()} disabled={system.isFetching} aria-label="刷新服务信息" title="刷新服务信息"><ReloadOutlined spin={system.isFetching} /></button></div>
-                <dl className="runtime-list"><div><dt>产品</dt><dd>{system.data?.product ?? '—'}</dd></div><div><dt>版本</dt><dd>{system.data?.version ?? '—'}</dd></div><div><dt>接口版本</dt><dd>{system.data?.apiVersion ?? '—'}</dd></div><div><dt>服务时间</dt><dd>{formatTime(system.data?.serverTime)}</dd></div></dl>
-              </section>
-              <section className="status-panel">
-                <div className="panel-heading"><div><span className="section-index">配置总览</span><h3>{selectedProject?.name ?? '当前项目'} · 机台配置状态</h3></div><span className="count">{dashboard.data?.machineCount ?? '—'}</span></div>
-                <dl className="runtime-list"><div><dt>机台总数</dt><dd>{dashboard.data?.machineCount ?? '—'}</dd></div><div><dt>配置匹配</dt><dd>{dashboard.data?.matchedCount ?? '—'}</dd></div><div><dt>配置不匹配</dt><dd>{dashboard.data?.mismatchCount ?? '—'}</dd></div><div><dt>状态未知</dt><dd>{dashboard.data?.unknownCount ?? '—'}</dd></div><div><dt>严重风险</dt><dd>{dashboard.data?.criticalRiskCount ?? '—'}</dd></div></dl>
-              </section>
-              {isAdmin && <section className="telemetry-panel queue-panel">
-                <div className="panel-heading"><div><span className="section-index">队列概览</span><h3>后台任务</h3></div><span className="section-index">全部任务</span></div>
-                <div className="queue-summary"><div><span>等待执行</span><b>{queueCount('Pending')}</b></div><div><span>执行中</span><b>{queueCount('Running')}</b></div><div><span>等待重试</span><b>{queueCount('Retry')}</b></div><div><span>已完成</span><b>{queueCount('Succeeded')}</b></div><div><span>失败</span><b>{queueCount('Failed')}</b></div></div>
-              </section>}
-            </>}
-
-            {activePage === 'operations' && isAdmin && <>
-              <section className="hero-panel job-submit-panel">
-                <div className="hero-copy"><span className="section-index">管理员诊断</span><h2>后台队列运维</h2><p>连通性任务会写入 PostgreSQL 并由 Worker 领取完成，用于部署验收、故障定位和队列重试观察。</p></div>
-                <div className="job-form">
-                  <label htmlFor="job-note">任务说明</label>
-                  <textarea id="job-note" value={note} maxLength={500} placeholder="例如：部署后 Worker 连通性验收" onChange={(event) => setNote(event.target.value)} />
-                  <button className="primary-action" type="button" onClick={() => enqueue.mutate(note)} disabled={enqueue.isPending}>{enqueue.isPending ? '正在提交' : '提交连通性任务'}</button>
-                  {enqueue.isSuccess && <p className="success-strip">任务已提交，Worker 通常会在几秒内完成。</p>}
-                  {enqueue.isError && <p className="error-strip">{enqueue.error.message}</p>}
-                </div>
-              </section>
-              <section className="status-panel jobs-panel">
-                <div className="panel-heading"><div><span className="section-index">最近任务</span><h3>执行记录</h3></div><button type="button" onClick={() => void status.refetch()} disabled={status.isFetching}>{status.isFetching ? '正在刷新' : '刷新'}</button></div>
-                {status.data?.jobs.length ? <div className="job-list">{status.data.jobs.map((job) => <article className="job-row" key={job.id}><div><strong>{jobTypeText[job.jobType] ?? job.jobType}</strong><span>{formatTime(job.createdAt)}{job.lastAttemptAt && `；上次尝试 ${formatTime(job.lastAttemptAt)}`}</span></div><span className={`job-state ${job.status.toLowerCase()}`}>{statusText[job.status]}</span><small>第 {job.attempts} 次</small>{job.lastError && <p>{job.lastError}</p>}</article>)}</div> : <p className="empty-state">还没有任务记录。提交一条连通性任务即可开始验证。</p>}
-              </section>
-            </>}
+            {activePage === 'overview' && <OverviewWorkspace projectId={selectedProjectId ?? ''} detail={projectDetail.data} projectError={projectDetail.error} isAuthenticated={isAuthenticated} isAdmin={isAdmin} onSelectProject={() => setProjectDialog(isAuthenticated ? 'switch' : 'login')} onOpenVersions={() => setActivePage('projects')} onOpenBaselines={openBaseline} onOpenMachines={attention => { setMachineAttention(attention); setSelectedMachineId(''); setActivePage('machines') }} onOpenMachine={openMachine} />}
 
             {activePage === 'projects' && <>
               {!isAuthenticated && <section className="status-panel catalog-detail project-empty-state"><div className="panel-heading"><div><span className="section-index">身份验证</span><h3>登录后开始管理项目</h3></div><button type="button" className="primary-action" onClick={() => setProjectDialog('login')}>登录</button></div><p className="empty-state">登录入口已收至页面顶部。登录后可从顶部选择现有项目，或新建和克隆项目。</p></section>}
               {isAuthenticated && !selectedProjectId && <section className="status-panel catalog-detail project-empty-state"><div className="panel-heading"><div><span className="section-index">项目工作台</span><h3>选择一个项目</h3></div><button type="button" className="primary-action" onClick={() => setProjectDialog('switch')}>选择项目</button></div><p className="empty-state">项目选择会保持到你手动切换。也可以从顶部新建项目。</p></section>}
-              {isAuthenticated && selectedProjectId && projectDetail.data && <ProjectWorkspace key={selectedProjectId} canWrite={canWrite} detail={projectDetail.data} focusedVersionId={focusedVersionId} focusedBaselineId={focusedBaselineId} focusedComponentId={focusedComponentId} focusPatch={focusPatch} onOpenMachine={machineId => { setSelectedMachineId(machineId); setActivePage('machines'); setSuccessMessage('') }} isAdmin={isAdmin} isSuperAdmin={isSuperAdmin} onSuccess={setSuccessMessage} />}
+              {isAuthenticated && selectedProjectId && projectDetail.data && <ProjectWorkspace key={selectedProjectId} canWrite={canWrite} detail={projectDetail.data} focusedVersionId={focusedVersionId} focusedComponentId={focusedComponentId} focusPatch={focusPatch} onOpenMachine={openMachine} onOpenBaseline={openBaseline} onCreateBaseline={() => { setFocusedBaselineId(''); setBaselineComposerRequest(value => value + 1); setActivePage('baselines'); setSuccessMessage('') }} isAdmin={isAdmin} isSuperAdmin={isSuperAdmin} onSuccess={setSuccessMessage} />}
               <div hidden>
               {!currentUser.data && <section className="status-panel catalog-detail"><div className="panel-heading"><div><span className="section-index">身份验证</span><h3>登录后管理项目</h3></div></div><form className="catalog-form" onSubmit={(event) => { event.preventDefault(); signIn.mutate({ userName, password }) }}><label>用户名<input value={userName} onChange={(event) => setUserName(event.target.value)} required /></label><label>密码<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label><button className="primary-action" type="submit" disabled={signIn.isPending}>{signIn.isPending ? '正在登录' : '登录'}</button></form>{signIn.isError && <p className="error-strip">登录失败，请检查凭据。</p>}</section>}
               {currentUser.data && <section className="status-panel catalog-detail"><div className="panel-heading"><div><span className="section-index">当前身份</span><h3>{currentUser.data.name}</h3></div><button type="button" onClick={() => signOut.mutate()} disabled={signOut.isPending}>退出登录</button></div></section>}
@@ -363,42 +303,7 @@ function App() {
             </>}
 
             {activePage === 'baselines' && <>
-              {!currentUser.data && <section className="status-panel catalog-detail"><div className="panel-heading"><div><span className="section-index">身份验证</span><h3>登录后管理基线</h3></div></div><p className="empty-state">请先在“项目”页面登录。</p></section>}
-              <section className="status-panel catalog-panel">
-                <div className="panel-heading"><div><span className="section-index">Step 4A</span><h3>创建基线草稿</h3></div></div>
-                <form className="catalog-form" onSubmit={(event) => { event.preventDefault(); addBaseline.mutate({ projectId: baselineProjectId, seriesCode: baselineSeriesCode, code: baselineCode, description: baselineDescription, reason: baselineReason }) }}>
-                  <label>所属项目<select value={baselineProjectId} onChange={(event) => setBaselineProjectId(event.target.value)} required><option value="">请选择项目</option>{projects.data?.map((project) => <option key={project.id} value={project.id}>{project.code} · {project.name}</option>)}</select></label>
-                  <label>系列编码<input value={baselineSeriesCode} maxLength={80} placeholder="例如：LINE-A" onChange={(event) => setBaselineSeriesCode(event.target.value)} required /></label>
-                  <label>基线编码<input value={baselineCode} maxLength={100} placeholder="例如：BL-001" onChange={(event) => setBaselineCode(event.target.value)} required /></label>
-                  <label>说明<input value={baselineDescription} maxLength={2000} onChange={(event) => setBaselineDescription(event.target.value)} /></label>
-                  <label className="wide-field">创建原因<input value={baselineReason} maxLength={500} onChange={(event) => setBaselineReason(event.target.value)} required /></label>
-                  <button className="primary-action" type="submit" disabled={addBaseline.isPending || !currentUser.data}>{addBaseline.isPending ? '正在创建' : '创建草稿快照'}</button>
-                </form>
-                {addBaseline.isError && <p className="error-strip">{addBaseline.error.message}</p>}
-              </section>
-              <section className="status-panel catalog-panel">
-                <div className="panel-heading"><div><span className="section-index">独立 Revision</span><h3>项目基线</h3></div><span className="count">{baselines.data?.length ?? 0}</span></div>
-                {baselineProjectId === '' ? <p className="empty-state">选择项目后显示其基线草稿与发布版本。</p> : baselines.data?.length ? <div className="catalog-list">{baselines.data.map((baseline) => <article className="project-row" key={baseline.id}><span><strong>{baseline.code}</strong><small>{baseline.seriesCode} · Revision {baseline.revisionNo} · {baseline.itemCount} 个快照项</small></span>{baseline.state === 'Draft' ? <form className="inline-form" onSubmit={(event) => { event.preventDefault(); release.mutate({ baselineId: baseline.id, reason: releaseReason }) }}><label>发布原因<input value={releaseReason} maxLength={500} onChange={(event) => setReleaseReason(event.target.value)} required /></label><button type="submit" disabled={release.isPending}>{release.isPending ? '正在发布' : '发布基线'}</button></form> : <em>{baseline.state === 'Released' ? '已发布' : baseline.state}</em>}</article>)}</div> : <p className="empty-state">该项目尚未创建基线。</p>}
-                {release.isError && <p className="error-strip">{release.error.message}</p>}
-              </section>
-              <section className="status-panel catalog-panel">
-                <div className="panel-heading"><div><span className="section-index">冻结快照</span><h3>查看基线组件树</h3></div></div>
-                <label>基线<select value={selectedBaselineId} onChange={(event) => { setSelectedBaselineId(event.target.value); setBaselineRequirementItemId('') }}><option value="">请选择基线</option>{baselines.data?.map((baseline) => <option key={baseline.id} value={baseline.id}>{baseline.code} · Revision {baseline.revisionNo}</option>)}</select></label>
-                {baselineDetail.data?.baseline.state === 'Draft' && <form className="inline-form" onSubmit={(event) => { event.preventDefault(); baselineDetail.data?.review?.status === 'Pending' ? decideReview.mutate('approve') : requestReview.mutate() }}><label>评审原因<input value={reviewReason} maxLength={500} onChange={(event) => setReviewReason(event.target.value)} required /></label>{baselineDetail.data.review?.status === 'Pending' && currentUser.data?.roles.includes('Admin') ? <><button type="submit" disabled={decideReview.isPending}>{decideReview.isPending ? '正在处理' : '通过评审'}</button><button type="button" onClick={() => decideReview.mutate('reject')} disabled={decideReview.isPending}>驳回评审</button></> : baselineDetail.data.review?.status !== 'Approved' && <button type="submit" disabled={requestReview.isPending}>{requestReview.isPending ? '正在送审' : '提交评审'}</button>}</form>}
-                {baselineDetail.data && <><p className="empty-state">{baselineDetail.data.baseline.seriesCode} · Revision {baselineDetail.data.baseline.revisionNo} · {baselineDetail.data.baseline.state === 'Released' ? '已发布且不可修改' : '草稿快照'}</p>{baselineDetail.data.baseline.state === 'Draft' && <form className="inline-form" onSubmit={(event) => { event.preventDefault(); setRequirement.mutate() }}><label>快照组件<select value={baselineRequirementItemId} onChange={(event) => { const item = baselineDetail.data?.items.find(candidate => candidate.id === event.target.value); setBaselineRequirementItemId(event.target.value); setBaselineRequirement(item?.requirement ?? 'Required') }} required><option value="">请选择组件</option>{baselineDetail.data.items.filter(item => item.versionId !== null).map((item) => <option key={item.id} value={item.id}>{item.componentName}</option>)}</select></label><label>必需性<select value={baselineRequirement} onChange={(event) => setBaselineRequirement(event.target.value)}><option value="Required">必需</option><option value="Optional">可选</option></select></label><label>修改原因<input value={baselineRequirementReason} maxLength={500} onChange={(event) => setBaselineRequirementReason(event.target.value)} required /></label><button type="submit" disabled={setRequirement.isPending || baselineRequirementItemId === ''}>{setRequirement.isPending ? '正在更新' : '更新必需性'}</button></form>}<div className="component-list">{baselineDetail.data.items.map((item) => <article className="component-row" key={item.id}><div><strong>{item.componentName}</strong><span>{item.versionNumber === null ? '结构分类节点（不参与版本必需性）' : item.lineageKey}</span></div><small>{item.versionNumber === null ? '无软件版本' : `版本 ${item.versionNumber} · ${item.requirement === 'Optional' ? '可选' : '必需'}`}</small></article>)}</div></>}
-                {baselineDetail.isError && <p className="error-strip">{baselineDetail.error.message}</p>}
-                {setRequirement.isError && <p className="error-strip">{setRequirement.error.message}</p>}
-              </section>
-              <section className="status-panel catalog-panel">
-                <div className="panel-heading"><div><span className="section-index">项目标准</span><h3>当前推荐基线</h3></div></div>
-                <p className="empty-state">{standard.data ? `当前标准：${standard.data.baselineCode}。它只提供项目级推荐，不会自动改写任何机台的实际目标。` : '尚未设置项目标准。设置后仅作为项目级推荐，不会自动修改机台目标。'}</p>
-                <form className="catalog-form" onSubmit={(event) => { event.preventDefault(); assignStandard.mutate({ projectId: baselineProjectId, baselineId: standardBaselineId, reason: standardReason }) }}>
-                  <label>已发布基线<select value={standardBaselineId} onChange={(event) => setStandardBaselineId(event.target.value)} required><option value="">请选择基线</option>{baselines.data?.filter((baseline) => baseline.state === 'Released').map((baseline) => <option key={baseline.id} value={baseline.id}>{baseline.code} · Revision {baseline.revisionNo}</option>)}</select></label>
-                  <label>设置原因<input value={standardReason} maxLength={500} onChange={(event) => setStandardReason(event.target.value)} required /></label>
-                  <button type="submit" disabled={assignStandard.isPending || baselineProjectId === ''}>{assignStandard.isPending ? '正在设置' : '设为项目标准'}</button>
-                </form>
-                {assignStandard.isError && <p className="error-strip">{assignStandard.error.message}</p>}
-              </section>
+              {!isAuthenticated || !selectedProjectId ? <section className="status-panel catalog-detail"><div className="panel-heading"><h3>{isAuthenticated ? '选择一个项目' : '登录后查看基线'}</h3><button type="button" onClick={() => setProjectDialog(isAuthenticated ? 'switch' : 'login')}>{isAuthenticated ? '选择项目' : '登录'}</button></div></section> : projectDetail.isPending ? <p role="status">正在读取项目。</p> : projectDetail.isError ? <p className="error-strip" role="alert">{projectDetail.error.message}</p> : projectDetail.data && <ProjectBaselineHistory key={selectedProjectId} detail={projectDetail.data} canWrite={canWrite} isAdmin={isAdmin} isSuperAdmin={isSuperAdmin} focusedBaselineId={focusedBaselineId} composerRequest={baselineComposerRequest} requestedBaseline={null} onOpenReference={reference => { if (reference.deleted) return; if (reference.machineId) openMachine(reference.machineId); else if (reference.baselineId) openBaseline(reference.baselineId) }} onOpenPatches={(componentId, versionId) => { setFocusedComponentId(componentId); setFocusedVersionId(versionId); setFocusPatch(true); setActivePage('projects'); setSuccessMessage('') }} onSuccess={setSuccessMessage} />}
             </>}
 
             {activePage === 'software' && <section className="status-panel catalog-panel">
@@ -409,7 +314,7 @@ function App() {
               <label>项目版本<select value={impactVersionId} onChange={(event) => setImpactVersionId(event.target.value)} disabled={!selectedProjectId || projectDetail.isLoading}><option value="">{selectedProjectId ? '请选择版本' : '请先选择项目'}</option>{projectDetail.data?.components.flatMap((component) => component.versions.map((version) => <option key={version.id} value={version.id}>{component.name} · {version.versionNumber}</option>))}</select></label>
               {impactVersionId && <><dl className="runtime-list"><div><dt>组件</dt><dd>{versionDetail.data?.version.componentName ?? '—'}</dd></div><div><dt>序列</dt><dd>{versionDetail.data?.version.sequenceNo ?? '—'}</dd></div><div><dt>成熟度</dt><dd>{maturityText[versionDetail.data?.version.maturity ?? ''] ?? '—'}</dd></div><div><dt>安全状态</dt><dd>{safetyText[versionDetail.data?.version.safety ?? ''] ?? '—'}</dd></div><div><dt>推荐</dt><dd>{versionDetail.data?.recommended ? '是' : '否'}</dd></div></dl><dl className="runtime-list"><div><dt>已使用基线</dt><dd>{versionImpact.data?.usedBaselineIds.length ?? 0}</dd></div><div><dt>当前机台</dt><dd>{versionImpact.data?.currentMachineIds.length ?? 0}</dd></div><div><dt>目标机台</dt><dd>{versionImpact.data?.targetMachineIds.length ?? 0}</dd></div><div><dt>历史机台</dt><dd>{versionImpact.data?.historicalMachineIds.length ?? 0}</dd></div></dl><div className="component-list">{versionExposure.data?.map(snapshot => <article className="component-row" key={snapshot.id}><div><strong>阻断时影响快照</strong><span>当前 {snapshot.currentMachineCount} · 目标 {snapshot.targetMachineCount} · 历史 {snapshot.historicalMachineCount} · 基线 {snapshot.baselineCount}</span></div><small>{formatTime(snapshot.blockedAt)}<br />{snapshot.blockedBy} · {snapshot.reason}</small></article>)}{versionDetail.data?.transitions.map((item, index) => <article className="component-row" key={`${item.occurredAt}-${index}`}><div><strong>{lifecycleAxisText[item.axis] ?? item.axis}</strong><span>{maturityText[item.fromState] ?? safetyText[item.fromState] ?? item.fromState} → {maturityText[item.toState] ?? safetyText[item.toState] ?? item.toState} · {item.reason}</span></div><small>{item.actor} · {formatTime(item.occurredAt)}</small></article>)}{versionImpact.data?.recentFacts.map((fact, index) => <article className="component-row" key={`${fact.machineId}-${index}`}><div><strong>{operationText[fact.operationType] ?? fact.operationType}</strong><span>已有一条关联机台事实</span></div><small>{formatTime(fact.effectiveAt)}</small></article>)}</div></>}</section>}
 
-            {activePage === 'search' && <section className="status-panel catalog-panel"><div className="panel-heading"><div><span className="section-index">{searchAllProjects ? '全部项目' : selectedProject?.name ?? '当前项目'}</span><h3>项目、组件、版本、补丁、基线和机台</h3></div></div><div className="catalog-form"><label>搜索范围<select aria-label="搜索范围" value={searchAllProjects ? 'all' : 'current'} onChange={event => setSearchAllProjects(event.target.value === 'all')}><option value="current">当前项目</option><option value="all">全部项目</option></select></label><label>搜索词<input value={searchTerm} minLength={2} onChange={(event) => setSearchTerm(event.target.value)} placeholder="至少输入两个字符" /></label></div>{!searchAllProjects && !selectedProjectId && <p className="empty-state">尚未选择项目。</p>}{catalogSearch.isFetching && <p role="status">正在搜索。</p>}{catalogSearch.isSuccess && catalogSearch.data.length === 0 && <p className="empty-state">没有找到匹配的记录。</p>}{searchTerm.trim().length >= 2 && <div className="catalog-list">{catalogSearch.data?.map((item) => <button type="button" className="component-row" key={`${item.type}-${item.id}`} onClick={() => { if (item.type === 'Project' || item.type === 'Component' || item.type === 'Version' || item.type === 'Patch') { setSelectedProjectId(item.projectId); localStorage.setItem('confighub.selected-project-id', item.projectId); setFocusedBaselineId(''); setFocusedComponentId(item.type === 'Component' ? item.id : ''); setFocusPatch(item.type === 'Patch'); setFocusedVersionId(item.type === 'Patch' ? item.versionId ?? '' : item.type === 'Version' ? item.id : ''); setActivePage('projects') } else if (item.type === 'Baseline') { setSelectedProjectId(item.projectId); localStorage.setItem('confighub.selected-project-id', item.projectId); setFocusedVersionId(''); setFocusedBaselineId(item.id); setActivePage('projects') } else { setSelectedProjectId(item.projectId); setSelectedMachineId(item.id); setActivePage('machines') } }}><div><strong>{item.label}</strong><span>{searchCaption(item)}</span></div><small>打开</small></button>)}</div>}{catalogSearch.isError && <p className="error-strip">{catalogSearch.error.message}</p>}</section>}
+            {activePage === 'search' && <section className="status-panel catalog-panel"><div className="panel-heading"><div><span className="section-index">{searchAllProjects ? '全部项目' : selectedProject?.name ?? '当前项目'}</span><h3>项目、组件、版本、补丁、基线和机台</h3></div></div><div className="catalog-form"><label>搜索范围<select aria-label="搜索范围" value={searchAllProjects ? 'all' : 'current'} onChange={event => setSearchAllProjects(event.target.value === 'all')}><option value="current">当前项目</option><option value="all">全部项目</option></select></label><label>搜索词<input value={searchTerm} minLength={2} onChange={(event) => setSearchTerm(event.target.value)} placeholder="至少输入两个字符" /></label></div>{!searchAllProjects && !selectedProjectId && <p className="empty-state">尚未选择项目。</p>}{catalogSearch.isFetching && <p role="status">正在搜索。</p>}{catalogSearch.isSuccess && catalogSearch.data.length === 0 && <p className="empty-state">没有找到匹配的记录。</p>}{searchTerm.trim().length >= 2 && <div className="catalog-list">{catalogSearch.data?.map((item) => <button type="button" className="component-row" key={`${item.type}-${item.id}`} onClick={() => { if (item.type === 'Project' || item.type === 'Component' || item.type === 'Version' || item.type === 'Patch') { setSelectedProjectId(item.projectId); localStorage.setItem('confighub.selected-project-id', item.projectId); setFocusedBaselineId(''); setFocusedComponentId(item.type === 'Component' ? item.id : ''); setFocusPatch(item.type === 'Patch'); setFocusedVersionId(item.type === 'Patch' ? item.versionId ?? '' : item.type === 'Version' ? item.id : ''); setActivePage('projects') } else if (item.type === 'Baseline') { setSelectedProjectId(item.projectId); localStorage.setItem('confighub.selected-project-id', item.projectId); setFocusedVersionId(''); setFocusedBaselineId(item.id); setBaselineComposerRequest(0); setActivePage('baselines') } else { setSelectedProjectId(item.projectId); setSelectedMachineId(item.id); setActivePage('machines') } }}><div><strong>{item.label}</strong><span>{searchCaption(item)}</span></div><small>打开</small></button>)}</div>}{catalogSearch.isError && <p className="error-strip">{catalogSearch.error.message}</p>}</section>}
 
             {activePage === 'compare' && <ConfigurationCompare key={selectedProjectId ?? ''} projectId={selectedProjectId ?? ''} components={projectDetail.data?.components ?? []} onOpenPatches={versionId => { setFocusedComponentId(''); setFocusedBaselineId(''); setFocusedVersionId(versionId); setFocusPatch(true); setActivePage('projects'); setSuccessMessage('') }} />}
 
@@ -430,7 +335,7 @@ function App() {
               {users.isError && <p className="error-strip">{users.error.message}</p>}
             </section>}
 
-            {activePage === 'machines' && <MachineWorkspace key={selectedProjectId ?? ''} projectId={selectedProjectId ?? ''} canWrite={canWrite} isAdmin={isAdmin} selectedMachineId={selectedMachineId} onSelectMachine={setSelectedMachineId} onOpenVersion={(projectId, versionId, patches = false) => { setSelectedProjectId(projectId); localStorage.setItem('confighub.selected-project-id', projectId); setFocusedComponentId(''); setFocusedBaselineId(''); setFocusedVersionId(versionId); setFocusPatch(patches); setActivePage('projects'); setSuccessMessage('') }} onSuccess={setSuccessMessage} />}
+            {activePage === 'machines' && <MachineWorkspace key={selectedProjectId ?? ''} projectId={selectedProjectId ?? ''} canWrite={canWrite} isAdmin={isAdmin} initialAttention={machineAttention} selectedMachineId={selectedMachineId} onSelectMachine={setSelectedMachineId} onOpenVersion={(projectId, versionId, patches = false) => { setSelectedProjectId(projectId); localStorage.setItem('confighub.selected-project-id', projectId); setFocusedComponentId(''); setFocusedBaselineId(''); setFocusedVersionId(versionId); setFocusPatch(patches); setActivePage('projects'); setSuccessMessage('') }} onSuccess={setSuccessMessage} />}
           </div>
         ) : (
           <section className="pending-page"><span className="section-index">后续垂直切片</span><h2>{selectedNavigation.label}尚未实现</h2><p>当前版本只完成了运行基础设施和后台任务链路。{selectedNavigation.label}将在核心领域模型与对应 API 落地后开放，现阶段不会提供无法保存或追溯的占位操作。</p><button className="primary-action" type="button" onClick={() => setActivePage('overview')}>返回运行总览</button></section>

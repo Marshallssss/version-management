@@ -31,7 +31,7 @@ async function main() {
     await target.goto('/')
     await target.evaluate(id => localStorage.setItem('confighub.selected-project-id', id), project.id)
     await target.reload()
-    await target.locator('.nav-item').filter({ hasText: '项目' }).click()
+    await target.locator('.nav-item').filter({ hasText: '版本' }).click()
     await target.locator('.root-node').first().click()
   }
   const openDelete = async number => {
@@ -64,6 +64,7 @@ async function main() {
     await page.screenshot({ path: path.join(output, name + '.png') })
   }
   const selectBaseline = async code => {
+    await page.locator('.nav-item').filter({ hasText: '基线' }).click()
     await page.locator('.baseline-timeline button').filter({ hasText: code }).click()
     await page.locator('.baseline-snapshot h3').filter({ hasText: code }).waitFor()
   }
@@ -139,6 +140,7 @@ async function main() {
     await page.locator('.baseline-snapshot h3').filter({ hasText: '冻结历史基线' }).waitFor()
     assert.deepEqual((await read(`/api/v1/baselines/${baseline.id}`)).items, snapshot.items)
 
+    await page.locator('.nav-item').filter({ hasText: '版本' }).click()
     await page.locator('.root-node').first().click()
     dialog = await openDelete('V1-frozen')
     await ready(dialog)
@@ -290,6 +292,7 @@ async function main() {
       assert.equal(await viewerPage.locator('.version-delete-button').count(), 0)
       await viewerPage.locator('.version-item').filter({ hasText: 'V1-corrected' }).click()
       assert.equal(await viewerPage.getByRole('button', { name: '调测维护', exact: true }).count(), 0)
+      await viewerPage.locator('.nav-item').filter({ hasText: '基线' }).click()
       await viewerPage.locator('.baseline-timeline button').filter({ hasText: '目标引用不可撤回' }).click()
       assert.equal(await viewerPage.getByRole('button', { name: '历史维护', exact: true }).count(), 0)
       assert.equal(await viewerPage.getByRole('button', { name: '撤回已发布基线', exact: true }).count(), 0)

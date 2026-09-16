@@ -170,12 +170,12 @@ body input[type="checkbox"], body input[type="radio"] { width: 16px; height: 16p
 body select option { color: var(--ui-ink); background: #fff; }
 .catalog-form { align-items: end; gap: 16px; margin: 16px 0; padding: 0; border: 0; background: transparent; }
 .catalog-form + .catalog-form { margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--ui-line); }
-body :is(.panel-heading, .catalog-form, .workspace-form, .compact-form, .toolbar-actions, .form-actions, .maintenance-action, .equipment-dialog, .machine-dialog, .overview-actions) button:where(:not(.ant-modal-close, .ant-btn, .inspector-toggle, .root-order-actions button)) {
+body :is(.panel-heading, .catalog-form, .workspace-form, .compact-form, .toolbar-actions, .form-actions, .maintenance-action, .equipment-dialog, .machine-dialog, .overview-actions, .overview-section-heading, .overview-diagnostic-form, .overview-empty, .baseline-history-filters, .history-list-state) button:where(:not(.ant-modal-close, .ant-btn, .inspector-toggle, .root-order-actions button)) {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   min-height: 36px; padding: 7px 12px; border: 1px solid #cbd4e0; border-radius: var(--ui-radius);
   color: var(--ui-ink); background: var(--ui-surface); font-family: inherit; font-size: 13px; line-height: 1.5;
 }
-body :is(.panel-heading, .catalog-form, .workspace-form, .compact-form, .toolbar-actions, .form-actions, .maintenance-action, .equipment-dialog, .machine-dialog, .overview-actions) button:where(:hover:not(:disabled, .ant-modal-close, .ant-btn)) {
+body :is(.panel-heading, .catalog-form, .workspace-form, .compact-form, .toolbar-actions, .form-actions, .maintenance-action, .equipment-dialog, .machine-dialog, .overview-actions, .overview-section-heading, .overview-diagnostic-form, .overview-empty, .baseline-history-filters, .history-list-state) button:where(:hover:not(:disabled, .ant-modal-close, .ant-btn)) {
   border-color: #a7bdf2; color: var(--ui-primary); background: #f8faff;
 }
 body button.primary-action, body .toolbar-actions button.primary-action, body .equipment-footer button.primary-action {
