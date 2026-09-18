@@ -11,12 +11,12 @@ public static partial class CatalogEndpoints
 {
     private static async Task<IResult> DeleteVersionAsync(Guid versionId, DeleteVersionRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
     {
-        if (!context.User.IsInRole("SuperAdmin")) return Results.Forbid();
         if (ValidateRequired(request.Reason, "删除原因", 500) is { } error) return Results.ValidationProblem(error);
         var key = context.Request.Headers["Idempotency-Key"].FirstOrDefault();
         if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.BadRequest(new { message = "删除版本需要有效的幂等键。" });
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
+        if (!await IsCurrentVersionAdministratorAsync(db, context, cancellationToken)) return Results.Forbid();
         var scope = $"versions.delete:{versionId}";
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request))));
         var replay = await db.IdempotencyRecords.AsNoTracking().SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
@@ -30,14 +30,16 @@ public static partial class CatalogEndpoints
             return Results.NotFound();
         }
         if (await db.MachineChamberVersions.AnyAsync(item => item.VersionId == versionId, cancellationToken)
-            || await db.MatrixImportReferences.AnyAsync(item => item.VersionId == versionId, cancellationToken)
             || await db.LaboratoryValidations.AnyAsync(item => item.ComponentVersionId == versionId, cancellationToken)
             || await db.BaselineItems.AnyAsync(item => item.ComponentVersionId == versionId, cancellationToken)
             || await db.ConfigurationBaselines.AnyAsync(item => item.TopComponentVersionId == versionId, cancellationToken)
             || await db.DeploymentItems.AnyAsync(item => item.NewComponentVersionId == versionId, cancellationToken)
             || await db.MachineCurrentConfigurations.AnyAsync(item => item.ComponentVersionId == versionId, cancellationToken)
             || await db.VersionExposureSnapshots.AnyAsync(item => item.ComponentVersionId == versionId, cancellationToken))
-            return Results.Conflict(new { message = "该版本已被基线、Excel 模板／组合、机台历史或验证记录引用，不能删除。可将版本标记为已废弃，保留追溯记录。" });
+            return Results.Conflict(new { message = "该版本已被基线、机台配置、验证或风险记录引用，不能删除。可将版本标记为已废弃，保留追溯记录。" });
+        var importReferences = await db.MatrixImportReferences.Where(item => item.VersionId == versionId).ToListAsync(cancellationToken);
+        // Preserve import snapshots and their component references; only detach the live version link.
+        foreach (var reference in importReferences) reference.VersionId = null;
         var patches = await db.VersionPatches.Where(item => item.ComponentVersionId == versionId).ToListAsync(cancellationToken);
         var transitions = await db.VersionLifecycleTransitions.Where(item => item.ComponentVersionId == versionId).ToListAsync(cancellationToken);
         var recommendations = await db.VersionRecommendations.Where(item => item.ComponentVersionId == versionId).ToListAsync(cancellationToken);
@@ -45,7 +47,7 @@ public static partial class CatalogEndpoints
         db.VersionLifecycleTransitions.RemoveRange(transitions);
         db.VersionRecommendations.RemoveRange(recommendations);
         db.ComponentVersions.Remove(version);
-        AddAuditEvent(db, context, "ComponentVersionDeleted", "ComponentVersion", versionId, new { version, patches, transitions, recommendations, reason = request.Reason!.Trim() });
+        AddAuditEvent(db, context, "ComponentVersionDeleted", "ComponentVersion", versionId, new { version, patches, transitions, recommendations, retainedImportReferences = importReferences.Select(item => new { item.Id, item.TemplateId, item.CombinationId, item.ComponentId, deletedVersionId = versionId }).ToArray(), reason = request.Reason!.Trim() });
         var result = new { id = versionId, deleted = true, componentId = version.ComponentId };
         var now = DateTimeOffset.UtcNow;
         db.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7), Status = IdempotencyRecordStatus.Completed, Result = JsonDocument.Parse(JsonSerializer.Serialize(result)) });
@@ -59,6 +61,30 @@ public static partial class CatalogEndpoints
         {
             return Results.Conflict(new { message = "该版本刚被其他记录引用，删除未执行。请刷新后重试。" });
         }
+    }
+
+    private static async Task<bool> IsCurrentVersionAdministratorAsync(ConfigHubDbContext db, HttpContext context, CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(context.User.FindFirst(global::System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var userId)) return false;
+        return await (from user in db.Users
+            join membership in db.UserRoles on user.Id equals membership.UserId
+            join role in db.Roles on membership.RoleId equals role.Id
+            where user.Id == userId && (user.LockoutEnd == null || user.LockoutEnd <= DateTimeOffset.UtcNow)
+                && (role.Name == "Admin" || role.Name == "SuperAdmin")
+            select user.Id).AnyAsync(cancellationToken);
+    }
+
+    private static async Task<bool> HasCurrentVersionLifecycleAccessAsync(ConfigHubDbContext db, HttpContext context, Guid projectId, CancellationToken cancellationToken)
+    {
+        if (await IsCurrentVersionAdministratorAsync(db, context, cancellationToken)) return true;
+        if (!Guid.TryParse(context.User.FindFirst(global::System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var userId)) return false;
+        return await (from user in db.Users
+            join membership in db.UserRoles on user.Id equals membership.UserId
+            join role in db.Roles on membership.RoleId equals role.Id
+            where user.Id == userId && (user.LockoutEnd == null || user.LockoutEnd <= DateTimeOffset.UtcNow)
+                && role.Name == "SeniorEngineer"
+                && db.ProjectMemberships.Any(item => item.ProjectId == projectId && item.UserId == userId && item.Role == ProjectMembershipRole.SeniorEngineer)
+            select user.Id).AnyAsync(cancellationToken);
     }
 
     private static async Task<IResult> ManageVersionPatchAsync(Guid patchId, ManagePatchRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)

@@ -15,9 +15,10 @@ async function main() {
   const output = path.resolve('artifacts/matrix-import', token)
   mkdirSync(output, { recursive: true })
   const workbook = path.join(output, 'project.xlsx')
-  const fixture = (changes = {}, file = workbook) => JSON.parse(execFileSync('powershell.exe', [
+  const fixture = (changes = {}, file = workbook, legacyLayout = false) => JSON.parse(execFileSync('powershell.exe', [
     '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.resolve('tests/integration/matrix-workbook-fixture.ps1'),
     '-Path', file, '-CellsJson', JSON.stringify(changes),
+    ...(legacyLayout ? ['-LegacyLayout'] : []),
   ], { encoding: 'utf8', windowsHide: true }).replace(/^\uFEFF/, ''))
   const write = async (url, data, method = 'POST', key = randomUUID()) => {
     const response = await api.fetch(url, { method, data, headers: { 'Idempotency-Key': key } })
@@ -46,7 +47,7 @@ async function main() {
     assert(download.ok(), await download.text())
     assert.match(download.headers()['content-type'], /spreadsheetml/)
     writeFileSync(workbook, await download.body())
-    const cells = fixture()
+    const cells = fixture({}, workbook, true)
     const column = component => Object.entries(cells).find(([cell, value]) => cell.endsWith('1') && value === component.id)?.[0].replace(/1$/, '')
     const aCol = column(a), bCol = column(b), uiCol = column(ui)
     assert(aCol && bCol && uiCol, 'Every version component has a bound template column')
@@ -124,10 +125,8 @@ async function main() {
     fixture({ A7: cells.A6 }, invalid)
     await scan(invalid)
     assert.equal((await state()).combinations.length, 3)
-    const deletion = await api.delete(`/api/v1/component-versions/${first.id}`, { data: { reason: '组合引用保护' }, headers: { 'Idempotency-Key': randomUUID() } })
-    assert.equal(deletion.status(), 409, await deletion.text())
     const impact = await get(`/api/v1/component-versions/${first.id}/operation-impact`)
-    assert.equal(impact.canDelete, false, 'Deletion preview must include Excel combination references')
+    assert.equal(impact.canDelete, true, 'An administrator can correct an imported version while preserving combination snapshots')
     assert(impact.groups.find(group => group.kind === 'matrix-combinations')?.total > 0)
     const referenceImpact = await get(`/api/v1/component-versions/${v0[ui.id].id}/operation-impact`)
     assert(referenceImpact.groups.find(group => group.kind === 'matrix-templates')?.total > 0)

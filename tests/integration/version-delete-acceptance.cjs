@@ -31,13 +31,13 @@ async function main() {
     assert.equal((await remove(deletable.id, '')).status(), 400)
     assert.equal((await remove(deletable.id, 'x'.repeat(501))).status(), 400)
     assert.equal((await admin.request.delete(`/api/v1/component-versions/${deletable.id}`, { data: { reason: '缺少幂等键' } })).status(), 400)
-    for (const role of ['Admin', 'Engineer', 'Viewer']) {
+    for (const role of ['Admin', 'SeniorEngineer', 'Engineer', 'Viewer']) {
       const userName = role.toLowerCase() + '-' + randomUUID().slice(0, 8)
       const password = randomUUID()
       await post('/api/v1/admin/users', { userName, displayName: '权限验收', password, role, reason: '权限验收' })
       const other = await browser.newContext({ baseURL })
       await post('/api/v1/auth/login', { userName, password }, other.request)
-      assert.equal((await remove(deletable.id, '权限测试', randomUUID(), other.request)).status(), 403)
+      if (role !== 'Admin') assert.equal((await remove(deletable.id, '权限测试', randomUUID(), other.request)).status(), 403)
       if (role === 'Admin') {
         const otherPage = await other.newPage()
         await otherPage.goto('/')
@@ -45,7 +45,9 @@ async function main() {
         await otherPage.reload()
         await otherPage.locator('.nav-item').filter({ hasText: '版本' }).click()
         await otherPage.locator('.root-node').first().click()
-        assert.equal(await otherPage.locator('.version-delete-button').count(), 0)
+        assert(await otherPage.locator('.version-delete-button').count() > 0)
+        const adminVersion = await createVersion('V-admin-delete')
+        assert.equal((await remove(adminVersion.id, '管理员清理误登记', randomUUID(), other.request)).status(), 200)
       }
       await other.close()
     }
@@ -102,7 +104,7 @@ async function main() {
     await post(`/api/v1/component-versions/${blocked.id}/safety`, { state: 'Blocked', reason: '影响快照保护' })
     assert.equal((await remove(blocked.id, '影响快照保护')).status(), 409)
     assert.deepEqual(errors, [])
-    console.log('Version deletion acceptance passed: SuperAdmin-only UI/API, confirmation/cancel, concurrent replay, audit, related-record cleanup, sibling retention and historical references.')
+    console.log('Version deletion acceptance passed: Admin/SuperAdmin UI/API, Engineer/Viewer denial, confirmation/cancel, concurrent replay, audit, related-record cleanup, sibling retention and historical references.')
   } finally {
     if (project) await post(`/api/v1/projects/${project.id}/archive`, { reason: '验收结束' }).catch(() => {})
     await browser.close()

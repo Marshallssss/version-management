@@ -10,6 +10,9 @@ export interface MatrixComponent {
   versionId: string | null
   versionNumber: string | null
   changed: boolean
+  previousVersionId?: string | null
+  previousVersionNumber?: string | null
+  versionAvailable?: boolean
 }
 
 export interface MatrixTemplate {
@@ -32,6 +35,18 @@ export interface MatrixSource {
   lastStatus: string | null
 }
 
+export interface MatrixMessage {
+  rowNumber: number | null
+  level: 'error' | 'info'
+  message: string
+  combinationId?: string | null
+  componentId?: string | null
+  componentName?: string | null
+  previousVersionNumber?: string | null
+  versionNumber?: string | null
+  sourceLabel?: string | null
+}
+
 export interface MatrixRun {
   id: string
   fileName: string
@@ -42,7 +57,7 @@ export interface MatrixRun {
   status: string
   importedCount: number
   skippedCount: number
-  messages: Array<{ rowNumber: number | null; level: 'error' | 'info'; message: string }>
+  messages: MatrixMessage[]
 }
 
 export interface MatrixCombination {
@@ -51,6 +66,7 @@ export interface MatrixCombination {
   runId: string
   sequenceNo: number
   sourceRow: number
+  sourceLabel?: string | null
   recordDate: string
   createdAt: string
   reason: string
@@ -72,6 +88,7 @@ const json = (method: string, input: unknown): RequestInit => ({
 })
 
 export const getMatrixWorkspace = (projectId: string) => request<MatrixWorkspace>(endpoint(projectId))
+export const getMatrixCombination = (projectId: string, combinationId: string) => request<MatrixCombination>(`${endpoint(projectId)}/combinations/${combinationId}`)
 export const createMatrixTemplate = (projectId: string, reason: string) => request<{ id: string; downloadUrl: string }>(`${endpoint(projectId)}/templates`, json('POST', { reason }))
 export const scanMatrixWorkbook = (projectId: string, input: { templateId: string; contentBase64: string; fileName: string; reason: string }) => request<MatrixRun>(`${endpoint(projectId)}/scan`, json('POST', input))
 export const saveMatrixSource = (projectId: string, input: { templateId: string; path: string; localTime: string; timeZoneId: string; enabled: boolean; reason: string }) => request<MatrixSource>(`${endpoint(projectId)}/source`, json('PUT', input))

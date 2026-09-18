@@ -10,8 +10,8 @@ public static partial class CatalogEndpoints
         Guid versionId, HttpContext context, IConfiguration configuration,
         IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
     {
-        if (!context.User.IsInRole("SuperAdmin")) return Results.Forbid();
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        if (!await IsCurrentVersionAdministratorAsync(db, context, cancellationToken)) return Results.Forbid();
         var version = await (from item in db.ComponentVersions.AsNoTracking()
             join component in db.ConfigurationComponents.AsNoTracking() on item.ComponentId equals component.Id
             where item.Id == versionId
@@ -74,8 +74,8 @@ public static partial class CatalogEndpoints
             await BuildOperationImpactGroupAsync("machine-history", "整机配置历史", machineHistory, cancellationToken),
             await BuildOperationImpactGroupAsync("chamber-history", "PM 特例历史", chamberHistory, cancellationToken),
             await BuildOperationImpactGroupAsync("exposure-snapshots", "风险影响快照", exposures, cancellationToken),
-            await BuildOperationImpactGroupAsync("matrix-templates", "Excel 模板参考", templates, cancellationToken),
-            await BuildOperationImpactGroupAsync("matrix-combinations", "Excel 测试组合", combinations, cancellationToken),
+            await BuildOperationImpactGroupAsync("matrix-templates", "Excel 模板参考（保留快照，不阻止删除）", templates, cancellationToken),
+            await BuildOperationImpactGroupAsync("matrix-combinations", "Excel 测试组合（保留快照，不阻止删除）", combinations, cancellationToken),
             await BuildOperationImpactGroupAsync("laboratory-validations", "Lab 验证记录", laboratory, cancellationToken)
         ];
         var cleanupCounts = new VersionCleanupCounts(
@@ -83,7 +83,7 @@ public static partial class CatalogEndpoints
             await db.VersionLifecycleTransitions.CountAsync(item => item.ComponentVersionId == versionId, cancellationToken),
             await db.VersionRecommendations.CountAsync(item => item.ComponentVersionId == versionId, cancellationToken));
         return Results.Ok(new VersionOperationImpact(version.Id, version.VersionNumber, version.ComponentId,
-            version.ComponentName, groups.All(group => group.Total == 0),
+            version.ComponentName, groups.Where(group => group.Kind is not ("matrix-templates" or "matrix-combinations")).All(group => group.Total == 0),
             configuration.GetValue<bool>("ConfigHub:TestDataMaintenanceEnabled"), cleanupCounts, groups));
     }
 

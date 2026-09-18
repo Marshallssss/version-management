@@ -55,10 +55,19 @@
 .matrix-tree-node > strong { font-weight: 500; color: var(--ui-muted); max-width: 120px; }
 .matrix-tree-node.root { border-color: transparent; background: var(--ui-surface-muted); }
 .matrix-tree-node.root > span { font-weight: 600; }
-.matrix-tree-node.changed { border-color: #a8c2f4; background: #f2f6ff; }
-.matrix-tree-node.changed > strong { color: var(--ui-primary); font-weight: 600; }
+.matrix-tree-node.changed { grid-template-columns: minmax(0, 1fr); border-color: #ebafb7; background: #fff0f2; box-shadow: inset 3px 0 #c34759; }
+.matrix-tree-node.changed .matrix-component-name { color: #982e3f; font-weight: 600; }
+.matrix-tree-node.focused { outline: 2px solid #b74154; outline-offset: 2px; scroll-margin-block: 80px; }
+.matrix-version-change { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 8px; min-width: 0; }
+.matrix-previous-version { color: #80535b; }
+.matrix-change-arrow { color: #a63c4d; }
+.matrix-current-version { min-width: 0; text-align: right; }
+.matrix-current-version strong { font-weight: 500; }
+.matrix-version-change .matrix-current-version { color: #982e3f; text-align: left; font-weight: 600; }
 .matrix-import-workspace .matrix-tree-node button.matrix-version-link { min-height: 0; padding: 0; border: 0; background: transparent; color: var(--ui-primary); font-size: 12px; text-align: right; overflow-wrap: anywhere; }
-.matrix-tree-node > small { grid-column: 2; color: var(--ui-primary); font-size: 10px; }
+.matrix-import-workspace .matrix-tree-node.changed button.matrix-version-link { color: #a42e43; text-align: left; }
+.matrix-import-workspace .matrix-tree-node button.matrix-version-link:hover { text-decoration: underline; }
+.matrix-tree-node > small { grid-column: 1 / -1; color: var(--ui-muted); font-size: 10px; }
 .matrix-tree-branch .matrix-tree-branch .matrix-tree-branch { border-left: 1px solid var(--ui-line); padding-left: 8px; margin-left: 8px; }
 .matrix-detail-meta { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 20px; padding-top: 12px; border-top: 1px solid var(--ui-line); color: var(--ui-muted); font-size: 11px; line-height: 1.6; }
 .matrix-run-counts { display: flex; flex-wrap: wrap; gap: 24px; padding: 0 0 16px; color: var(--ui-muted); font-size: 12px; }
@@ -67,6 +76,10 @@
 .matrix-run-messages li { display: grid; grid-template-columns: 75px minmax(0, 1fr); gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--ui-line); font-size: 12px; line-height: 1.7; color: var(--ui-muted); }
 .matrix-run-messages li strong { font-weight: 500; }
 .matrix-run-messages li span { overflow-wrap: anywhere; }
+.matrix-run-messages a.matrix-change-link { color: var(--ui-primary); text-decoration: underline; text-decoration-color: #bccdf1; text-underline-offset: 3px; overflow-wrap: anywhere; border-radius: 2px; }
+.matrix-run-messages a.matrix-change-link:hover { color: #1a48a2; text-decoration-color: currentColor; }
+.matrix-run-messages a.matrix-change-link:focus-visible { outline: 2px solid var(--ui-primary); outline-offset: 3px; }
+.matrix-combination-load-error { min-width: 0; }
 .matrix-run-messages li.error, .matrix-import-workspace .matrix-error-text, .matrix-import-workspace .matrix-error-text b { color: var(--ui-danger); }
 .matrix-legacy-entry { margin-top: 26px; padding-top: 18px; border-top: 1px solid var(--ui-line); }
 .matrix-legacy-entry > summary { cursor: pointer; color: var(--ui-muted); font-size: 13px; }

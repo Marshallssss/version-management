@@ -30,4 +30,14 @@
 .laboratory-content .laboratory-actions button[aria-pressed="true"], .laboratory-content button.primary-action { color: #fff; background: var(--ui-primary); border-color: var(--ui-primary); }
 .laboratory-badge { color: var(--ui-muted); border-color: var(--ui-line); }
 .laboratory-badge.Failed { color: var(--ui-danger); }
+.lab-node-shell { position: relative; min-width: 0; }
+.project-workspace .lab-node-shell.has-lab-status .lab-node { padding-right: 72px; }
+.project-workspace .lab-node-shell > .laboratory-badge.machine-state {
+  position: absolute; right: 10px; top: 50%; transform: translateY(-50%); margin: 0;
+  display: inline-flex; justify-content: center; width: 54px; height: 24px; min-height: 24px;
+  padding: 2px 5px; border: 1px solid #566171; border-radius: 4px; color: #fff; background: #566171; font-size: 11px;
+}
+.project-workspace .lab-node-shell > .laboratory-badge.deployed { background: #2853a5; border-color: #2853a5; }
+.project-workspace .lab-node-shell > .laboratory-badge:focus-visible { outline: 2px solid var(--ui-primary); outline-offset: 2px; }
+.project-workspace .laboratory-tree .lab-root-column > .lab-branch-node > .lab-node-shell > .lab-node { border-left: 3px solid #d49b41; background: var(--ui-lab-soft); }
 @media (max-width: 600px) { .laboratory-drawer .ant-drawer-content-wrapper { max-width: 100vw; } .laboratory-drawer .ant-drawer-body { padding: 16px; } }

@@ -8,7 +8,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ConfigHub.Infrastructure.ExcelImport;
 
-public sealed record MatrixMessage(int? RowNumber, string Level, string Message);
+public sealed record MatrixMessage(int? RowNumber, string Level, string Message, Guid? CombinationId = null,
+    Guid? ComponentId = null, string? ComponentName = null, string? PreviousVersionNumber = null,
+    string? VersionNumber = null, string? SourceLabel = null);
 
 public static class MatrixImportService
 {
@@ -71,19 +73,20 @@ public static class MatrixImportService
             var waiting = false;
             foreach (var row in rows)
             {
+                var position = row.SourceLabel ?? $"第 {row.RowNumber} 行";
                 var contentHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { row.RecordDate, row.Reason, values = row.Values.OrderBy(x => x.Key) }, Json))));
                 if (knownRows.TryGetValue(row.RowKey, out var old))
                 {
-                    if (old.ContentHash != contentHash) throw new InvalidDataException($"第 {row.RowNumber} 行已录入，内容被修改。请还原该行，新增一行登记变更。");
+                    if (old.ContentHash != contentHash) throw new InvalidDataException($"{position}已录入，内容被修改。请还原原记录，新增一条登记变更。");
                     run.SkippedCount++;
                     continue;
                 }
                 if (!row.Submit) { waiting = true; run.SkippedCount++; continue; }
-                if (waiting) throw new InvalidDataException($"第 {row.RowNumber} 行之前还有待填写记录，请先完成前序记录，避免继承错误。");
-                if (!DateOnly.TryParseExact(row.RecordDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _)) throw new InvalidDataException($"第 {row.RowNumber} 行记录日期应为 YYYY-MM-DD 文本。");
-                if (string.IsNullOrWhiteSpace(row.Reason) || row.Reason.Length > 500) throw new InvalidDataException($"第 {row.RowNumber} 行必须填写不超过 500 字的变更说明。");
-                if (row.Values.Values.Any(x => x.Length > 160)) throw new InvalidDataException($"第 {row.RowNumber} 行版本号不能超过 160 字。");
-                var items = preceding.Select(x => x with { Changed = false }).ToList();
+                if (waiting) throw new InvalidDataException($"{position}之前还有待填写记录，请先完成前序记录，避免继承错误。");
+                if (!DateOnly.TryParseExact(row.RecordDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _)) throw new InvalidDataException($"{position}记录日期应为 YYYY-MM-DD 文本，例如 2026-09-18。");
+                if (string.IsNullOrWhiteSpace(row.Reason) || row.Reason.Length > 500) throw new InvalidDataException($"{position}必须填写不超过 500 字的变更说明。");
+                if (row.Values.Values.Any(x => x.Length > 160)) throw new InvalidDataException($"{position}版本号不能超过 160 字。");
+                var items = preceding.Select(x => x with { Changed = false, PreviousVersionId = x.VersionId, PreviousVersionNumber = x.VersionNumber }).ToList();
                 for (var i = 0; i < items.Count; i++)
                 {
                     var item = items[i];
@@ -93,18 +96,23 @@ public static class MatrixImportService
                     if (version is null)
                     {
                         var command = await ComponentVersionCommands.CreateAsync(db, item.ComponentId, number, row.Reason, writeContext, ct, VersionMaturity.Testing);
-                        version = command.Version ?? throw new InvalidDataException($"第 {row.RowNumber} 行版本与并发登记冲突，请重新扫描。");
+                        version = command.Version ?? throw new InvalidDataException($"{position}版本与并发登记冲突，请重新扫描。");
                         availableVersions.Add(version);
                     }
                     items[i] = item with { VersionId = version.Id, VersionNumber = version.VersionNumber, Changed = item.VersionId != version.Id };
                 }
+                var unavailable = items.FirstOrDefault(item => item.VersionId != null && !availableVersions.Any(version => version.Id == item.VersionId));
+                if (unavailable is not null) throw new InvalidDataException($"{position}沿用的「{unavailable.ComponentName} / {unavailable.VersionNumber}」已被管理员删除。请在本条明确填写该组件的正确版本，不能继续继承误登记版本。");
                 var combination = new MatrixImportCombination { Id = Guid.NewGuid(), ProjectId = projectId, TemplateId = templateId, RunId = run.Id, RowKey = row.RowKey, SourceRow = row.RowNumber, SequenceNo = ++sequence, ContentHash = contentHash, RecordDate = row.RecordDate, Reason = row.Reason, CreatedAt = DateTimeOffset.UtcNow, Items = Document(items) };
                 db.MatrixImportCombinations.Add(combination);
                 foreach (var item in items) db.MatrixImportReferences.Add(new() { Id = Guid.NewGuid(), TemplateId = templateId, CombinationId = combination.Id, ComponentId = item.ComponentId, VersionId = item.VersionId });
                 Audit(db, writeContext, "MatrixCombinationImported", combination.Id, new { projectId, templateId, sourceId, row.RowNumber, row.Reason, changed = items.Count(x => x.Changed), grantorUserId = userId });
                 preceding = items;
                 run.ImportedCount++;
-                messages.Add(new(row.RowNumber, "info", $"已登记第 {sequence} 套组合，{items.Count(x => x.Changed)} 个组件变更。"));
+                foreach (var item in items.Where(item => item.Changed))
+                    messages.Add(new(row.RowNumber, "info", $"{item.ComponentName} 从 {item.PreviousVersionNumber ?? "未指定"} 变为 {item.VersionNumber ?? "未指定"}",
+                        combination.Id, item.ComponentId, item.ComponentName, item.PreviousVersionNumber, item.VersionNumber, position));
+                if (!items.Any(item => item.Changed)) messages.Add(new(row.RowNumber, "info", "沿用前一套配置，无组件版本变更。", combination.Id, SourceLabel: position));
                 await db.SaveChangesAsync(ct);
             }
         }

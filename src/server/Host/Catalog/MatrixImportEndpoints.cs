@@ -15,6 +15,7 @@ public static partial class CatalogEndpoints
     {
         var group = endpoints.MapGroup("/api/v1/projects/{projectId:guid}/matrix-import").RequireAuthorization();
         group.MapGet("", GetMatrixImportAsync);
+        group.MapGet("/combinations/{combinationId:guid}", GetMatrixCombinationAsync);
         group.MapPost("/templates", CreateMatrixTemplateAsync).RequireAuthorization("SeniorEngineer");
         group.MapGet("/templates/{templateId:guid}/download", DownloadMatrixTemplateAsync);
         group.MapPost("/scan", ScanMatrixUploadAsync).RequireAuthorization("SeniorEngineer");
@@ -48,10 +49,80 @@ public static partial class CatalogEndpoints
         var sources = await db.MatrixImportSources.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct);
         var runs = await db.MatrixImportRuns.AsNoTracking().Where(x => x.ProjectId == projectId).OrderByDescending(x => x.CreatedAt).Take(100).ToListAsync(ct);
         var combinations = await db.MatrixImportCombinations.AsNoTracking().Where(x => x.ProjectId == projectId).OrderByDescending(x => x.CreatedAt).Take(200).ToListAsync(ct);
+        var legacyRunIds = runs.Where(run => MatrixImportService.Read<List<MatrixMessage>>(run.Messages)
+            .Any(message => message.Level == "info" && message.RowNumber != null && message.CombinationId == null)).Select(run => run.Id).ToArray();
+        var ids = combinations.Select(combination => combination.Id).ToArray();
+        var legacyCombinations = await db.MatrixImportCombinations.AsNoTracking()
+            .Where(combination => legacyRunIds.Contains(combination.RunId) && !ids.Contains(combination.Id)).ToListAsync(ct);
+        var views = await MatrixCombinationViewsAsync(db, combinations.Concat(legacyCombinations).ToList(), ct);
+        foreach (var run in runs.Where(run => legacyRunIds.Contains(run.Id)))
+        {
+            var messages = new List<MatrixMessage>();
+            foreach (var message in MatrixImportService.Read<List<MatrixMessage>>(run.Messages))
+            {
+                var combination = message.Level == "info" && message.CombinationId == null
+                    ? views.Values.FirstOrDefault(item => item.RunId == run.Id && item.SourceRow == message.RowNumber) : null;
+                if (combination is null) { messages.Add(message); continue; }
+                var changed = combination.Items.Where(item => item.Changed).ToArray();
+                if (changed.Length == 0) messages.Add(message with { Message = "沿用前一套配置，无组件版本变更。", CombinationId = combination.Id, SourceLabel = combination.SourceLabel });
+                foreach (var item in changed) messages.Add(new(message.RowNumber, "info",
+                    $"{item.ComponentName} 从 {item.PreviousVersionNumber ?? "未指定"} 变为 {item.VersionNumber ?? "未指定"}",
+                    combination.Id, item.ComponentId, item.ComponentName, item.PreviousVersionNumber, item.VersionNumber, combination.SourceLabel));
+            }
+            // Enrich old summaries for display without rewriting persisted import history.
+            run.Messages = MatrixImportService.Document(messages);
+        }
         return Results.Ok(new
         {
             templates = templates.Select(x => new { x.Id, x.CreatedAt, x.ReferenceBaselineCode, componentCount = MatrixImportService.Read<List<MatrixComponent>>(x.Components).Count(c => !c.IsCategory), components = x.Components.RootElement }),
-            sources, runs, combinations
+            sources, runs, combinations = combinations.Select(combination => views[combination.Id])
+        });
+    }
+
+    private static async Task<IResult> GetMatrixCombinationAsync(Guid projectId, Guid combinationId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken ct)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        if (!await db.Projects.AnyAsync(project => project.Id == projectId && project.Status == ProjectStatus.Active, ct)) return Results.NotFound();
+        var combination = await db.MatrixImportCombinations.AsNoTracking().SingleOrDefaultAsync(item => item.ProjectId == projectId && item.Id == combinationId, ct);
+        if (combination is null) return Results.NotFound();
+        var views = await MatrixCombinationViewsAsync(db, [combination], ct);
+        return Results.Ok(views[combinationId]);
+    }
+
+    private sealed record MatrixCombinationView(Guid Id, Guid ProjectId, Guid TemplateId, Guid RunId, string RowKey,
+        int SourceRow, string SourceLabel, long SequenceNo, string ContentHash, string RecordDate, string Reason,
+        DateTimeOffset CreatedAt, IReadOnlyList<MatrixComponent> Items);
+
+    private static async Task<Dictionary<Guid, MatrixCombinationView>> MatrixCombinationViewsAsync(ConfigHubDbContext db,
+        List<MatrixImportCombination> combinations, CancellationToken ct)
+    {
+        if (combinations.Count == 0) return [];
+        var selectedIds = combinations.Select(item => item.Id).ToArray();
+        var templateIds = combinations.Select(item => item.TemplateId).Distinct().ToArray();
+        var runIds = combinations.Select(item => item.RunId).Distinct().ToArray();
+        var templates = await db.MatrixImportTemplates.AsNoTracking().Where(item => templateIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, ct);
+        var previous = await db.MatrixImportCombinations.AsNoTracking().Where(candidate => db.MatrixImportCombinations.Any(current =>
+            selectedIds.Contains(current.Id) && current.TemplateId == candidate.TemplateId && current.SequenceNo == candidate.SequenceNo + 1)).ToListAsync(ct);
+        var previousItems = previous.ToDictionary(item => (item.TemplateId, item.SequenceNo), item => MatrixImportService.Read<List<MatrixComponent>>(item.Items));
+        var runs = await db.MatrixImportRuns.AsNoTracking().Where(item => runIds.Contains(item.Id)).ToListAsync(ct);
+        var messages = runs.ToDictionary(item => item.Id, item => MatrixImportService.Read<List<MatrixMessage>>(item.Messages));
+        var frozen = combinations.ToDictionary(item => item.Id, item => MatrixImportService.Read<List<MatrixComponent>>(item.Items));
+        var versionIds = frozen.Values.SelectMany(items => items).Where(item => item.VersionId != null).Select(item => item.VersionId!.Value).Distinct().ToArray();
+        var available = (await db.ComponentVersions.AsNoTracking().Where(version => versionIds.Contains(version.Id)).Select(version => version.Id).ToListAsync(ct)).ToHashSet();
+        return combinations.ToDictionary(combination => combination.Id, combination =>
+        {
+            var before = (previousItems.GetValueOrDefault((combination.TemplateId, combination.SequenceNo - 1))
+                ?? MatrixImportService.Read<List<MatrixComponent>>(templates[combination.TemplateId].Components)).ToDictionary(item => item.ComponentId);
+            var items = frozen[combination.Id].Select(item => item with
+            {
+                PreviousVersionId = before.GetValueOrDefault(item.ComponentId)?.VersionId,
+                PreviousVersionNumber = before.GetValueOrDefault(item.ComponentId)?.VersionNumber,
+                VersionAvailable = item.VersionId == null || available.Contains(item.VersionId.Value)
+            }).ToArray();
+            var label = messages.GetValueOrDefault(combination.RunId)?.FirstOrDefault(message => message.CombinationId == combination.Id)?.SourceLabel
+                ?? $"第 {combination.SourceRow} 行";
+            return new MatrixCombinationView(combination.Id, combination.ProjectId, combination.TemplateId, combination.RunId, combination.RowKey,
+                combination.SourceRow, label, combination.SequenceNo, combination.ContentHash, combination.RecordDate, combination.Reason, combination.CreatedAt, items);
         });
     }
 

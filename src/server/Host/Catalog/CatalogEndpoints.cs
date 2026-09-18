@@ -16,9 +16,9 @@ public static partial class CatalogEndpoints
         MapLaboratoryEndpoints(endpoints);
         endpoints.MapPost("/api/v1/version-patches/{patchId:guid}/manage", ManageVersionPatchAsync).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/component-versions/{versionId:guid}/maintenance", MaintainVersionAsync).RequireAuthorization("SuperAdmin");
-        endpoints.MapGet("/api/v1/component-versions/{versionId:guid}/operation-impact", GetVersionOperationImpactAsync).RequireAuthorization("SuperAdmin");
+        endpoints.MapGet("/api/v1/component-versions/{versionId:guid}/operation-impact", GetVersionOperationImpactAsync).RequireAuthorization("Admin");
         endpoints.MapDelete("/api/v1/component-versions/{versionId:guid}", async (Guid versionId, [FromBody] DeleteVersionRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken) =>
-            await DeleteVersionAsync(versionId, request, context, factory, cancellationToken)).RequireAuthorization("SuperAdmin");
+            await DeleteVersionAsync(versionId, request, context, factory, cancellationToken)).RequireAuthorization("Admin");
         endpoints.MapGet("/api/v1/maintenance-capabilities", (IConfiguration configuration) => Results.Ok(new { enabled = configuration.GetValue<bool>("ConfigHub:TestDataMaintenanceEnabled") })).RequireAuthorization();
         var projects = endpoints.MapGroup("/api/v1/projects").RequireAuthorization();
         projects.MapGet("", ListProjectsAsync);
@@ -1901,19 +1901,36 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
 
     private static async Task<IResult> ChangeMaturityAsync(Guid versionId, LifecycleRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
     {
-        if (!Enum.TryParse<VersionMaturity>(request.State, true, out var next) || string.IsNullOrWhiteSpace(request.Reason)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = ["必须提供有效状态和原因。"] });
+        if (!Enum.TryParse<VersionMaturity>(request.State, true, out var next) || !Enum.IsDefined(next) || string.IsNullOrWhiteSpace(request.Reason) || request.Reason.Trim().Length > 500) return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = ["必须提供有效状态和不超过 500 字的原因。"] });
         await using var database = await factory.CreateDbContextAsync(cancellationToken);
         var key = context.Request.Headers["Idempotency-Key"].FirstOrDefault(); if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["修改版本成熟度必须提供不超过 200 个字符的 Idempotency-Key。"] });
-        var scope = $"versions.maturity:{versionId}"; var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request)))); var replay = await database.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
-        if (replay is not null) { if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (replay.Result is not null) return TypedResults.Ok(replay.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
-        var version = await database.ComponentVersions.SingleOrDefaultAsync(item => item.Id == versionId, cancellationToken);
+        await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
+        var projectId = await database.ComponentVersions.Where(item => item.Id == versionId)
+            .Join(database.ConfigurationComponents, item => item.ComponentId, component => component.Id, (_, component) => (Guid?)component.ProjectId)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (projectId is null) return Results.NotFound();
+        if (!await HasCurrentVersionLifecycleAccessAsync(database, context, projectId.Value, cancellationToken)) return Results.Forbid();
+        await database.Projects.FromSqlInterpolated($"SELECT * FROM projects WHERE id = {projectId.Value} FOR UPDATE").SingleAsync(cancellationToken);
+        var isAdministrator = await IsCurrentVersionAdministratorAsync(database, context, cancellationToken);
+        var scope = $"versions.maturity:{versionId}";
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request))));
+        var replay = await database.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
+        if (replay is not null)
+        {
+            if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" });
+            if (replay.Result is null) return Results.Conflict(new { message = "该请求仍在处理。" });
+            var saved = replay.Result.RootElement;
+            if (saved.TryGetProperty("administratorRestore", out var restore) && restore.GetBoolean() && !isAdministrator) return Results.Forbid();
+            return TypedResults.Ok(new { maturity = saved.GetProperty("maturity").GetString(), safety = saved.GetProperty("safety").GetString() });
+        }
+        var version = await database.ComponentVersions.FromSqlInterpolated($"SELECT * FROM component_versions WHERE id = {versionId} FOR UPDATE").SingleOrDefaultAsync(cancellationToken);
         if (version is null) return Results.NotFound();
-        var component = await database.ConfigurationComponents.SingleAsync(item => item.Id == version.ComponentId, cancellationToken);
-        if (!await HasProjectWriteAccessAsync(database, context, component.ProjectId, cancellationToken, requireSeniorMembership: true)) return Results.Forbid();
+        var administratorRestore = version.Maturity == VersionMaturity.Deprecated && next == VersionMaturity.Testing;
+        if (administratorRestore && !isAdministrator) return Results.Forbid();
         if (!IsAllowedMaturityTransition(version.Maturity, next)) return Results.Conflict(new { message = "不允许的成熟度转换。" });
         if (next == VersionMaturity.Released && await ValidateLaboratoryReleaseAsync(database, context, [versionId], cancellationToken) is { } laboratoryError)
             return Results.Conflict(new { message = laboratoryError });
-        var now = DateTimeOffset.UtcNow; await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken); database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }); var actor = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required.");
+        var now = DateTimeOffset.UtcNow; database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }); var actor = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required.");
         var previous = version.Maturity;
         if (next == VersionMaturity.Testing)
         {
@@ -1927,8 +1944,20 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         }
         version.Maturity = next;
         database.VersionLifecycleTransitions.Add(new VersionLifecycleTransition { Id = Guid.NewGuid(), ComponentVersionId = version.Id, Axis = LifecycleAxis.Maturity, FromState = previous.ToString(), ToState = next.ToString(), Reason = request.Reason.Trim(), Actor = actor, OccurredAt = DateTimeOffset.UtcNow });
-        AddAuditEvent(database, context, "VersionMaturityChanged", "ComponentVersion", version.Id, new { from = previous.ToString(), to = next.ToString(), reason = request.Reason.Trim() });
-        await database.SaveChangesAsync(cancellationToken); var record = await database.IdempotencyRecords.SingleAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken); record.Status = IdempotencyRecordStatus.Completed; record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { maturity = version.Maturity.ToString(), safety = version.Safety.ToString() })); await database.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
+        AddAuditEvent(database, context, "VersionMaturityChanged", "ComponentVersion", version.Id, new { from = previous.ToString(), to = next.ToString(), administratorRestore, reason = request.Reason.Trim() });
+        try
+        {
+            await database.SaveChangesAsync(cancellationToken);
+            var record = await database.IdempotencyRecords.SingleAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
+            record.Status = IdempotencyRecordStatus.Completed;
+            record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { maturity = version.Maturity.ToString(), safety = version.Safety.ToString(), administratorRestore }));
+            await database.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception) when (exception.InnerException is Npgsql.PostgresException { SqlState: Npgsql.PostgresErrorCodes.UniqueViolation })
+        {
+            return Results.Conflict(new { message = "该组件版本状态已被其他操作更新，请刷新后重试。" });
+        }
         return TypedResults.Ok(new { maturity = version.Maturity.ToString(), safety = version.Safety.ToString() });
     }
 
@@ -2000,6 +2029,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
             (VersionMaturity.Testing, VersionMaturity.Draft or VersionMaturity.Released or VersionMaturity.Deprecated) => true,
             (VersionMaturity.Released, VersionMaturity.Testing or VersionMaturity.Maintenance or VersionMaturity.Deprecated) => true,
             (VersionMaturity.Maintenance, VersionMaturity.Deprecated) => true,
+            (VersionMaturity.Deprecated, VersionMaturity.Testing) => true,
             _ => false
         };
 

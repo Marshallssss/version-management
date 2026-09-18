@@ -88,7 +88,15 @@ async function main() {
     await page.evaluate(id => localStorage.setItem('confighub.selected-project-id', id), project.id)
     await page.reload()
     await page.locator('.nav-item').filter({ hasText: /^版本$/ }).click()
-    await page.locator('.laboratory-badge').filter({ hasText: /Lab 1 台/ }).click()
+    const deployedBadge = page.locator('.lab-node-shell').getByRole('button', { name: '已上机', exact: true })
+    await deployedBadge.waitFor()
+    assert(await deployedBadge.evaluate(badge => {
+      const node = badge.parentElement.querySelector('.lab-node').getBoundingClientRect()
+      const count = badge.parentElement.querySelector('.testing-count').getBoundingClientRect()
+      const marker = badge.getBoundingClientRect()
+      return node.height <= 60 && marker.top >= node.top && marker.bottom <= node.bottom && marker.left >= count.right - 1
+    }), 'Lab marker stays inside the existing node height and to the right of Testing')
+    await deployedBadge.click()
     await page.getByText('Lab 使用与验证', { exact: true }).waitFor()
     assert(await page.getByText('PM 仍有问题', { exact: true }).isVisible())
     await page.getByRole('button', { name: '登记验证结果', exact: true }).click()

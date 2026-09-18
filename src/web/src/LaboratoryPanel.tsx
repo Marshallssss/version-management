@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Drawer } from 'antd'
-import { ExperimentOutlined, LinkOutlined } from '@ant-design/icons'
+import { LinkOutlined } from '@ant-design/icons'
 import { getLaboratoryVersions, recordLaboratory, type LaboratoryVersion } from './laboratory-api'
 import './laboratory-panel.css'
 
@@ -13,7 +13,9 @@ const formatTime = (value: string) => new Date(value).toLocaleString('zh-CN', { 
 export function LaboratoryBadge({ data, onClick, unavailable = false }: { data?: LaboratoryVersion; onClick: () => void; unavailable?: boolean }) {
   const count = data?.currentUses.filter(item => item.chamberNumber == null).length ?? 0
   const pm = data?.currentUses.filter(item => item.chamberNumber != null).length ?? 0
-  return <button type="button" className={`laboratory-badge ${data?.validationStatus ?? ''}`} onClick={onClick} title="查看 Lab 实际使用与验证记录"><ExperimentOutlined aria-hidden /><span>{unavailable ? 'Lab 信息未获取' : !count && !pm ? '未登记 Lab 使用' : `Lab ${count ? `${count} 台` : ''}${count && pm ? ' · ' : ''}${pm ? `${pm} PM` : ''}`}{!unavailable && data && ` · ${resultLabel[data.validationStatus] ?? '待验证'}`}</span></button>
+  const label = unavailable ? '未获取' : count || pm ? '已上机' : '未上机'
+  const title = unavailable ? '暂未获取 Lab 使用情况' : `${label} · Lab 整机 ${count} 台 / PM ${pm} 个 · ${data ? resultLabel[data.validationStatus] : '待验证'}，点击查看记录`
+  return <button type="button" className={`laboratory-badge machine-state ${count || pm ? 'deployed' : ''}`} onClick={onClick} title={title} aria-label={label}><span>{label}</span></button>
 }
 
 export function LaboratoryPanel({ projectId, versionId, versionNumber, componentName, testing, canWrite, onClose, onOpenMachine }: {
