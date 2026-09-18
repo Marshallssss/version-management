@@ -8,6 +8,8 @@ import type { OperationImpactReference } from './catalog-api'
 import { DeleteVersionButton } from './DeleteVersionButton'
 import { LaboratoryHistory } from './LaboratoryHistory'
 import { VersionChamberImpact } from './VersionChamberImpact'
+import { LaboratoryBadge, LaboratoryPanel } from './LaboratoryPanel'
+import { getLaboratoryVersions } from './laboratory-api'
 
 type FormMode = 'idle' | 'create-root' | 'create-child' | 'edit' | 'delete'
 type InitialMaturity = 'Draft' | 'Testing' | 'Released' | 'Maintenance' | 'Deprecated'
@@ -31,6 +33,10 @@ function formatTime(value: string) {
 
 export function ProjectWorkspace({ canWrite = true, detail, focusedVersionId, focusedComponentId, focusPatch, isAdmin, isSuperAdmin, onOpenMachine, onOpenBaseline, onCreateBaseline, onSuccess }: { canWrite?: boolean; detail: ProjectDetail; focusedVersionId?: string; focusedComponentId?: string; focusPatch?: boolean; onOpenMachine?: (machineId: string) => void; onOpenBaseline: (baselineId: string) => void; onCreateBaseline: () => void; isAdmin: boolean; isSuperAdmin: boolean; onSuccess: (message: string) => void }) {
   const queryClient = useQueryClient()
+  const laboratory = useQuery({ queryKey: ['laboratory-versions', detail.project.id], queryFn: () => getLaboratoryVersions(detail.project.id) })
+  const [laboratoryVersionId, setLaboratoryVersionId] = useState('')
+  const laboratoryComponent = detail.components.find(component => component.versions.some(version => version.id === laboratoryVersionId))
+  const laboratoryVersion = laboratoryComponent?.versions.find(version => version.id === laboratoryVersionId)
   const openReference = (reference: OperationImpactReference) => {
     if (reference.deleted) return
     if (reference.machineId) onOpenMachine?.(reference.machineId)
@@ -104,6 +110,7 @@ export function ProjectWorkspace({ canWrite = true, detail, focusedVersionId, fo
     await queryClient.invalidateQueries({ queryKey: ['project', detail.project.id] })
     await queryClient.invalidateQueries({ queryKey: ['projects'] })
     await queryClient.invalidateQueries({ queryKey: ['project-version-detail'] })
+    await queryClient.invalidateQueries({ queryKey: ['laboratory-versions', detail.project.id] })
   }
   const reset = () => { setFormMode('idle'); setName(''); setReason('') }
   const selectComponent = (componentId: string) => {
@@ -256,9 +263,10 @@ export function ProjectWorkspace({ canWrite = true, detail, focusedVersionId, fo
       <span className="testing-count" title={`此分支共 ${testingVersionCounts.get(component.id) ?? 0} 个测试中版本`}><small>测试中</small><b>{testingVersionCounts.get(component.id) ?? 0}</b></span>
     </button>
     {testingVersions.get(component.id)?.map(version => <PatchBadge key={version.id} version={version} onOpen={() => openPatches(component.id, version.id)} />)}
+    {testingVersions.get(component.id)?.map(version => <LaboratoryBadge key={`lab-${version.id}`} data={laboratory.data?.versions.find(item => item.versionId === version.id)} unavailable={laboratory.isError || laboratory.isLoading} onClick={() => setLaboratoryVersionId(version.id)} />)}
     {children.get(component.id)?.filter(child => testingBranchIds.has(child.id)).map(child => renderTestingNode(child, depth + 1))}
   </div>
-  const versionSelection = selectedVersion ? <div className="selected-version-summary"><strong>{selectedVersion.versionNumber}</strong><small>{maturityText(selectedVersion.maturity)} · {safetyText(selectedVersion.safety)}</small>{isSuperAdmin && <DeleteVersionButton onOpenReference={openReference} version={selectedVersion} componentName={selected?.name ?? ''} onDeleted={async () => { setSelectedVersionId(''); setInspectorTab('versions'); await refresh(); onSuccess('版本已删除。') }} />}</div> : <p className="empty-state">先在“版本”中选择或登记软件版本。</p>
+  const versionSelection = selectedVersion ? <div className="selected-version-summary"><strong>{selectedVersion.versionNumber}</strong><small>{maturityText(selectedVersion.maturity)} · {safetyText(selectedVersion.safety)}</small><button type="button" className="laboratory-badge" onClick={() => setLaboratoryVersionId(selectedVersion.id)}><ExperimentOutlined aria-hidden />Lab 记录</button>{isSuperAdmin && <DeleteVersionButton onOpenReference={openReference} version={selectedVersion} componentName={selected?.name ?? ''} onDeleted={async () => { setSelectedVersionId(''); setInspectorTab('versions'); await refresh(); onSuccess('版本已删除。') }} />}</div> : <p className="empty-state">先在“版本”中选择或登记软件版本。</p>
 
   const metadataFields = <><label>组件负责人<input value={owner} maxLength={160} onChange={event => setOwner(event.target.value)} /></label><label>组件型号<input value={model} maxLength={200} onChange={event => setModel(event.target.value)} /></label><label className="wide-field">组件备注<textarea value={notes} maxLength={2000} onChange={event => setNotes(event.target.value)} /></label></>
   return <section className={canWrite ? 'project-workspace' : 'project-workspace read-only-workspace'}>
@@ -299,5 +307,6 @@ export function ProjectWorkspace({ canWrite = true, detail, focusedVersionId, fo
       </section>
     </div>
     <LaboratoryHistory open={laboratoryHistoryOpen} onClose={() => setLaboratoryHistoryOpen(false)} detail={detail} />
+    {laboratoryComponent && laboratoryVersion && <LaboratoryPanel key={laboratoryVersion.id} projectId={detail.project.id} versionId={laboratoryVersion.id} versionNumber={laboratoryVersion.versionNumber} componentName={laboratoryComponent.name} testing={laboratoryVersion.maturity === 'Testing'} canWrite={canWrite} onClose={() => setLaboratoryVersionId('')} onOpenMachine={onOpenMachine} />}
   </section>
 }

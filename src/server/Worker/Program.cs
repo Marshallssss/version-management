@@ -35,6 +35,8 @@ builder.Services.AddPooledDbContextFactory<ConfigHubDbContext>(options =>
     options.UseNpgsql(connectionString));
 builder.Services.AddSingleton<BackgroundJobLeaseService>();
 builder.Services.AddSingleton<IBackgroundJobHandler, NoopBackgroundJobHandler>();
+builder.Services.AddSingleton<IBackgroundJobHandler, MatrixImportJobHandler>();
 builder.Services.AddHostedService<BackgroundJobWorker>();
+builder.Services.AddHostedService<MatrixImportScheduler>();
 
 await builder.Build().RunAsync();

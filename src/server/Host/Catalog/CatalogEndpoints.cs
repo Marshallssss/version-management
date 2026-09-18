@@ -12,6 +12,8 @@ public static partial class CatalogEndpoints
 {
     public static IEndpointRouteBuilder MapCatalogEndpoints(this IEndpointRouteBuilder endpoints)
     {
+        MapMatrixImportEndpoints(endpoints);
+        MapLaboratoryEndpoints(endpoints);
         endpoints.MapPost("/api/v1/version-patches/{patchId:guid}/manage", ManageVersionPatchAsync).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/component-versions/{versionId:guid}/maintenance", MaintainVersionAsync).RequireAuthorization("SuperAdmin");
         endpoints.MapGet("/api/v1/component-versions/{versionId:guid}/operation-impact", GetVersionOperationImpactAsync).RequireAuthorization("SuperAdmin");
@@ -81,9 +83,9 @@ public static partial class CatalogEndpoints
         endpoints.MapGet("/api/v1/dashboard", GetDashboardAsync).RequireAuthorization();
         endpoints.MapPost("/api/v1/admin/drift-summaries/rebuild", RebuildMachineDriftSummariesAsync)
             .RequireAuthorization("Admin");
-        endpoints.MapPost("/api/v1/imports", StageImportAsync).RequireAuthorization("Engineer");
+        endpoints.MapPost("/api/v1/imports", StageImportAsync).RequireAuthorization("SeniorEngineer");
         endpoints.MapGet("/api/v1/imports/{batchId:guid}", GetImportPreviewAsync).RequireAuthorization("Engineer");
-        endpoints.MapPost("/api/v1/imports/{batchId:guid}/commit", CommitImportAsync).RequireAuthorization("Engineer");
+        endpoints.MapPost("/api/v1/imports/{batchId:guid}/commit", CommitImportAsync).RequireAuthorization("SeniorEngineer");
 
         endpoints.MapPost("/api/v1/components/{componentId:guid}/versions", CreateVersionAsync).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/component-versions/{versionId:guid}/maturity", ChangeMaturityAsync).RequireAuthorization("SeniorEngineer");
@@ -419,15 +421,19 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
     private static Task<IResult> RecordFactsAsync(Guid machineId, RecordFactsRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
         => RecordFactsCoreAsync(machineId, request, context, factory, context.Request.Headers["Idempotency-Key"].FirstOrDefault(), cancellationToken);
 
-    private static async Task<IResult> RecordFactsCoreAsync(Guid machineId, RecordFactsRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, string? idempotencyKey, CancellationToken cancellationToken)
+    private static async Task<IResult> RecordFactsCoreAsync(Guid machineId, RecordFactsRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, string? idempotencyKey, CancellationToken cancellationToken, bool laboratoryOnly = false)
     {
         if (!Enum.TryParse<DeploymentOperationType>(request.OperationType, true, out var operation) || !Enum.TryParse<ObservationCoverage>(request.Coverage, true, out var coverage) || string.IsNullOrWhiteSpace(request.SourceType) || string.IsNullOrWhiteSpace(request.Reason) || request.Items is null || request.Items.Count == 0) return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = ["必须提供操作类型、覆盖范围、来源、原因和事实项。"] });
         var key = idempotencyKey; if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["记录事实必须提供不超过 200 个字符的 Idempotency-Key。"] });
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request)))); var scope = $"deployment-facts:{machineId}";
-        await using var db = await factory.CreateDbContextAsync(cancellationToken); var existing = await db.IdempotencyRecords.SingleOrDefaultAsync(x => x.Scope == scope && x.IdempotencyKey == key, cancellationToken);
-        if (existing is not null) { if (existing.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (existing.Result is not null) return TypedResults.Ok(existing.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
-        var machine = await db.Machines.SingleOrDefaultAsync(x => x.Id == machineId, cancellationToken); if (machine is null) return Results.NotFound();
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var machine = await db.Machines.FromSqlInterpolated($"SELECT * FROM machines WHERE id = {machineId} FOR UPDATE").SingleOrDefaultAsync(cancellationToken); if (machine is null) return Results.NotFound();
         if (!await HasProjectWriteAccessAsync(db, context, machine.ProjectId, cancellationToken)) return Results.Forbid();
+        var existing = await db.IdempotencyRecords.SingleOrDefaultAsync(x => x.Scope == scope && x.IdempotencyKey == key, cancellationToken);
+        if (existing is not null) { if (existing.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (existing.Result is not null) return TypedResults.Ok(existing.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
+        if (laboratoryOnly && (machine.Stage != "Lab" || request.Items.Count != 1 || request.EffectiveAt is null || request.EffectiveAt == default(DateTimeOffset) || request.EffectiveAt > DateTimeOffset.UtcNow.AddMinutes(1)))
+            return Results.BadRequest(new { message = "请选择 Lab 阶段整机，填写不晚于现在的实际升级时间；每次仅登记所选组件。" });
         if (operation == DeploymentOperationType.Rollback)
         {
             if (!await HasProjectWriteAccessAsync(db, context, machine.ProjectId, cancellationToken, requireSeniorMembership: true)) return Results.Forbid();
@@ -445,13 +451,14 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         var sourceType = request.SourceType.Trim(); var externalEventId = NormalizeOptional(request.ExternalEventId, 200);
         if (sourceType == "baseline-upgrade" && request.SourceConfigurationBaselineId is null) return Results.ValidationProblem(new Dictionary<string, string[]> { ["sourceConfigurationBaselineId"] = ["基线升级必须关联已发布基线。"] });
         if (externalEventId is not null && await db.DeploymentBatches.AnyAsync(item => item.SourceType == sourceType && item.ExternalEventId == externalEventId, cancellationToken)) return Results.Conflict(new { message = "该来源的外部事件已记录。" });
-        var now = DateTimeOffset.UtcNow; await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken); db.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }); var batch = new DeploymentBatch { Id = Guid.NewGuid(), MachineId = machineId, OperationType = operation, Coverage = coverage, SourceType = sourceType, ExternalEventId = externalEventId, CorrectsDeploymentBatchId = correctedBatch?.Id, RecordedAt = now, EffectiveAt = correctedBatch?.EffectiveAt ?? request.EffectiveAt ?? now }; db.DeploymentBatches.Add(batch);
+        var now = DateTimeOffset.UtcNow; db.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }); var batch = new DeploymentBatch { Id = Guid.NewGuid(), MachineId = machineId, OperationType = operation, Coverage = coverage, SourceType = sourceType, ExternalEventId = externalEventId, CorrectsDeploymentBatchId = correctedBatch?.Id, RecordedAt = now, EffectiveAt = correctedBatch?.EffectiveAt ?? request.EffectiveAt ?? now }; db.DeploymentBatches.Add(batch);
         var componentIds = request.Items.Select(x => x.ComponentId).Distinct().ToArray(); var components = await db.ConfigurationComponents.Where(x => x.ProjectId == machine.ProjectId && componentIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, cancellationToken); if (components.Count != componentIds.Length) return Results.ValidationProblem(new Dictionary<string, string[]> { ["items"] = ["存在不属于机台项目的组件。"] });
         var versionedComponentIds = await db.ComponentVersions.Where(version => componentIds.Contains(version.ComponentId)).Select(version => version.ComponentId).Distinct().ToArrayAsync(cancellationToken);
         if (componentIds.Except(versionedComponentIds).Any()) return Results.ValidationProblem(new Dictionary<string, string[]> { ["items"] = ["结构分类节点没有软件版本，不能记录为机台实际配置。"] });
         var versionIds = request.Items.Where(x => !x.Absent && x.VersionId is not null).Select(x => x.VersionId!.Value).Distinct().ToArray();
         var versions = await db.ComponentVersions.Where(x => versionIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, cancellationToken);
         if (versions.Count != versionIds.Length || request.Items.Any(x => !x.Absent && (x.VersionId is null || versions[x.VersionId.Value].ComponentId != x.ComponentId))) return Results.ValidationProblem(new Dictionary<string, string[]> { ["items"] = ["事实版本必须属于对应组件。"] });
+        if (laboratoryOnly && versions.Values.Any(version => version.Maturity != VersionMaturity.Testing)) return Results.Conflict(new { message = "实验室升级登记仅限测试中版本。" });
         if (request.SourceConfigurationBaselineId is not null)
         {
             if (operation != DeploymentOperationType.Upgrade || coverage != ObservationCoverage.Full || sourceType != "baseline-upgrade") return Results.ValidationProblem(new Dictionary<string, string[]> { ["sourceConfigurationBaselineId"] = ["基线引用仅可用于完整覆盖的基线升级。"] });
@@ -802,11 +809,11 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
 
     private static async Task<IResult> StageImportAsync(StageImportRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
     {
-        if (request.ProjectId == Guid.Empty || string.IsNullOrWhiteSpace(request.SourceFileName) || string.IsNullOrWhiteSpace(request.Reason) || request.Rows is null || request.Rows.Count == 0) return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = ["必须提供项目、来源文件、原因和至少一行数据。"] });
+        if (request.ProjectId == Guid.Empty || string.IsNullOrWhiteSpace(request.SourceFileName) || string.IsNullOrWhiteSpace(request.Reason) || request.Reason.Length > 500 || request.Rows is null || request.Rows.Count is 0 or > 2000) return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = ["必须提供项目、来源文件、原因和至少一行数据。"] });
         var key = context.Request.Headers["Idempotency-Key"].FirstOrDefault(); if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["生成导入预览必须提供不超过 200 个字符的 Idempotency-Key。"] });
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         if (!await db.Projects.AnyAsync(item => item.Id == request.ProjectId, cancellationToken)) return Results.NotFound();
-        if (!await HasProjectWriteAccessAsync(db, context, request.ProjectId, cancellationToken)) return Results.Forbid();
+        if (!await HasProjectWriteAccessAsync(db, context, request.ProjectId, cancellationToken, requireSeniorMembership: true)) return Results.Forbid();
         var scope = $"imports.stage:{request.ProjectId}"; var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request)))); var replay = await db.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
         if (replay is not null) { if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (replay.Result is not null) return TypedResults.Ok(replay.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
         var now = DateTimeOffset.UtcNow; await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken); db.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }); var batch = new ImportBatch { Id = Guid.NewGuid(), ProjectId = request.ProjectId, SourceFileName = request.SourceFileName.Trim(), CreatedBy = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required."), Reason = request.Reason.Trim(), CreatedAt = now };
@@ -821,6 +828,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         {
             string? error = null;
             if (string.IsNullOrWhiteSpace(row.value.ComponentName) || string.IsNullOrWhiteSpace(row.value.VersionNumber)) error = "组件名称和版本号为必填项。";
+            else if (row.value.VersionNumber.Length > 160) error = "版本号不能超过 160 字。";
             else if (!componentsByName.TryGetValue(Normalize(row.value.ComponentName), out var candidates)) error = "组件不存在或不属于该项目。";
             else if (candidates.Length != 1) error = "存在同名组件，请先在项目中调整为唯一名称后再导入。";
             else
@@ -844,7 +852,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         var batch = await db.ImportBatches.AsNoTracking().SingleOrDefaultAsync(item => item.Id == batchId, cancellationToken);
         if (batch is null) return Results.NotFound();
-        if (!await HasProjectWriteAccessAsync(db, context, batch.ProjectId, cancellationToken)) return Results.Forbid();
+        if (!await HasProjectWriteAccessAsync(db, context, batch.ProjectId, cancellationToken, requireSeniorMembership: true)) return Results.Forbid();
         var stagedRows = await db.ImportRows.AsNoTracking().Where(item => item.ImportBatchId == batchId).OrderBy(item => item.RowNumber).ToListAsync(cancellationToken);
         var rows = stagedRows.Select(item => new { item.RowNumber, payload = item.Payload.Deserialize<StageImportRow>(), item.ValidationError });
         return TypedResults.Ok(new { id = batch.Id, status = batch.Status.ToString(), sourceFileName = batch.SourceFileName, rows });
@@ -856,7 +864,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["提交导入必须提供不超过 200 个字符的 Idempotency-Key。"] });
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         var batch = await db.ImportBatches.SingleOrDefaultAsync(item => item.Id == batchId, cancellationToken); if (batch is null) return Results.NotFound();
-        if (!await HasProjectWriteAccessAsync(db, context, batch.ProjectId, cancellationToken)) return Results.Forbid();
+        if (!await HasProjectWriteAccessAsync(db, context, batch.ProjectId, cancellationToken, requireSeniorMembership: true)) return Results.Forbid();
         var scope = $"imports.commit:{batchId}"; var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(batchId.ToString())));
         var replay = await db.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
         if (replay is not null) { if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (replay.Result is not null) return TypedResults.Ok(replay.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
@@ -872,8 +880,8 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
             var value = JsonSerializer.Deserialize<StageImportRow>(row.Payload.RootElement.GetRawText())!;
             if (!componentsByName.TryGetValue(Normalize(value.ComponentName!), out var candidates) || candidates.Length != 1)
                 return Results.Conflict(new { message = "导入预览所引用的组件已经变更或出现同名，请重新生成预览。" });
-            var command = await CreateComponentVersionCommandAsync(db, candidates[0].Id, value.VersionNumber!, batch.Reason, context, cancellationToken);
-            if (command.Version is null) throw new InvalidOperationException("已验证的导入行在提交时无法创建版本。");
+            var command = await CreateComponentVersionCommandAsync(db, candidates[0].Id, value.VersionNumber!, batch.Reason, context, cancellationToken, VersionMaturity.Testing);
+            if (command.Version is null) return Results.Conflict(new { message = $"第 {row.RowNumber} 行的组件或版本已变更，请重新生成预览。" });
         }
         batch.Status = ImportBatchStatus.Committed;
         AddAuditEvent(db, context, "ImportCommitted", "ImportBatch", batch.Id, new { batch.ProjectId, rowCount = rows.Count });
@@ -1189,6 +1197,8 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
 
         if (testingVersions.Any(v => versionsByComponent.GetValueOrDefault(v.ComponentId)?.Id != v.Id))
             return Results.ValidationProblem(new Dictionary<string, string[]> { ["testingVersionIds"] = ["勾选发布的测试版本必须与基线快照选定版本一致。"] });
+        if (await ValidateLaboratoryReleaseAsync(database, context, testingVersionIds, cancellationToken) is { } laboratoryError)
+            return Results.Conflict(new { message = laboratoryError });
         if (request.PublishImmediately && (versionsByComponent.Count == 0 || versionsByComponent.Values.Any(v => v.Safety == VersionSafety.Blocked)))
             return Results.Conflict(new { message = "直接发布基线需要至少一个实际版本，且不能包含已阻断版本。" });
 
@@ -1692,6 +1702,9 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         var component = await database.ConfigurationComponents.SingleOrDefaultAsync(item => item.Id == componentId, cancellationToken);
         if (component is null) return Results.NotFound();
         if (!await HasProjectWriteAccessAsync(database, httpContext, component.ProjectId, cancellationToken, requireSeniorMembership: initialMaturity != VersionMaturity.Draft)) return Results.Forbid();
+        if (initialMaturity is VersionMaturity.Released or VersionMaturity.Maintenance
+            && await ValidateLaboratoryReleaseAsync(database, httpContext, [Guid.Empty], cancellationToken) is { } laboratoryError)
+            return Results.Conflict(new { message = laboratoryError });
         var now = DateTimeOffset.UtcNow; await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken); database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }); var result = await CreateComponentVersionCommandAsync(database, componentId, request.VersionNumber!.Trim(), request.Reason!.Trim(), httpContext, cancellationToken, initialMaturity);
         if (result.ComponentMissing) return Results.NotFound();
         if (result.Duplicate) return Results.Conflict(new { message = "该组件版本号已存在。" });
@@ -1797,10 +1810,11 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         if (!await HasProjectWriteAccessAsync(database, context, component.ProjectId, cancellationToken)) return Results.Forbid();
         if (await database.ConfigurationComponents.AnyAsync(item => item.ParentComponentId == componentId, cancellationToken)) return Results.Conflict(new { message = "请先移动或删除子组件后再删除该组件。" });
         if (await database.MachineChamberVersions.AnyAsync(item => item.ComponentId == componentId, cancellationToken)
+            || await database.MatrixImportReferences.AnyAsync(item => item.ComponentId == componentId, cancellationToken)
             || await database.BaselineItems.AnyAsync(item => item.ConfigurationComponentId == componentId, cancellationToken)
             || await database.DeploymentItems.AnyAsync(item => item.ConfigurationComponentId == componentId, cancellationToken)
             || await database.MachineCurrentConfigurations.AnyAsync(item => item.ConfigurationComponentId == componentId, cancellationToken))
-            return Results.Conflict(new { message = "该组件已进入基线或机台历史，不能删除历史引用。" });
+            return Results.Conflict(new { message = "该组件已进入基线、Excel 模板／组合或机台历史，不能删除历史引用。" });
         var versions = await database.ComponentVersions.Where(item => item.ComponentId == componentId).ToListAsync(cancellationToken);
         var versionIds = versions.Select(item => item.Id).ToArray();
         if (await database.VersionExposureSnapshots.AnyAsync(item => versionIds.Contains(item.ComponentVersionId), cancellationToken)
@@ -1818,27 +1832,10 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
 
     private static async Task<VersionCommandResult> CreateComponentVersionCommandAsync(ConfigHubDbContext database, Guid componentId, string versionNumber, string reason, HttpContext context, CancellationToken cancellationToken, VersionMaturity initialMaturity = VersionMaturity.Draft)
     {
-        var component = await database.ConfigurationComponents.SingleOrDefaultAsync(candidate => candidate.Id == componentId, cancellationToken);
-        if (component is null) return new VersionCommandResult(null, true, false);
-        var normalizedVersion = Normalize(versionNumber);
-        if (await database.ComponentVersions.AnyAsync(version => version.ComponentId == componentId && version.NormalizedVersionNumber == normalizedVersion, cancellationToken)) return new VersionCommandResult(null, false, true);
-        var sequenceNo = (await database.ComponentVersions.Where(version => version.ComponentId == componentId).Select(version => (long?)version.SequenceNo).MaxAsync(cancellationToken) ?? 0) + 10;
-        var version = new ComponentVersion { Id = Guid.NewGuid(), ComponentId = componentId, VersionNumber = versionNumber, NormalizedVersionNumber = normalizedVersion, SequenceNo = sequenceNo, Maturity = initialMaturity, CreatedAt = DateTimeOffset.UtcNow };
-        var actor = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required.");
-        if (initialMaturity == VersionMaturity.Testing)
-        {
-            await DeprecateOtherTestingVersionsAsync(database, componentId, version.Id, reason, context, cancellationToken);
-            await database.SaveChangesAsync(cancellationToken);
-        }
-        database.ComponentVersions.Add(version);
-        var previousMaturity = VersionMaturity.Draft;
-        foreach (var nextMaturity in GetInitialMaturityPath(initialMaturity))
-        {
-            database.VersionLifecycleTransitions.Add(new VersionLifecycleTransition { Id = Guid.NewGuid(), ComponentVersionId = version.Id, Axis = LifecycleAxis.Maturity, FromState = previousMaturity.ToString(), ToState = nextMaturity.ToString(), Reason = reason, Actor = actor, OccurredAt = DateTimeOffset.UtcNow });
-            previousMaturity = nextMaturity;
-        }
-        AddAuditEvent(database, context, "ComponentVersionCreated", "ComponentVersion", version.Id, new { version.ComponentId, version.VersionNumber, version.SequenceNo, maturity = version.Maturity.ToString(), reason });
-        return new VersionCommandResult(version, false, false);
+        var result = await ComponentVersionCommands.CreateAsync(database, componentId, versionNumber, reason,
+            new(context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required."),
+                context.Items["CorrelationId"]?.ToString() ?? context.TraceIdentifier), cancellationToken, initialMaturity);
+        return new(result.Version, result.NotFound, result.Duplicate);
     }
 
     private static async Task DeprecateOtherTestingVersionsAsync(ConfigHubDbContext database, Guid componentId, Guid retainedVersionId, string reason, HttpContext context, CancellationToken cancellationToken)
@@ -1914,6 +1911,8 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         var component = await database.ConfigurationComponents.SingleAsync(item => item.Id == version.ComponentId, cancellationToken);
         if (!await HasProjectWriteAccessAsync(database, context, component.ProjectId, cancellationToken, requireSeniorMembership: true)) return Results.Forbid();
         if (!IsAllowedMaturityTransition(version.Maturity, next)) return Results.Conflict(new { message = "不允许的成熟度转换。" });
+        if (next == VersionMaturity.Released && await ValidateLaboratoryReleaseAsync(database, context, [versionId], cancellationToken) is { } laboratoryError)
+            return Results.Conflict(new { message = laboratoryError });
         var now = DateTimeOffset.UtcNow; await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken); database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }); var actor = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required.");
         var previous = version.Maturity;
         if (next == VersionMaturity.Testing)

@@ -49,13 +49,34 @@ public static partial class CatalogEndpoints
         var exposures = db.VersionExposureSnapshots.AsNoTracking().Where(item => item.ComponentVersionId == versionId)
             .OrderByDescending(item => item.BlockedAt).ThenBy(item => item.Id)
             .Select(item => new OperationImpactItem(item.Id, "风险影响快照", item.Reason, null, null, false));
+        var templates = db.MatrixImportTemplates.AsNoTracking()
+            .Where(item => db.MatrixImportReferences.Any(reference => reference.TemplateId == item.Id
+                && reference.CombinationId == null && reference.VersionId == versionId))
+            .OrderByDescending(item => item.CreatedAt).ThenBy(item => item.Id)
+            .Select(item => new OperationImpactItem(item.Id, "Excel 模板冻结参考",
+                item.ReferenceBaselineCode ?? "生成时的参考配置", null, null, false));
+        var combinations = db.MatrixImportCombinations.AsNoTracking()
+            .Where(item => db.MatrixImportReferences.Any(reference => reference.CombinationId == item.Id && reference.VersionId == versionId))
+            .OrderByDescending(item => item.CreatedAt).ThenBy(item => item.Id)
+            .Select(item => new OperationImpactItem(item.Id, "Excel 第 " + item.SequenceNo + " 套测试组合",
+                item.Reason, null, null, false));
+        var laboratory = from validation in db.LaboratoryValidations.AsNoTracking()
+            join machine in db.Machines.IgnoreQueryFilters().AsNoTracking() on validation.MachineId equals machine.Id
+            where validation.ComponentVersionId == versionId
+            orderby validation.RecordedAt descending, validation.Id
+            select new OperationImpactItem(validation.Id, machine.Name,
+                validation.ChamberNumber == null ? "整机 Lab 验证记录" : "PM" + validation.ChamberNumber + " Lab 验证记录",
+                machine.Id, null, machine.DeletedAt != null);
         OperationImpactGroup[] groups =
         [
             await BuildOperationImpactGroupAsync("baselines", "引用基线", baselines, cancellationToken),
             await BuildOperationImpactGroupAsync("current-machines", "整机当前配置", currentMachines, cancellationToken),
             await BuildOperationImpactGroupAsync("machine-history", "整机配置历史", machineHistory, cancellationToken),
             await BuildOperationImpactGroupAsync("chamber-history", "PM 特例历史", chamberHistory, cancellationToken),
-            await BuildOperationImpactGroupAsync("exposure-snapshots", "风险影响快照", exposures, cancellationToken)
+            await BuildOperationImpactGroupAsync("exposure-snapshots", "风险影响快照", exposures, cancellationToken),
+            await BuildOperationImpactGroupAsync("matrix-templates", "Excel 模板参考", templates, cancellationToken),
+            await BuildOperationImpactGroupAsync("matrix-combinations", "Excel 测试组合", combinations, cancellationToken),
+            await BuildOperationImpactGroupAsync("laboratory-validations", "Lab 验证记录", laboratory, cancellationToken)
         ];
         var cleanupCounts = new VersionCleanupCounts(
             await db.VersionPatches.CountAsync(item => item.ComponentVersionId == versionId, cancellationToken),

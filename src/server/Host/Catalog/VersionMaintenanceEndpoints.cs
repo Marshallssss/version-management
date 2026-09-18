@@ -30,12 +30,14 @@ public static partial class CatalogEndpoints
             return Results.NotFound();
         }
         if (await db.MachineChamberVersions.AnyAsync(item => item.VersionId == versionId, cancellationToken)
+            || await db.MatrixImportReferences.AnyAsync(item => item.VersionId == versionId, cancellationToken)
+            || await db.LaboratoryValidations.AnyAsync(item => item.ComponentVersionId == versionId, cancellationToken)
             || await db.BaselineItems.AnyAsync(item => item.ComponentVersionId == versionId, cancellationToken)
             || await db.ConfigurationBaselines.AnyAsync(item => item.TopComponentVersionId == versionId, cancellationToken)
             || await db.DeploymentItems.AnyAsync(item => item.NewComponentVersionId == versionId, cancellationToken)
             || await db.MachineCurrentConfigurations.AnyAsync(item => item.ComponentVersionId == versionId, cancellationToken)
             || await db.VersionExposureSnapshots.AnyAsync(item => item.ComponentVersionId == versionId, cancellationToken))
-            return Results.Conflict(new { message = "该版本已被基线、机台历史或影响快照引用，不能删除。可将版本标记为已废弃，保留追溯记录。" });
+            return Results.Conflict(new { message = "该版本已被基线、Excel 模板／组合、机台历史或验证记录引用，不能删除。可将版本标记为已废弃，保留追溯记录。" });
         var patches = await db.VersionPatches.Where(item => item.ComponentVersionId == versionId).ToListAsync(cancellationToken);
         var transitions = await db.VersionLifecycleTransitions.Where(item => item.ComponentVersionId == versionId).ToListAsync(cancellationToken);
         var recommendations = await db.VersionRecommendations.Where(item => item.ComponentVersionId == versionId).ToListAsync(cancellationToken);
@@ -108,6 +110,10 @@ public static partial class CatalogEndpoints
         if (replay is not null) return replay.RequestHash == hash && replay.Result is not null ? Results.Ok(replay.Result.RootElement.Clone()) : Results.Conflict(new { message = "幂等键已用于其他操作。" });
         var version = await db.ComponentVersions.FromSqlInterpolated($"SELECT * FROM component_versions WHERE id = {versionId} FOR UPDATE").SingleOrDefaultAsync(cancellationToken);
         if (version is null) return Results.NotFound();
+        if (maturity is VersionMaturity.Released or VersionMaturity.Maintenance
+            && version.Maturity is not (VersionMaturity.Released or VersionMaturity.Maintenance)
+            && await ValidateLaboratoryReleaseAsync(db, context, [versionId], cancellationToken) is { } laboratoryError)
+            return Results.Conflict(new { message = laboratoryError });
         var normalized = Normalize(request.VersionNumber!);
         if (await db.ComponentVersions.AnyAsync(v => v.ComponentId == version.ComponentId && v.Id != versionId && v.NormalizedVersionNumber == normalized, cancellationToken)) return Results.Conflict(new { message = "该组件已登记相同版本号。" });
         if (maturity == VersionMaturity.Testing && await db.ComponentVersions.AnyAsync(v => v.ComponentId == version.ComponentId && v.Id != versionId && v.Maturity == VersionMaturity.Testing, cancellationToken)) return Results.Conflict(new { message = "该组件已有测试版本，请先处理现有测试版本。" });

@@ -51,6 +51,12 @@ public sealed class ConfigHubDbContext(DbContextOptions<ConfigHubDbContext> opti
     public DbSet<BulkOperationItem> BulkOperationItems => Set<BulkOperationItem>();
     public DbSet<ImportBatch> ImportBatches => Set<ImportBatch>();
     public DbSet<ImportRow> ImportRows => Set<ImportRow>();
+    public DbSet<MatrixImportTemplate> MatrixImportTemplates => Set<MatrixImportTemplate>();
+    public DbSet<MatrixImportSource> MatrixImportSources => Set<MatrixImportSource>();
+    public DbSet<MatrixImportRun> MatrixImportRuns => Set<MatrixImportRun>();
+    public DbSet<MatrixImportCombination> MatrixImportCombinations => Set<MatrixImportCombination>();
+    public DbSet<MatrixImportReference> MatrixImportReferences => Set<MatrixImportReference>();
+    public DbSet<LaboratoryValidation> LaboratoryValidations => Set<LaboratoryValidation>();
     public DbSet<VersionExposureSnapshot> VersionExposureSnapshots => Set<VersionExposureSnapshot>();
     public DbSet<VersionExposureMachine> VersionExposureMachines => Set<VersionExposureMachine>();
     public DbSet<VersionExposureBaseline> VersionExposureBaselines => Set<VersionExposureBaseline>();
@@ -60,6 +66,8 @@ public sealed class ConfigHubDbContext(DbContextOptions<ConfigHubDbContext> opti
         base.OnModelCreating(builder);
         ConfigHubModel.Configure(builder);
         MachineEquipmentModel.Configure(builder);
+        MatrixImportModel.Configure(builder);
+        LaboratoryModel.Configure(builder);
         builder.Entity<ConfigurationComponent>(entity =>
         {
             entity.Property(x => x.Owner).HasColumnName("owner").HasMaxLength(160);

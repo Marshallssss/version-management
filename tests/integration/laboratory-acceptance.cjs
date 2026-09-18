@@ -1,0 +1,125 @@
+const { chromium } = require('playwright')
+const { readFileSync, mkdirSync } = require('node:fs')
+const { spawn } = require('node:child_process')
+const { once } = require('node:events')
+const { randomUUID } = require('node:crypto')
+const path = require('node:path')
+const assert = require('node:assert/strict')
+
+async function main() {
+  const baseURL = process.env.CONFIGHUB_TEST_URL || 'http://127.0.0.1:5080'
+  const config = JSON.parse(readFileSync(path.join(process.env.LOCALAPPDATA, 'ConfigHub/appsettings.local.json'), 'utf8').replace(/^\uFEFF/, ''))
+  const browser = await chromium.launch({ channel: 'msedge', headless: true })
+  const context = await browser.newContext({ baseURL, viewport: { width: 1440, height: 1000 } })
+  const api = context.request
+  const write = async (url, data, method = 'POST', client = api) => {
+    const response = await client.fetch(url, { method, data, headers: { 'Idempotency-Key': randomUUID() } })
+    assert(response.ok(), `${url}: ${await response.text()}`)
+    return response.status() === 204 ? null : response.json()
+  }
+  const get = async url => { const response = await api.get(url); assert(response.ok(), await response.text()); return response.json() }
+  const credentials = { email: config.ConfigHub.BootstrapAdmin.Email, password: config.ConfigHub.BootstrapAdmin.Password }
+  const token = randomUUID().slice(0, 8)
+  let project
+  let host
+  let strict
+  try {
+    await write('/api/v1/auth/login', credentials)
+    project = await write('/api/v1/projects', { code: `LAB-${token}`, name: `Lab 闭环验收 ${token}`, reason: '验收' })
+    const a = await write(`/api/v1/projects/${project.id}/components`, { name: '主控软件', reason: '验收' })
+    const b = await write(`/api/v1/projects/${project.id}/components`, { name: '驱动软件', reason: '验收' })
+    const a0 = await write(`/api/v1/components/${a.id}/versions`, { versionNumber: 'CONTROL.0', maturity: 'Released', reason: '验收' })
+    const b0 = await write(`/api/v1/components/${b.id}/versions`, { versionNumber: 'DRIVER.0', maturity: 'Released', reason: '验收' })
+    const baseline = await write(`/api/v1/projects/${project.id}/baselines`, { seriesCode: 'LAB', baselineCode: 'LAB-BASE', publishImmediately: true, reason: '验收' })
+    await write(`/api/v1/projects/${project.id}/standard`, { configurationBaselineId: baseline.id, reason: '验收' })
+    const v = await write(`/api/v1/components/${a.id}/versions`, { versionNumber: 'CONTROL.TEST', maturity: 'Testing', reason: '验收' })
+    const machineInput = { projectId: project.id, name: 'Lab 一号机', serialNumber: token, stage: 'Lab', location: '实验室', owner: '测试工程师', chambers: [{ number: 1, stage: 'Lab' }, { number: 2, stage: 'HVM' }], reason: '验收' }
+    const machine = await write('/api/v1/machines', machineInput)
+    await write(`/api/v1/machines/${machine.id}/target`, { configurationBaselineId: baseline.id, reason: '验收' })
+    await write(`/api/v1/machines/${machine.id}/facts`, { operationType: 'InitialSnapshot', coverage: 'Full', sourceType: 'acceptance', effectiveAt: new Date(Date.now() - 10 * 60000).toISOString(), reason: '验收', items: [{ componentId: a.id, versionId: a0.id, absent: false }, { componentId: b.id, versionId: b0.id, absent: false }] })
+    const endpoint = `/api/v1/projects/${project.id}/laboratory-versions`
+    assert.equal((await get(endpoint)).versions.find(x => x.versionId === v.id).currentUses.length, 0)
+    const installedAt = new Date(Date.now() - 5 * 60000).toISOString()
+    await write(`/api/v1/component-versions/${v.id}/laboratory-deployments`, { machineId: machine.id, chamberNumber: null, installedAt, reason: '实际升级主控' })
+    let usage = (await get(endpoint)).versions.find(x => x.versionId === v.id)
+    assert.equal(usage.currentUses.filter(x => x.chamberNumber == null).length, 1)
+    assert.equal(usage.currentUses.find(x => x.chamberNumber === 1).kind, 'ChamberInherited')
+    const actual = await get(`/api/v1/machines/${machine.id}/configuration`)
+    assert(actual.some(x => x.versionId === b0.id), 'Partial upgrade preserves unrelated components')
+    assert.equal(new Date(actual.find(x => x.versionId === v.id).knownInstalledAt).toISOString(), installedAt)
+    const equipmentBefore = await get(`/api/v1/machines/${machine.id}/equipment`)
+    await write(`/api/v1/machines/${machine.id}/chambers/1/configuration`, { reason: '保留驱动特例', items: [{ componentId: b.id, versionId: b0.id }] }, 'PUT')
+    await write(`/api/v1/component-versions/${v.id}/laboratory-deployments`, { machineId: machine.id, chamberNumber: 1, installedAt: new Date(Date.now() - 4 * 60000).toISOString(), reason: 'Lab PM 主控升级' })
+    const equipment = await get(`/api/v1/machines/${machine.id}/equipment`)
+    assert.equal(equipment.targetBaselineId, equipmentBefore.targetBaselineId)
+    assert.equal(equipment.chambers.find(x => x.number === 1).overrides.length, 2, 'PM partial upgrade preserves other overrides')
+    assert.equal((await get(endpoint)).versions.find(x => x.versionId === v.id).currentUses.find(x => x.chamberNumber === 1).kind, 'ChamberOverride')
+    const nonLab = await api.post(`/api/v1/component-versions/${v.id}/laboratory-deployments`, { data: { machineId: machine.id, chamberNumber: 2, installedAt, reason: '非Lab拒绝' }, headers: { 'Idempotency-Key': randomUUID() } })
+    assert.equal(nonLab.status(), 400, await nonLab.text())
+
+    host = spawn(path.resolve('src/server/Host/bin/Release/net10.0/ConfigHub.Host.exe'), ['--urls', 'http://127.0.0.1:5097', '--ConfigHub:Laboratory:RequirePassedValidationForRelease', 'true'], { cwd: path.resolve('src/server/Host'), windowsHide: true })
+    let logs = ''
+    host.stdout.on('data', bytes => { logs += bytes })
+    host.stderr.on('data', bytes => { logs += bytes })
+    let ready = false
+    for (let i = 0; i < 100; i++) { try { if ((await fetch('http://127.0.0.1:5097/health/live')).ok) { ready = true; break } } catch {} await new Promise(resolve => setTimeout(resolve, 100)) }
+    assert(ready, logs)
+    strict = await browser.newContext({ baseURL: 'http://127.0.0.1:5097' })
+    await write('/api/v1/auth/login', credentials, 'POST', strict.request)
+    const strictPost = (url, data) => strict.request.post(url, { data, headers: { 'Idempotency-Key': randomUUID() } })
+    assert.equal((await strictPost(`/api/v1/component-versions/${v.id}/laboratory-validations`, { machineId: machine.id, chamberNumber: null, result: 'Passed', occurredAt: installedAt, reason: '不能保存本轮开始前的验证' })).status(), 400)
+    assert.equal((await strictPost(`/api/v1/component-versions/${v.id}/maturity`, { state: 'Released', reason: '没有验证应拒绝' })).status(), 409)
+    assert.equal((await strictPost(`/api/v1/components/${a.id}/versions`, { versionNumber: 'BYPASS', maturity: 'Released', reason: '初始发布应拒绝' })).status(), 409)
+    assert.equal((await strictPost(`/api/v1/projects/${project.id}/baselines`, { seriesCode: 'LAB', baselineCode: 'BYPASS', testingVersionIds: [v.id], publishImmediately: true, reason: '组合发布应拒绝' })).status(), 409)
+    await write(`/api/v1/component-versions/${v.id}/laboratory-validations`, { machineId: machine.id, chamberNumber: null, result: 'Passed', occurredAt: new Date().toISOString(), reason: '整机验证通过' })
+    await write(`/api/v1/component-versions/${v.id}/laboratory-validations`, { machineId: machine.id, chamberNumber: 1, result: 'Failed', occurredAt: new Date().toISOString(), reason: 'PM 仍有问题' })
+    const impact = await get(`/api/v1/component-versions/${v.id}/operation-impact`)
+    assert.equal(impact.canDelete, false)
+    assert.equal(impact.groups.find(group => group.kind === 'laboratory-validations')?.total, 2)
+    assert.equal((await strictPost(`/api/v1/component-versions/${v.id}/maturity`, { state: 'Released', reason: '失败不能被另一范围通过掩盖' })).status(), 409)
+    await write(`/api/v1/component-versions/${v.id}/laboratory-validations`, { machineId: machine.id, chamberNumber: 1, result: 'InProgress', occurredAt: new Date().toISOString(), reason: '重新测试，失败尚未解决' })
+    assert.equal((await strictPost(`/api/v1/component-versions/${v.id}/maturity`, { state: 'Released', reason: '开始复测不能代替通过结论' })).status(), 409)
+    assert.equal((await get(endpoint)).versions.find(x => x.versionId === v.id).validationStatus, 'Failed')
+
+    const page = await context.newPage()
+    const errors = []
+    page.on('pageerror', error => errors.push(error.message))
+    await page.goto('/')
+    await page.evaluate(id => localStorage.setItem('confighub.selected-project-id', id), project.id)
+    await page.reload()
+    await page.locator('.nav-item').filter({ hasText: /^版本$/ }).click()
+    await page.locator('.laboratory-badge').filter({ hasText: /Lab 1 台/ }).click()
+    await page.getByText('Lab 使用与验证', { exact: true }).waitFor()
+    assert(await page.getByText('PM 仍有问题', { exact: true }).isVisible())
+    await page.getByRole('button', { name: '登记验证结果', exact: true }).click()
+    await page.getByLabel('Lab 机台／腔室').selectOption(`${machine.id}:1`)
+    await page.getByLabel('实际验证时间').fill(new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 19))
+    await page.getByLabel('验证说明', { exact: true }).fill('PM 复测通过')
+    mkdirSync('artifacts/laboratory', { recursive: true })
+    await page.screenshot({ path: 'artifacts/laboratory/desktop.png', fullPage: true, animations: 'disabled' })
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.waitForFunction(() => { const rect = document.querySelector('.laboratory-drawer .ant-drawer-content-wrapper')?.getBoundingClientRect(); return rect && rect.left >= -1 && rect.right <= innerWidth + 1 })
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
+    await page.screenshot({ path: 'artifacts/laboratory/mobile.png', animations: 'disabled' })
+    assert.deepEqual(errors, [])
+    await page.getByRole('button', { name: '保存验证结果', exact: true }).click()
+    await page.getByRole('status').filter({ hasText: '验证结果已保存' }).waitFor()
+    assert.equal((await get(endpoint)).versions.find(x => x.versionId === v.id).validationStatus, 'Passed')
+    await write(`/api/v1/machines/${machine.id}/equipment`, { ...machineInput, stage: 'T0', chambers: [{ number: 1, stage: 'T0' }, { number: 2, stage: 'HVM' }], reason: '离开Lab历史保留' }, 'PUT')
+    usage = (await get(endpoint)).versions.find(x => x.versionId === v.id)
+    assert.equal(usage.currentUses.length, 0)
+    assert.equal(usage.validations.length, 4)
+    const released = await strictPost(`/api/v1/component-versions/${v.id}/maturity`, { state: 'Released', reason: '已完成本轮验证' })
+    assert(released.ok(), await released.text())
+    await write(`/api/v1/component-versions/${v.id}/maturity`, { state: 'Testing', reason: '新一轮测试' })
+    assert.equal((await strictPost(`/api/v1/component-versions/${v.id}/maturity`, { state: 'Released', reason: '不能复用上一轮验证' })).status(), 409)
+    assert.equal((await get(`/api/v1/projects/${project.id}/standard`)).baselineCode, 'LAB-BASE')
+    console.log('Laboratory acceptance passed: whole/PM current association, partial preservation, actual installation time, validation history, all release gates, unresolved failure, new testing round, stage-history retention and UI screenshots.')
+  } finally {
+    if (strict) await strict.close()
+    if (host && host.exitCode === null) { const done = once(host, 'exit'); host.kill(); await done }
+    if (project) await write(`/api/v1/projects/${project.id}/archive`, { reason: '验收结束' }).catch(() => {})
+    await browser.close()
+  }
+}
+main().catch(error => { console.error(error); process.exitCode = 1 })

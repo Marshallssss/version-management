@@ -79,6 +79,10 @@ async function main() {
     assert((await page.locator('.component-inspector').innerText()).includes('99-' + token))
     await navigate('导入')
     assert.equal(await page.getByLabel('所属项目').count(), 0)
+    const openLegacyImport = async () => {
+      if (!await page.getByLabel('表格内容（组件名称、版本号）').isVisible()) await page.getByText('粘贴文本导入', { exact: true }).click()
+    }
+    await openLegacyImport()
     await page.getByLabel('表格内容（组件名称、版本号）').fill(`99-${token}\tV-import`)
     await page.getByLabel('导入原因', { exact: true }).fill('预览项目隔离')
     await page.getByRole('button', { name: '生成预览', exact: true }).click()
@@ -98,6 +102,7 @@ async function main() {
       await previewGate
       await route.fulfill({ response })
     })
+    await openLegacyImport()
     await page.getByLabel('表格内容（组件名称、版本号）').fill(`99-${token}\tV-late-response`)
     await page.getByLabel('导入原因', { exact: true }).fill('迟到响应验收')
     await page.getByRole('button', { name: '生成预览', exact: true }).click()
@@ -110,6 +115,7 @@ async function main() {
     assert.equal(await page.getByRole('button', { name: '提交导入', exact: true }).count(), 0)
     assert.equal(await page.getByLabel('表格内容（组件名称、版本号）').inputValue(), '')
     await switchProject(a)
+    await openLegacyImport()
     await page.getByLabel('表格内容（组件名称、版本号）').fill(`99-${token}\tV-import`)
     await page.getByLabel('导入原因', { exact: true }).fill('真实提交验收')
     await page.getByRole('button', { name: '生成预览', exact: true }).click()

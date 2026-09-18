@@ -101,6 +101,8 @@ public static partial class CatalogEndpoints
         {
             var chamber = await db.MachineChambers.SingleOrDefaultAsync(x => x.MachineId == machineId && x.Number == number && x.Installed, ct);
             if (chamber is null) return Results.BadRequest(new { message = "只能为已安装的腔室登记特例。" });
+            if (request.LaboratoryOnly && (chamber.Stage != "Lab" || !request.Partial || request.Items?.Count != 1 || request.InstalledAt is null || request.InstalledAt == default(DateTimeOffset) || request.InstalledAt > DateTimeOffset.UtcNow.AddMinutes(1)))
+                return Results.BadRequest(new { message = "请选择 Lab 阶段腔室，填写不晚于现在的实际升级时间；每次仅登记所选组件。" });
             if (request.Items is null || request.Items.Count > 500 || request.Items.Select(x => x.ComponentId).Distinct().Count() != request.Items.Count)
                 return Results.BadRequest(new { message = "请选择不重复的组件与版本；空列表表示全部恢复沿用整机。" });
             var ids = request.Items.Select(x => x.VersionId).ToArray();
@@ -108,14 +110,15 @@ public static partial class CatalogEndpoints
             var components = await db.ConfigurationComponents.Where(x => x.ProjectId == machine.ProjectId).Select(x => x.Id).ToListAsync(ct);
             if (request.Items.Any(x => !components.Contains(x.ComponentId) || !versions.TryGetValue(x.VersionId, out var v) || v.ComponentId != x.ComponentId))
                 return Results.BadRequest(new { message = "组件必须属于机台项目，版本必须属于所选组件。" });
+            if (request.LaboratoryOnly && versions.Values.Any(version => version.Maturity != VersionMaturity.Testing)) return Results.Conflict(new { message = "实验室升级登记仅限测试中版本。" });
             var facts = await db.MachineChamberVersions.Where(x => x.ChamberId == chamber.Id).ToListAsync(ct);
             var current = facts.GroupBy(x => x.ComponentId).ToDictionary(x => x.Key, x => x.MaxBy(y => y.Sequence)!);
-            var history = EquipmentEvent(db, context, machineId, number, "ChamberOverridesChanged", request.Reason!, new { items = request.Items });
+            var history = EquipmentEvent(db, context, machineId, number, "ChamberOverridesChanged", request.Reason!, new { items = request.Items, partial = request.Partial, installedAt = request.InstalledAt, source = request.LaboratoryOnly ? "LaboratoryRegistration" : "Manual" });
             var sequence = facts.Count == 0 ? 1 : facts.Max(x => x.Sequence) + 1;
-            foreach (var componentId in current.Keys.Union(request.Items.Select(x => x.ComponentId)))
+            foreach (var componentId in request.Partial ? request.Items.Select(x => x.ComponentId) : current.Keys.Union(request.Items.Select(x => x.ComponentId)))
             {
                 var next = request.Items.SingleOrDefault(x => x.ComponentId == componentId)?.VersionId;
-                if (current.GetValueOrDefault(componentId)?.VersionId == next) continue;
+                if (!request.LaboratoryOnly && current.GetValueOrDefault(componentId)?.VersionId == next) continue;
                 db.MachineChamberVersions.Add(new() { Id = Guid.NewGuid(), ChamberId = chamber.Id, ComponentId = componentId, VersionId = next, Sequence = sequence, HistoryId = history.Id });
             }
         }
@@ -162,4 +165,4 @@ public static partial class CatalogEndpoints
 
 public sealed record ChamberInput(int Number, string Stage);
 public sealed record ChamberVersionInput(Guid ComponentId, Guid VersionId);
-public sealed record MachineEquipmentRequest(string? Reason, string? Owner = null, string? Stage = null, List<ChamberInput>? Chambers = null, List<ChamberVersionInput>? Items = null);
+public sealed record MachineEquipmentRequest(string? Reason, string? Owner = null, string? Stage = null, List<ChamberInput>? Chambers = null, List<ChamberVersionInput>? Items = null, bool Partial = false, DateTimeOffset? InstalledAt = null, bool LaboratoryOnly = false);
