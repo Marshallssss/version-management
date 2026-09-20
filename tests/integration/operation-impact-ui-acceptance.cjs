@@ -31,7 +31,7 @@ async function main() {
     await target.goto('/')
     await target.evaluate(id => localStorage.setItem('confighub.selected-project-id', id), project.id)
     await target.reload()
-    await target.locator('.nav-item').filter({ hasText: '版本' }).click()
+    await target.locator('.nav-item').filter({ hasText: /^版本$/ }).click()
     await target.locator('.root-node').first().click()
   }
   const openDelete = async number => {
@@ -140,7 +140,7 @@ async function main() {
     await page.locator('.baseline-snapshot h3').filter({ hasText: '冻结历史基线' }).waitFor()
     assert.deepEqual((await read(`/api/v1/baselines/${baseline.id}`)).items, snapshot.items)
 
-    await page.locator('.nav-item').filter({ hasText: '版本' }).click()
+    await page.locator('.nav-item').filter({ hasText: /^版本$/ }).click()
     await page.locator('.root-node').first().click()
     dialog = await openDelete('V1-frozen')
     await ready(dialog)

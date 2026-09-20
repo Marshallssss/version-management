@@ -1,0 +1,25 @@
+.machine-import-dialog .ant-modal-body { padding-top: 12px; }
+.machine-import-upload { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding-bottom: 20px; }
+.machine-import-upload .toolbar-actions { flex-basis: 100%; flex-wrap: wrap; }
+.machine-import-upload input[type="file"] { display: none; }
+.machine-import-upload label { display: grid; gap: 6px; flex: 1 1 240px; font-size: 13px; color: var(--ui-muted); }
+.machine-import-dialog :is(input, button) { font: inherit; }
+.machine-import-upload input { min-width: 0; width: 100%; height: 36px; padding: 6px 10px; border: 1px solid var(--ui-line); border-radius: 4px; background: var(--ui-surface); color: var(--ui-ink); }
+.machine-import-dialog .ant-modal-body button { min-height: 34px; padding: 6px 12px; border: 1px solid var(--ui-line); border-radius: 4px; color: var(--ui-ink); background: var(--ui-surface); cursor: pointer; }
+.machine-import-dialog .ant-modal-body button.primary-action { color: white; background: #285bea; border-color: #285bea; }
+.machine-import-dialog button:disabled { opacity: .5; cursor: not-allowed; }
+.machine-import-filename { color: var(--ui-muted); overflow-wrap: anywhere; min-width: 0; font-size: 12px; }
+.machine-import-results { border-top: 1px solid var(--ui-line); padding-top: 18px; }
+.machine-import-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 12px; }
+.machine-import-summary span { flex: 1; font-size: 12px; color: var(--ui-muted); }
+.machine-import-table { overflow-x: auto; max-height: 440px; }
+.machine-import-table table { border-collapse: collapse; width: 100%; table-layout: fixed; min-width: 760px; font-size: 12px; }
+.machine-import-table th { position: sticky; top: 0; background: #eef2f7; text-align: left; z-index: 1; }
+.machine-import-table :is(th, td) { padding: 12px 10px; border-bottom: 1px solid var(--ui-line); vertical-align: top; overflow-wrap: anywhere; }
+.machine-import-table small { display: block; color: var(--ui-muted); line-height: 1.7; }
+.machine-import-table .machine-import-warning, .machine-import-table .machine-import-warning small { background: #fff1f0; color: #a62e32; }
+.machine-import-dialog .ant-modal-body .machine-import-link { color: #245ac7; border: 0; background: transparent; text-align: left; padding: 3px 0; }
+.machine-import-history { margin-top: 22px; border-top: 1px solid var(--ui-line); padding-top: 14px; }
+.machine-import-history summary { cursor: pointer; color: var(--ui-muted); }
+.machine-import-dialog .ant-modal-body .machine-import-history button { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; text-align: left; width: 100%; border: 0; border-bottom: 1px solid var(--ui-line); border-radius: 0; padding: 12px 0; }
+@media (max-width: 600px) { .machine-import-summary span { flex-basis: 100%; } .machine-import-upload > button { width: 100%; } }

@@ -162,7 +162,7 @@ async function main() {
     await capture('compare')
     await capture('compare', 390)
     await page.setViewportSize({ width: 1440, height: 1000 })
-    for (const [name, file] of [['搜索', 'search'], ['导入', 'import'], ['部署记录', 'deployment'], ['用户与角色', 'users']]) {
+    for (const [name, file] of [['搜索', 'search'], ['版本导入', 'import'], ['部署记录', 'deployment'], ['用户与角色', 'users']]) {
       await nav(name)
       if (name === '搜索') {
         await page.getByLabel('搜索词').fill('3.1')

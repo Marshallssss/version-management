@@ -38,7 +38,7 @@ async function main() {
     await page.goto('/')
     await page.evaluate(id => localStorage.setItem('confighub.selected-project-id', id), project.id)
     await page.reload()
-    await page.locator('.nav-item').filter({ hasText: '版本' }).click()
+    await page.locator('.nav-item').filter({ hasText: /^版本$/ }).click()
     await page.locator('.project-intro').waitFor()
     assert.equal(await page.locator('.workspace-heading').count(), 0)
     assert((await page.locator('.project-switch').innerText()).includes(project.name || '记录维护验收项目'))

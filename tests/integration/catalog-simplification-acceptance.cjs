@@ -54,7 +54,7 @@ async function main() {
     assert.equal((await call(`/api/v1/components/${root.id}`, { name: '工艺系统', notes: 'x'.repeat(2001), reason: '过长' }, 'PUT')).status(), 400)
     page = await context.newPage(); const errors = []; page.on('pageerror', e => errors.push(e.message))
     await page.goto('/'); await page.evaluate(id => localStorage.setItem('confighub.selected-project-id', id), project.id); await page.reload()
-    await page.locator('.nav-item').filter({ hasText: '版本' }).click()
+    await page.locator('.nav-item').filter({ hasText: /^版本$/ }).click()
     const testingNode = page.locator('.laboratory-tree .lab-node').filter({ hasText: '下位机控制软件' })
     await testingNode.waitFor()
     assert(await testingNode.evaluate(node => {

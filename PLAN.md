@@ -2,6 +2,18 @@
 
 ## Final Architecture and Product Plan
 
+### 2026-09-21 版本导入引导与机台 Excel 导入（验收完成）
+
+- 侧栏及页面统一“版本导入”，增加生成模板、填写、首次导入、可选每日扫描的步骤引导，保留已有自动扫描和历史记录。
+- 机台页增加 Excel 导入入口，下载当前项目绑定模板，一行一台，覆盖资料、状态、整机/PM 阶段；预览校验后显式确认，已有序列号不覆盖。
+- 软件仅匹配当前项目已发布基线，作为初始实际快照，不自动指派目标；基线为空或无法识别不阻止机台资料导入，明确红色提示及版本留空。预览、提交与历史保留原始输入和逐台结果。
+- 导入复用机台创建及事实命令，保留权限、审计、原因、关联编号、幂等与失败重试；补齐真实 XLSX/API/UI 回归、Release build、Migration/model 检查与文档后推送。
+- 已交付项目绑定的机台模板、阶段/状态下拉、文本日期格式说明、资料/状态/PM/软件分区及冻结表头。预览使用已有 ImportBatch/ImportRow 保存原始资料、识别结果及警告，不直接写机台业务表；显式确认后调用相同创建和 InitialSnapshot 命令，安装时间保持未知。首次机台状态/CIP 时间纳入公共创建命令并审计。
+- 基线警告只影响软件配置；普通资料错误拦截提交。预览后基线撤回/快照改变会降为红色警告与版本留空。逐台结果长期保留，批次行锁与稳定命令键防止重复提交/并发重试，成功机台不重复创建；现有序列号及历史删除机台均不覆盖。
+- 新增 `machine-import-acceptance.cjs`，覆盖真实 XLSX、项目/表头/公式/越界/日期校验、资料错误零写入、基线识别失败仍导入资料、初始快照不伪造安装时间/目标、权限、持久结果、并发冲突后的失败项重试、基线撤回后的过期预览与桌面/390px 页面。旧页面测试改用精确导航名称，避免“版本”误匹配“版本导入”。
+- 全部 31 组 CJS 验收及 catalog、background-job、Windows operations preflight（13 脚本）、web compatibility 通过；Release build 0 warning / 0 error，前端 build 无大包警告，Migration 已最新且 EF 无 pending model changes。Host/Worker 运行，live/ready 为 200。
+- 模板已用独立 XLSX 读取器验证分区、文本、真实空白、下拉及冻结，整表渲染及页面截图已复核（`artifacts/machine-import`）；未冒充原生 Excel 人工验收。README、版本导入说明和新增机台导入说明同步。本片无新增 Migration，PostgreSQL 17 / Windows Production Integration Pending 边界不变。
+
 ### 2026-09-20 项目资料、基线名称与批量 Lab 登记（验收完成）
 
 - 核验并补测 Excel 当前项目、模板与文件标识的三方校验，跨项目错误明确提示，不以组件同名匹配。

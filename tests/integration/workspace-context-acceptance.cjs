@@ -77,7 +77,7 @@ async function main() {
     await page.getByRole('button').filter({ hasText: '99-' + token }).click()
     await page.locator('.component-inspector:not(.collapsed)').waitFor()
     assert((await page.locator('.component-inspector').innerText()).includes('99-' + token))
-    await navigate('导入')
+    await navigate('版本导入')
     assert.equal(await page.getByLabel('所属项目').count(), 0)
     const openLegacyImport = async () => {
       if (!await page.getByLabel('表格内容（组件名称、版本号）').isVisible()) await page.getByText('粘贴文本导入', { exact: true }).click()

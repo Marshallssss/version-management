@@ -122,7 +122,7 @@ async function main() {
     await page.goto('/')
     await page.evaluate(id => localStorage.setItem('confighub.selected-project-id', id), project.id)
     await page.reload()
-    await page.locator('.nav-item').filter({ hasText: '版本' }).click()
+    await page.locator('.nav-item').filter({ hasText: /^版本$/ }).click()
     const laboratory = page.locator('.laboratory-tree')
     const laboratoryNode = laboratory.locator('.lab-node').filter({ hasText: '界面致命缺陷组件' })
     await laboratoryNode.click()

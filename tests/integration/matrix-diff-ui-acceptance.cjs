@@ -77,8 +77,8 @@ async function main() {
       await page.goto('/')
       await page.evaluate(id => localStorage.setItem('confighub.selected-project-id', id), project.id)
       await page.reload()
-      await page.locator('.nav-item').filter({ hasText: /^导入$/ }).click()
-      await page.getByRole('heading', { name: 'Excel 版本登记' }).waitFor()
+      await page.locator('.nav-item').filter({ hasText: /^版本导入$/ }).click()
+      await page.locator('.matrix-import-workspace').getByRole('heading', { name: '版本导入', exact: true }).waitFor()
       await page.getByLabel('测试组合详情', { exact: true }).waitFor()
     }
     const openFirstChange = async () => {

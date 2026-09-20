@@ -34,7 +34,7 @@ async function main() {
     await page.goto('/')
     await page.evaluate(id => localStorage.setItem('confighub.selected-project-id', id), project.id)
     await page.reload()
-    await page.locator('.nav-item').filter({ hasText: '版本' }).click()
+    await page.locator('.nav-item').filter({ hasText: /^版本$/ }).click()
     await page.locator('.workspace-layout.inspector-collapsed').waitFor()
     assert.equal(await page.locator('.lab-root-column').count(), 6)
     assert(await page.evaluate(() => parseFloat(getComputedStyle(document.querySelector('.nav-label')).fontSize) >= 14))

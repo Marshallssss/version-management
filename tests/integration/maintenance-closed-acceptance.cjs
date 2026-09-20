@@ -173,7 +173,7 @@ async function main() {
       await page.goto('/')
       await page.evaluate(id => localStorage.setItem('confighub.selected-project-id', id), project.id)
       await page.reload()
-      await page.locator('.nav-item').filter({ hasText: '版本' }).click()
+      await page.locator('.nav-item').filter({ hasText: /^版本$/ }).click()
       await page.locator('.root-node').filter({ hasText: '控制程序' }).first().click()
       const inspector = page.locator('.component-inspector')
       await inspector.locator('.version-item').filter({ hasText: 'V1-historical' }).click()
@@ -192,7 +192,7 @@ async function main() {
       await page.screenshot({ path: path.join(output, label + '-mobile.png'), fullPage: true })
       if (label === 'superadmin') {
         await page.setViewportSize({ width: 1440, height: 1000 })
-        await page.locator('.nav-item').filter({ hasText: '版本' }).click()
+        await page.locator('.nav-item').filter({ hasText: /^版本$/ }).click()
         await page.locator('.root-node').filter({ hasText: '控制程序' }).first().click()
         await inspector.getByRole('button', { name: '版本', exact: true }).click()
         await inspector.getByRole('button', { name: '登记新版本', exact: true }).click()

@@ -20,7 +20,7 @@ const navigation = [
   { id: 'deployments', icon: HistoryOutlined, label: '部署记录', available: true },
   { id: 'compare', icon: SwapOutlined, label: '配置比对', available: true },
   { id: 'search', icon: SearchOutlined, label: '搜索', available: true },
-  { id: 'imports', icon: ImportOutlined, label: '导入', available: true },
+  { id: 'imports', icon: ImportOutlined, label: '版本导入', available: true },
   { id: 'users', icon: TeamOutlined, label: '用户与角色', available: true, adminOnly: true },
 ]
 
@@ -337,7 +337,7 @@ function App() {
               {users.isError && <p className="error-strip">{users.error.message}</p>}
             </section>}
 
-            {activePage === 'machines' && <MachineWorkspace key={selectedProjectId ?? ''} projectId={selectedProjectId ?? ''} canWrite={canWrite} isAdmin={isAdmin} initialAttention={machineAttention} selectedMachineId={selectedMachineId} onSelectMachine={setSelectedMachineId} onOpenVersion={(projectId, versionId, patches = false) => { setSelectedProjectId(projectId); localStorage.setItem('confighub.selected-project-id', projectId); setFocusedComponentId(''); setFocusedBaselineId(''); setFocusedVersionId(versionId); setFocusPatch(patches); setActivePage('projects'); setSuccessMessage('') }} onSuccess={setSuccessMessage} />}
+            {activePage === 'machines' && <MachineWorkspace key={selectedProjectId ?? ''} projectId={selectedProjectId ?? ''} canWrite={canWrite} canImport={currentUser.data?.roles.some(role => ['SeniorEngineer', 'Admin', 'SuperAdmin'].includes(role)) === true} isAdmin={isAdmin} initialAttention={machineAttention} selectedMachineId={selectedMachineId} onSelectMachine={setSelectedMachineId} onOpenVersion={(projectId, versionId, patches = false) => { setSelectedProjectId(projectId); localStorage.setItem('confighub.selected-project-id', projectId); setFocusedComponentId(''); setFocusedBaselineId(''); setFocusedVersionId(versionId); setFocusPatch(patches); setActivePage('projects'); setSuccessMessage('') }} onSuccess={setSuccessMessage} />}
           </div>
         ) : (
           <section className="pending-page"><span className="section-index">后续垂直切片</span><h2>{selectedNavigation.label}尚未实现</h2><p>当前版本只完成了运行基础设施和后台任务链路。{selectedNavigation.label}将在核心领域模型与对应 API 落地后开放，现阶段不会提供无法保存或追溯的占位操作。</p><button className="primary-action" type="button" onClick={() => setActivePage('overview')}>返回运行总览</button></section>

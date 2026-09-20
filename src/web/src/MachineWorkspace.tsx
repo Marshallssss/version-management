@@ -1,5 +1,6 @@
 import { Modal } from 'antd'
-import { PlusOutlined, EditOutlined, ArrowLeftOutlined, HistoryOutlined, SettingOutlined, SwapOutlined, UnorderedListOutlined, EnvironmentOutlined, CloudUploadOutlined, AimOutlined, SearchOutlined, ClearOutlined } from '@ant-design/icons'
+import { MachineImportDialog } from './MachineImportDialog'
+import { FileExcelOutlined, PlusOutlined, EditOutlined, ArrowLeftOutlined, HistoryOutlined, SettingOutlined, SwapOutlined, UnorderedListOutlined, EnvironmentOutlined, CloudUploadOutlined, AimOutlined, SearchOutlined, ClearOutlined } from '@ant-design/icons'
 import { MachineVersionComparison } from './MachineVersionComparison'
 import { ConfigurationTree } from './ConfigurationTree'
 import { ChamberFields, MachineEquipmentPanel, stages } from './MachineEquipmentPanel'
@@ -14,7 +15,7 @@ import { RollbackFactPanel } from './RollbackFactPanel'
 import { getMachineRegistry, type MachineAttention } from './machine-registry-api'
 import { assignMachineTarget, compareMachineToBaseline, createMachine, getBaselines, getMachineConfiguration, getMachineDrift, getMachineEquipment, getMachineFacts, getMachineTarget, getMachineTargetHistory, getProject, getProjectStandard, recordMachineFacts, updateMachine } from './catalog-api'
 
-const sourceText: Record<string, string> = { 'manual-ui': '人工录入', Manual: '人工录入', 'bulk-ui': '批量录入', 'agent-automation': '机台代理' }
+const sourceText: Record<string, string> = { 'machine-excel': 'Excel 机台导入', 'manual-ui': '人工录入', Manual: '人工录入', 'bulk-ui': '批量录入', 'agent-automation': '机台代理' }
 const machineStatusText: Record<string, string> = { Active: '在用', Archived: '已归档', ShortTermCip: '短期 CIP', LongTermCip: '长期 CIP', NoProduction: '暂未过货' }
 const matchText: Record<string, string> = { Matched: '匹配', Mismatch: '不匹配', Unknown: '未知' }
 const riskText: Record<string, string> = { None: '无', High: '高', Critical: '严重', Unknown: '未知' }
@@ -24,7 +25,7 @@ function formatTime(value: string | null | undefined) {
   return value ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value)) : '—'
 }
 
-export function MachineWorkspace({ projectId, canWrite = true, isAdmin = false, selectedMachineId, initialAttention = '', onSelectMachine, onOpenVersion, onSuccess }: { projectId: string; canWrite?: boolean; isAdmin?: boolean; selectedMachineId: string; initialAttention?: MachineAttention; onSelectMachine: (machineId: string) => void; onOpenVersion: (projectId: string, versionId: string, patches?: boolean) => void; onSuccess: (message: string) => void }) {
+export function MachineWorkspace({ projectId, canWrite = true, canImport = false, isAdmin = false, selectedMachineId, initialAttention = '', onSelectMachine, onOpenVersion, onSuccess }: { projectId: string; canWrite?: boolean; canImport?: boolean; isAdmin?: boolean; selectedMachineId: string; initialAttention?: MachineAttention; onSelectMachine: (machineId: string) => void; onOpenVersion: (projectId: string, versionId: string, patches?: boolean) => void; onSuccess: (message: string) => void }) {
   const queryClient = useQueryClient()
   const [toolTab, setToolTab] = useState<string | null>(null)
   const [detailTab, setDetailTab] = useState('configuration')
@@ -43,6 +44,7 @@ export function MachineWorkspace({ projectId, canWrite = true, isAdmin = false, 
   const [machineChambers, setMachineChambers] = useState<ChamberInput[]>([])
   const [machineReason, setMachineReason] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [editSerial, setEditSerial] = useState('')
   const [editName, setEditName] = useState('')
@@ -174,7 +176,7 @@ export function MachineWorkspace({ projectId, canWrite = true, isAdmin = false, 
 
   return <div className={`machine-workspace${selectedMachine ? ' has-selection' : ' machine-unselected'}`}>
     <section className="machine-registry-panel">
-      <div className="panel-heading machine-heading"><strong>机台管理 <span className="workspace-count">{projectMachines.length} 台</span></strong><div className="toolbar-actions">{canWrite && projectId && <><button type="button" className="primary-action" aria-label="新建机台 / 从已有机台复制资料" onClick={() => setCreateOpen(true)}><PlusOutlined aria-hidden />新建机台</button><button type="button" onClick={() => setToolTab('upgrade')}><CloudUploadOutlined aria-hidden />批量升级</button><button type="button" onClick={() => setToolTab('target')}><AimOutlined aria-hidden />批量目标</button></>}</div></div>
+      <div className="panel-heading machine-heading"><strong>机台管理 <span className="workspace-count">{projectMachines.length} 台</span></strong><div className="toolbar-actions">{canImport && projectId && <button type="button" onClick={() => setImportOpen(true)}><FileExcelOutlined aria-hidden />Excel 导入机台</button>}{canWrite && projectId && <><button type="button" className="primary-action" aria-label="新建机台 / 从已有机台复制资料" onClick={() => setCreateOpen(true)}><PlusOutlined aria-hidden />新建机台</button><button type="button" onClick={() => setToolTab('upgrade')}><CloudUploadOutlined aria-hidden />批量升级</button><button type="button" onClick={() => setToolTab('target')}><AimOutlined aria-hidden />批量目标</button></>}</div></div>
     </section>
     <section className="machine-list-panel">
       <div className="machine-list-controls"><strong>当前项目机台</strong><div className="machine-filter-summary"><span aria-live="polite">{visibleMachines.length} / {projectMachines.length} 台</span><button type="button" className="machine-clear-filters" disabled={!hasFilters} onClick={clearFilters} title="清空机台筛选" aria-label="清空机台筛选"><ClearOutlined aria-hidden /></button></div></div>
@@ -227,6 +229,7 @@ export function MachineWorkspace({ projectId, canWrite = true, isAdmin = false, 
         </div>
       </>}
     </section>
+    {canImport && importOpen && <MachineImportDialog projectId={projectId} onClose={() => setImportOpen(false)} onOpenMachine={onSelectMachine} />}
     <Modal title="新建机台" open={canWrite && createOpen} onCancel={() => { if (!addMachine.isPending) setCreateOpen(false) }} maskClosable={!addMachine.isPending} width={820} footer={null} className="machine-dialog" destroyOnHidden>
       <div className="machine-create">
         <form hidden={!canWrite} className="catalog-form" onSubmit={(event) => { event.preventDefault(); addMachine.mutate({ projectId: machineProjectId, serialNumber: machineSerial, name: machineName, machineType, process: machineProcess, equipmentConfiguration: equipmentNotes, location: machineLocation, owner: machineOwner, stage: machineStage, chambers: machineChambers, reason: machineReason }) }}>

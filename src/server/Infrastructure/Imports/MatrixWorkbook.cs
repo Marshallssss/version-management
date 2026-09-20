@@ -55,14 +55,14 @@ public static class MatrixWorkbook
         return Package(sheet);
     }
 
-    private static byte[] Package(XDocument sheet)
+    internal static byte[] Package(XDocument sheet, string sheetName = "版本登记")
     {
         using var stream = new MemoryStream();
         using (var zip = new ZipArchive(stream, ZipArchiveMode.Create, true))
         {
             Add(zip, "[Content_Types].xml", "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/><Override PartName=\"/xl/worksheets/sheet1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/><Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/></Types>");
             Add(zip, "_rels/.rels", "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/></Relationships>");
-            Add(zip, "xl/workbook.xml", "<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheets><sheet name=\"版本登记\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>");
+            Add(zip, "xl/workbook.xml", new XElement(S + "workbook", new XAttribute(XNamespace.Xmlns + "r", "http://schemas.openxmlformats.org/officeDocument/2006/relationships"), new XElement(S + "sheets", new XElement(S + "sheet", new XAttribute("name", sheetName), new XAttribute("sheetId", 1), new XAttribute(XNamespace.Get("http://schemas.openxmlformats.org/officeDocument/2006/relationships") + "id", "rId1")))).ToString());
             Add(zip, "xl/_rels/workbook.xml.rels", "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/><Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/></Relationships>");
             Add(zip, "xl/styles.xml", """
                 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
@@ -86,7 +86,7 @@ public static class MatrixWorkbook
         return stream.ToArray();
     }
 
-    public static IReadOnlyList<MatrixInputRow> Read(byte[] bytes, Guid templateId, IReadOnlyList<MatrixComponent> components)
+    internal static Dictionary<string, (string Text, bool Numeric)> ReadCells(byte[] bytes, out int[] rowNumbers)
     {
         if (bytes.Length > MaximumBytes) throw new InvalidDataException("Excel 不能超过 10 MiB。");
         using var stream = new MemoryStream(bytes); using var zip = new ZipArchive(stream, ZipArchiveMode.Read);
@@ -109,6 +109,13 @@ public static class MatrixWorkbook
             var text = kind switch { "inlineStr" => string.Concat(cell.Descendants(S + "t").Select(x => x.Value)), "s" => int.TryParse(value, out var index) && index >= 0 && index < shared.Length ? shared[index] : throw new InvalidDataException("Excel 文本索引不合法。"), "e" => throw new InvalidDataException($"{address} 含 Excel 错误值。"), _ => value };
             if (!cells.TryAdd(address, (text.Trim(), kind is null or "n" && value.Length > 0))) throw new InvalidDataException("Excel 包含重复单元格。");
         }
+        rowNumbers = doc.Descendants(S + "row").Select(x => int.TryParse((string?)x.Attribute("r"), out var row) ? row : 0).ToArray();
+        return cells;
+    }
+
+    public static IReadOnlyList<MatrixInputRow> Read(byte[] bytes, Guid templateId, IReadOnlyList<MatrixComponent> components)
+    {
+        var cells = ReadCells(bytes, out var rowNumbers);
         string Value(int c, int r) => cells.GetValueOrDefault(Column(c) + r).Text ?? "";
         if (Value(1, 1) == $"ConfigHub.Matrix.v2:{templateId:D}") return ReadVertical(cells, templateId, components);
         if (Value(1, 1) != $"ConfigHub.Matrix.v1:{templateId:D}") throw new InvalidDataException("Excel 不属于当前项目所选模板，请切换到原项目及对应模板，或重新下载当前项目模板。");
@@ -131,7 +138,7 @@ public static class MatrixWorkbook
             if (split == 0 || !int.TryParse(cell.Key.AsSpan(split), out var rowNumber)) throw new InvalidDataException("Excel 单元格位置不合法。");
             if (rowNumber >= 6 && cell.Value.Text.Length > 0 && !permittedColumns.Contains(cell.Key[..split])) throw new InvalidDataException($"{cell.Key} 不属于模板组件列，请勿自行添加组件列；新增组件后重新生成模板。");
         }
-        var dataRows = doc.Descendants(S + "row").Select(x => int.TryParse((string?)x.Attribute("r"), out var row) ? row : 0).Where(x => x >= 6).Order().ToArray();
+        var dataRows = rowNumbers.Where(x => x >= 6).Order().ToArray();
         var result = new List<MatrixInputRow>(); var keys = new HashSet<string>();
         foreach (var row in dataRows)
         {

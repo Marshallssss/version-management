@@ -1,0 +1,8 @@
+.import-steps { display: flex; flex-wrap: wrap; gap: 16px 24px; list-style: none; margin: 0 0 24px; padding: 18px 0; border-block: 1px solid var(--ui-line); }
+.import-steps li { display: flex; align-items: flex-start; gap: 10px; flex: 1 1 190px; min-width: 0; }
+.import-step-number { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 26px; height: 26px; border: 1px solid var(--ui-line); border-radius: 50%; font-size: 12px; color: var(--ui-muted); }
+.import-steps [aria-current="step"] .import-step-number { color: white; background: #285bea; border-color: #285bea; }
+.import-steps strong { display: block; color: var(--ui-ink); font-size: 13px; line-height: 24px; }
+.import-steps small { display: block; color: var(--ui-muted); font-size: 12px; line-height: 1.6; }
+.import-guidance { font-size: 13px; line-height: 1.8; color: var(--ui-muted); margin: 10px 0 18px; }
+@media (max-width: 600px) { .import-steps { gap: 12px; } .import-steps li { flex-basis: calc(50% - 12px); } }
