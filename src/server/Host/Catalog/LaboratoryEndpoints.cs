@@ -12,6 +12,7 @@ public static partial class CatalogEndpoints
     private static void MapLaboratoryEndpoints(IEndpointRouteBuilder endpoints)
     {
         endpoints.MapGet("/api/v1/projects/{projectId:guid}/laboratory-versions", GetLaboratoryVersionsAsync).RequireAuthorization();
+        endpoints.MapPost("/api/v1/projects/{projectId:guid}/laboratory-deployments", RecordLaboratorySelectionAsync).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/component-versions/{versionId:guid}/laboratory-deployments", RecordLaboratoryDeploymentAsync).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/component-versions/{versionId:guid}/laboratory-validations", RecordLaboratoryValidationAsync).RequireAuthorization("Engineer");
     }
@@ -80,6 +81,7 @@ public static partial class CatalogEndpoints
         if (!await db.Projects.AnyAsync(project => project.Id == projectId && project.Status == ProjectStatus.Active, ct)) return Results.NotFound();
         var versions = await db.ComponentVersions.AsNoTracking().Where(version => db.ConfigurationComponents.Any(component => component.ProjectId == projectId && component.Id == version.ComponentId)).ToListAsync(ct);
         var versionIds = versions.Select(version => version.Id).ToArray();
+        var componentNames = await db.ConfigurationComponents.Where(component => component.ProjectId == projectId).ToDictionaryAsync(component => component.Id, component => component.Name, ct);
         var uses = await ReadLaboratoryUsesAsync(db, projectId, ct);
         var validations = await db.LaboratoryValidations.AsNoTracking().Where(validation => versionIds.Contains(validation.ComponentVersionId)).OrderByDescending(validation => validation.RecordedAt).ToListAsync(ct);
         var testingRounds = await db.VersionLifecycleTransitions.AsNoTracking().Where(x => versionIds.Contains(x.ComponentVersionId) && x.Axis == LifecycleAxis.Maturity && x.ToState == "Testing").ToListAsync(ct);
@@ -100,7 +102,7 @@ public static partial class CatalogEndpoints
                 .Concat(chambers.Where(chamber => chamber.MachineId == machine.Id).Select(chamber => new { machineId = machine.Id, machineName = machine.Name, machine.SerialNumber, machine.Location, machineStage = machine.Stage, chamberNumber = (int?)chamber.Number }))),
             versions = versions.Select(version => new
             {
-                versionId = version.Id, version.ComponentId,
+                versionId = version.Id, version.ComponentId, version.VersionNumber, componentName = componentNames[version.ComponentId], maturity = version.Maturity.ToString(),
                 validationStatus = Status(version),
                 currentUses = uses.GetValueOrDefault(version.Id) ?? [],
                 validations = validations.Where(validation => validation.ComponentVersionId == version.Id).Select(validation => new
@@ -112,6 +114,28 @@ public static partial class CatalogEndpoints
                 })
             })
         });
+    }
+
+    private static async Task<IResult> RecordLaboratorySelectionAsync(Guid projectId, LaboratorySelectionRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken ct)
+    {
+        if (request.VersionIds is null || request.VersionIds.Count is < 1 or > 100 || request.VersionIds.Distinct().Count() != request.VersionIds.Count)
+            return Results.BadRequest(new { message = "请选择 1 至 100 个不重复的测试版本。" });
+        await using var db = await factory.CreateDbContextAsync(ct);
+        if (!await HasProjectWriteAccessAsync(db, context, projectId, ct)) return Results.Forbid();
+        if (!await db.Machines.AnyAsync(machine => machine.Id == request.MachineId && machine.ProjectId == projectId, ct))
+            return Results.BadRequest(new { message = "机台不属于当前项目。" });
+        var versions = await db.ComponentVersions.Where(version => request.VersionIds.Contains(version.Id)
+            && db.ConfigurationComponents.Any(component => component.Id == version.ComponentId && component.ProjectId == projectId)).OrderBy(version => version.ComponentId).ToListAsync(ct);
+        if (versions.Count != request.VersionIds.Count || versions.Select(version => version.ComponentId).Distinct().Count() != versions.Count)
+            return Results.BadRequest(new { message = "所有版本必须属于当前项目，每个组件只能选择一个版本。" });
+        if (request.ChamberNumber is not null)
+            return await ChangeMachineEquipmentAsync(request.MachineId,
+                new(request.Reason, Items: versions.Select(version => new ChamberVersionInput(version.ComponentId, version.Id)).ToList(), Partial: true, InstalledAt: request.InstalledAt.ToUniversalTime(), LaboratoryOnly: true),
+                "overrides", request.ChamberNumber, context, factory, ct);
+        return await RecordFactsCoreAsync(request.MachineId,
+            new("Upgrade", "Partial", "laboratory-registration", null, request.InstalledAt.ToUniversalTime(), request.Reason,
+                versions.Select(version => new RecordFactItem(version.ComponentId, version.Id, false, request.InstalledAt.ToUniversalTime())).ToList()),
+            context, factory, context.Request.Headers["Idempotency-Key"].FirstOrDefault(), ct, laboratoryOnly: true);
     }
 
     private static async Task<IResult> RecordLaboratoryDeploymentAsync(Guid versionId, LaboratoryDeploymentRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken ct)
@@ -198,4 +222,5 @@ public static partial class CatalogEndpoints
 }
 
 public sealed record LaboratoryDeploymentRequest(Guid MachineId, int? ChamberNumber, DateTimeOffset InstalledAt, string? Reason);
+public sealed record LaboratorySelectionRequest(Guid MachineId, int? ChamberNumber, List<Guid>? VersionIds, DateTimeOffset InstalledAt, string? Reason);
 public sealed record LaboratoryValidationRequest(Guid MachineId, int? ChamberNumber, string Result, DateTimeOffset OccurredAt, string? Reason);

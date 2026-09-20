@@ -31,6 +31,16 @@
 .laboratory-badge { color: var(--ui-muted); border-color: var(--ui-line); }
 .laboratory-badge.Failed { color: var(--ui-danger); }
 .lab-node-shell { position: relative; min-width: 0; }
+.laboratory-selection { min-width: 0; margin: 0; padding: 12px 0; border: 0; border-top: 1px solid var(--ui-line); max-height: 240px; overflow-y: auto; }
+.laboratory-selection legend { font-size: 13px; font-weight: 600; padding-right: 12px; }
+.laboratory-content .laboratory-selection label { display: flex; align-items: center; gap: 10px; padding: 8px; color: var(--ui-ink); }
+.laboratory-content .laboratory-selection input[type="checkbox"] { width: 16px; height: 16px; min-height: 0; flex: 0 0 16px; padding: 0; margin: 0; accent-color: var(--ui-primary); }
+.laboratory-selection label:has(input:checked) { background: var(--ui-surface-muted); }
+.laboratory-selection label span { min-width: 0; overflow-wrap: anywhere; }
+.laboratory-selection strong { margin-left: 10px; color: var(--ui-primary); }
+.laboratory-selection small { display: block; color: var(--ui-muted); margin-top: 3px; }
+.laboratory-batch-results { list-style: none; padding: 0; margin: 0; }
+.laboratory-batch-results li { display: grid; gap: 5px; overflow-wrap: anywhere; }
 .project-workspace .lab-node-shell.has-lab-status .lab-node { padding-right: 72px; }
 .project-workspace .lab-node-shell > .laboratory-badge.machine-state {
   position: absolute; right: 10px; top: 50%; transform: translateY(-50%); margin: 0;

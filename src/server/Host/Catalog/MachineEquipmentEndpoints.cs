@@ -101,7 +101,7 @@ public static partial class CatalogEndpoints
         {
             var chamber = await db.MachineChambers.SingleOrDefaultAsync(x => x.MachineId == machineId && x.Number == number && x.Installed, ct);
             if (chamber is null) return Results.BadRequest(new { message = "只能为已安装的腔室登记特例。" });
-            if (request.LaboratoryOnly && (chamber.Stage != "Lab" || !request.Partial || request.Items?.Count != 1 || request.InstalledAt is null || request.InstalledAt == default(DateTimeOffset) || request.InstalledAt > DateTimeOffset.UtcNow.AddMinutes(1)))
+            if (request.LaboratoryOnly && (chamber.Stage != "Lab" || !request.Partial || request.Items is null || request.Items.Count is < 1 or > 100 || request.InstalledAt is null || request.InstalledAt == default(DateTimeOffset) || request.InstalledAt > DateTimeOffset.UtcNow.AddMinutes(1)))
                 return Results.BadRequest(new { message = "请选择 Lab 阶段腔室，填写不晚于现在的实际升级时间；每次仅登记所选组件。" });
             if (request.Items is null || request.Items.Count > 500 || request.Items.Select(x => x.ComponentId).Distinct().Count() != request.Items.Count)
                 return Results.BadRequest(new { message = "请选择不重复的组件与版本；空列表表示全部恢复沿用整机。" });

@@ -111,7 +111,7 @@ public static class MatrixWorkbook
         }
         string Value(int c, int r) => cells.GetValueOrDefault(Column(c) + r).Text ?? "";
         if (Value(1, 1) == $"ConfigHub.Matrix.v2:{templateId:D}") return ReadVertical(cells, templateId, components);
-        if (Value(1, 1) != $"ConfigHub.Matrix.v1:{templateId:D}") throw new InvalidDataException("Excel 与所选模板不匹配，请选择生成此文件的模板。");
+        if (Value(1, 1) != $"ConfigHub.Matrix.v1:{templateId:D}") throw new InvalidDataException("Excel 不属于当前项目所选模板，请切换到原项目及对应模板，或重新下载当前项目模板。");
         var expected = components.Where(x => !x.IsCategory).ToDictionary(x => x.ComponentId);
         var bindings = new Dictionary<int, Guid>(); var fields = new Dictionary<string, int>();
         for (var c = 2; c <= 500; c++)

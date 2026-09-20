@@ -7,7 +7,7 @@ export type BaselineHistoryItem = {
   versionNumber: string | null
 }
 
-export type BaselineHistoryEntry = BaselineSummary & { items: BaselineHistoryItem[] }
+export type BaselineHistoryEntry = BaselineSummary & { releasedAt: string | null; items: BaselineHistoryItem[] }
 
 export const getBaselineHistoryIndex = (projectId: string) =>
   request<BaselineHistoryEntry[]>(`/api/v1/projects/${projectId}/baseline-history-index`)

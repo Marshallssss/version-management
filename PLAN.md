@@ -2,6 +2,18 @@
 
 ## Final Architecture and Product Plan
 
+### 2026-09-20 项目资料、基线名称与批量 Lab 登记（验收完成）
+
+- 核验并补测 Excel 当前项目、模板与文件标识的三方校验，跨项目错误明确提示，不以组件同名匹配。
+- Admin/SuperAdmin 可审计修改基线名称，但不能通过改名修改冻结内容；数据库保留严格的名称限定保护。基线筛选改为真实发布时间，详情展示发布时间，未发布不冒充已发布。
+- 项目克隆增加说明输入；保存后可编辑编码、名称和说明，保持项目标识、组件及历史关联不变。
+- Lab 支持多测试版本、多机台/腔室选择；同一范围的升级作为一个局部配置命令提交，跨机台逐项显示结果并可重试失败项，不改变目标或项目标准。
+- 机台新增可选工艺/配置字段，创建、克隆、修改和详情贯通；由真实模型生成前进 Migration，执行构建、迁移、权限/历史与页面验收后推送主干。
+- 已应用真实模型生成的 `20260920022058_AddMachineProcessConfigurationAndBaselineRename`，不修改旧 Migration；改名触发器仅放行名称及其规范化字段，数据库实测仍拒绝快照/描述篡改及未授权直接改名。
+- 新增 `metadata-lab-acceptance.cjs`：覆盖跨项目模板/文件拒绝、克隆说明与项目资料编辑、Admin 改名/非管理员拒绝/审计幂等、真实发布时间、机台可选资料及界面复制、整机/PM 多版本、跨项目/非 Lab/Viewer 拒绝、两台机台部分失败重试不重复、批量验证与桌面/390px 布局。
+- 全部 30 组 CJS 验收及 catalog、background-job、Windows operations preflight（13 脚本）、web compatibility 通过。Release build 0 warning / 0 error，前端 build 无大包警告，真实 Migration 与 EF pending model changes 通过；Host/Worker 保持运行。
+- 实页截图已复核：`artifacts/metadata-lab` 下基线、机台及 Lab 桌面/窄屏；改名按钮整合到标题旁，中文多选与逐项反馈沿用现有风格。README/Excel-Lab 说明已同步，其他环境须先备份并升级数据库；PostgreSQL 17 / Windows Production Integration Pending 边界不变。
+
 ### 2026-09-18 Excel 台账易用性与管理员纠错（验收完成）
 
 - 新模板改为组件在左侧纵向分组、每列一套版本组合，冻结组件名称与参考列；日期明确为 `YYYY-MM-DD` 并给出示例，每个根组件使用独立分区。取消新模板提交标记，有变更且日期/说明完整即录入；不完整内容整批拒绝。旧 v1 模板继续按原提交标记处理，不自动导入旧草稿。

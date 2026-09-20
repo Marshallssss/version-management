@@ -17,7 +17,7 @@ public static partial class CatalogEndpoints
             .Select(machine => new
             {
                 machine.Id, machine.ProjectId, machine.Name, machine.SerialNumber, machine.MachineType,
-                machine.Location, machine.Owner, machine.Stage, machine.ExpectedResumeAt,
+                machine.Location, machine.Process, machine.EquipmentConfiguration, machine.Owner, machine.Stage, machine.ExpectedResumeAt,
                 status = machine.Status.ToString(),
                 targetBaselineId = database.MachineTargetAssignments.Where(target => target.MachineId == machine.Id && target.ValidTo == null)
                     .Select(target => (Guid?)target.ConfigurationBaselineId).SingleOrDefault(),
@@ -53,7 +53,7 @@ public static partial class CatalogEndpoints
             items = machines.Select(machine => new
             {
                 machine.Id, machine.ProjectId, machine.Name, machine.SerialNumber, machine.MachineType,
-                machine.Location, machine.Owner, machine.Stage, machine.ExpectedResumeAt, machine.status,
+                machine.Location, machine.Process, machine.EquipmentConfiguration, machine.Owner, machine.Stage, machine.ExpectedResumeAt, machine.status,
                 machine.targetBaselineId, machine.targetBaselineCode,
                 matchStatus = machine.matchStatus ?? "Unknown", riskSeverity = machine.riskSeverity ?? "Unknown",
                 machine.summaryCalculatedAt, machine.hasActualConfiguration,

@@ -33,6 +33,10 @@ export function MachineWorkspace({ projectId, canWrite = true, isAdmin = false, 
   const [machineSerial, setMachineSerial] = useState('')
   const [machineName, setMachineName] = useState('')
   const [machineType, setMachineType] = useState('')
+  const [machineProcess, setMachineProcess] = useState('')
+  const [equipmentNotes, setEquipmentNotes] = useState('')
+  const [editProcess, setEditProcess] = useState('')
+  const [editConfiguration, setEditConfiguration] = useState('')
   const [machineLocation, setMachineLocation] = useState('')
   const [machineOwner, setMachineOwner] = useState('')
   const [machineStage, setMachineStage] = useState('Lab')
@@ -68,7 +72,7 @@ export function MachineWorkspace({ projectId, canWrite = true, isAdmin = false, 
   const selectedMachine = machines.data?.find(machine => machine.id === selectedMachineId && machine.projectId === projectId)
   const projectMachines = useMemo(() => machines.data?.filter(machine => machine.projectId === projectId).sort((a, b) => (a.location || '\uffff').localeCompare(b.location || '\uffff', 'zh-CN', { numeric: true }) || a.name.localeCompare(b.name, 'zh-CN', { numeric: true })) ?? [], [machines.data, projectId])
   const visibleMachines = useMemo(() => projectMachines.filter(machine => {
-    const matchesText = !search.trim() || [machine.name, machine.serialNumber, machine.machineType, machine.owner].some(value => value?.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))
+    const matchesText = !search.trim() || [machine.name, machine.serialNumber, machine.machineType, machine.owner, machine.process, machine.equipmentConfiguration].some(value => value?.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))
     const matchesLocation = !locationFilter || (locationFilter === '__empty' ? !machine.location : machine.location === locationFilter)
     const matchesBaseline = !baselineFilter || (baselineFilter === '__none' ? !machine.targetBaselineId : machine.targetBaselineId === baselineFilter)
     const matchesActual = !actualComponentFilter && !actualVersionFilter || machine.actualVersions.some(version => (!actualComponentFilter || version.componentId === actualComponentFilter) && (!actualVersionFilter || version.versionId === actualVersionFilter))
@@ -101,6 +105,8 @@ export function MachineWorkspace({ projectId, canWrite = true, isAdmin = false, 
     setEditName(selectedMachine.name)
     setEditType(selectedMachine.machineType ?? '')
     setEditLocation(selectedMachine.location ?? '')
+    setEditProcess(selectedMachine.process ?? '')
+    setEditConfiguration(selectedMachine.equipmentConfiguration ?? '')
     setEditStatus(selectedMachine.status)
     setExpectedResumeAt(selectedMachine.expectedResumeAt ? new Date(new Date(selectedMachine.expectedResumeAt).getTime() - new Date(selectedMachine.expectedResumeAt).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : '')
     setEditReason('')
@@ -114,6 +120,8 @@ export function MachineWorkspace({ projectId, canWrite = true, isAdmin = false, 
     setMachineName(`${source.name} 副本`)
     setMachineType(source.machineType ?? '')
     setMachineLocation(source.location ?? '')
+    setMachineProcess(source.process ?? '')
+    setEquipmentNotes(source.equipmentConfiguration ?? '')
     setMachineOwner(source.owner ?? '')
     setMachineStage(source.stage ?? 'Lab')
     setMachineChambers((source.chambers ?? []).map(number => ({ number, stage: 'Lab' })))
@@ -137,13 +145,13 @@ export function MachineWorkspace({ projectId, canWrite = true, isAdmin = false, 
   const addMachine = useMutation({
     mutationFn: createMachine,
     onSuccess: async ({ id }) => {
-      setMachineSerial(''); setMachineName(''); setMachineType(''); setMachineLocation(''); setMachineReason(''); setMachineOwner(''); setMachineStage('Lab'); setMachineChambers([]); setCloneMachineId(''); setCreateOpen(false)
+      setMachineProcess(''); setEquipmentNotes(''); setMachineSerial(''); setMachineName(''); setMachineType(''); setMachineLocation(''); setMachineReason(''); setMachineOwner(''); setMachineStage('Lab'); setMachineChambers([]); setCloneMachineId(''); setCreateOpen(false)
       onSelectMachine(id); onSuccess('机台已创建，可继续登记目标和实际配置。')
       await invalidateMachineData()
     },
   })
   const update = useMutation({
-    mutationFn: () => updateMachine(selectedMachineId, { serialNumber: editSerial, name: editName, machineType: editType, location: editLocation, status: editStatus, expectedResumeAt: ['ShortTermCip', 'LongTermCip'].includes(editStatus) && expectedResumeAt ? new Date(expectedResumeAt).toISOString() : null, reason: editReason }),
+    mutationFn: () => updateMachine(selectedMachineId, { serialNumber: editSerial, name: editName, machineType: editType, process: editProcess, equipmentConfiguration: editConfiguration, location: editLocation, status: editStatus, expectedResumeAt: ['ShortTermCip', 'LongTermCip'].includes(editStatus) && expectedResumeAt ? new Date(expectedResumeAt).toISOString() : null, reason: editReason }),
     onSuccess: async () => {
       setEditOpen(false); setEditReason(''); onSuccess('机台资料已更新，变更已写入审计记录。')
       await invalidateMachineData()
@@ -185,7 +193,7 @@ export function MachineWorkspace({ projectId, canWrite = true, isAdmin = false, 
       <div className="machine-location-groups">{[...new Set(visibleMachines.map(machine => machine.location || '未填写位置'))].map(location => <section className="machine-location-group" key={location}><h4><EnvironmentOutlined aria-hidden />{location}</h4><div className="machine-list">{visibleMachines.filter(machine => (machine.location || '未填写位置') === location).map(machine => {
         const actualSummary = machine.actualVersions.map(version => `${version.componentName} ${version.versionNumber}`).join(' · ')
         return <button type="button" aria-pressed={machine.id === selectedMachineId} className={machine.id === selectedMachineId ? 'machine-list-item machine-registry-row selected' : 'machine-list-item machine-registry-row'} key={machine.id} onClick={() => { onSelectMachine(machine.id); setFactComponentId(''); setFactVersionId('') }}>
-          <span className="machine-row-identity"><strong>{machine.name}</strong><span className="machine-list-identity">{machine.serialNumber}{machine.machineType && ` · ${machine.machineType}`}</span></span>
+          <span className="machine-row-identity"><strong>{machine.name}</strong>{machine.process && <small title={machine.process}>{machine.process}</small>}<span className="machine-list-identity">{machine.serialNumber}{machine.machineType && ` · ${machine.machineType}`}</span></span>
           <span className="machine-row-state"><b>{machine.stage || '未登记阶段'}</b><span>{machineStatusText[machine.status] ?? '未知状态'}</span>{machine.expectedResumeAt && <small>预计恢复 {formatTime(machine.expectedResumeAt)}</small>}</span>
           <span className="machine-row-owner"><b>{machine.location || '未填写位置'}</b><span>负责人 {machine.owner || '未填写'}</span></span>
           <span className="machine-row-chambers">{machine.chambers?.length ? machine.chambers.map(number => <span key={number}>PM{number}</span>) : <small>未登记腔室</small>}</span>
@@ -196,7 +204,7 @@ export function MachineWorkspace({ projectId, canWrite = true, isAdmin = false, 
     </section>
     <section hidden={!selectedMachine} className="machine-detail-panel">
       {selectedMachine && <>
-        <div className="machine-detail-header"><div><span className="section-index">已选机台</span><h3>{selectedMachine.name}</h3><p>{selectedMachine.serialNumber}{selectedMachine.machineType ? ` · ${selectedMachine.machineType}` : ''}{selectedMachine.location ? ` · ${selectedMachine.location}` : ''}</p></div><div className="toolbar-actions">{canWrite && <button type="button" aria-label="编辑机台资料" onClick={() => setEditOpen(true)}><EditOutlined />编辑资料</button>}<button type="button" onClick={() => onSelectMachine('')}><ArrowLeftOutlined />返回机台列表</button></div></div>
+        <div className="machine-detail-header"><div><span className="section-index">已选机台</span><h3>{selectedMachine.name}</h3>{(selectedMachine.process || selectedMachine.equipmentConfiguration) && <p className="machine-extra-info">工艺：{selectedMachine.process || '未填写'} · 配置：{selectedMachine.equipmentConfiguration || '未填写'}</p>}<p>{selectedMachine.serialNumber}{selectedMachine.machineType ? ` · ${selectedMachine.machineType}` : ''}{selectedMachine.location ? ` · ${selectedMachine.location}` : ''}</p></div><div className="toolbar-actions">{canWrite && <button type="button" aria-label="编辑机台资料" onClick={() => setEditOpen(true)}><EditOutlined />编辑资料</button>}<button type="button" onClick={() => onSelectMachine('')}><ArrowLeftOutlined />返回机台列表</button></div></div>
         <div className="machine-statuses"><span>{machineStatusText[selectedMachine.status]}{selectedMachine.expectedResumeAt && ` · 预计恢复 ${formatTime(selectedMachine.expectedResumeAt)}`}</span><span data-match={machineDrift.data?.matchStatus}>匹配 {matchText[machineDrift.data?.matchStatus ?? 'Unknown']}</span><span data-risk={machineDrift.data?.riskSeverity}>风险 {riskText[machineDrift.data?.riskSeverity ?? 'Unknown']}</span><span>阶段 {selectedMachine.stage ?? '未登记'}</span><span>负责人 {selectedMachine.owner || '未填写'}</span></div>
         <nav className="workspace-tabs" aria-label="机台详情">
           {[['configuration', '当前配置', <UnorderedListOutlined aria-hidden />], ['target', '目标与对比', <SwapOutlined aria-hidden />], ['equipment', '阶段与腔室', <SettingOutlined aria-hidden />], ['history', '历史', <HistoryOutlined aria-hidden />]].map(([id, label, icon]) => <button type="button" key={String(id)} aria-pressed={detailTab === id} onClick={() => setDetailTab(String(id))}>{icon}{label}</button>)}
@@ -221,10 +229,11 @@ export function MachineWorkspace({ projectId, canWrite = true, isAdmin = false, 
     </section>
     <Modal title="新建机台" open={canWrite && createOpen} onCancel={() => { if (!addMachine.isPending) setCreateOpen(false) }} maskClosable={!addMachine.isPending} width={820} footer={null} className="machine-dialog" destroyOnHidden>
       <div className="machine-create">
-        <form hidden={!canWrite} className="catalog-form" onSubmit={(event) => { event.preventDefault(); addMachine.mutate({ projectId: machineProjectId, serialNumber: machineSerial, name: machineName, machineType, location: machineLocation, owner: machineOwner, stage: machineStage, chambers: machineChambers, reason: machineReason }) }}>
+        <form hidden={!canWrite} className="catalog-form" onSubmit={(event) => { event.preventDefault(); addMachine.mutate({ projectId: machineProjectId, serialNumber: machineSerial, name: machineName, machineType, process: machineProcess, equipmentConfiguration: equipmentNotes, location: machineLocation, owner: machineOwner, stage: machineStage, chambers: machineChambers, reason: machineReason }) }}>
           <label>复制已有机台<select value={cloneMachineId} onChange={(event) => setCloneMachineId(event.target.value)}><option value="">不复制，手工录入</option>{projectMachines.map(machine => <option key={machine.id} value={machine.id}>{machine.name} · {machine.serialNumber}</option>)}</select></label>
           <label>机台序列号<input value={machineSerial} onChange={(event) => setMachineSerial(event.target.value)} required /></label>
           <label>机台名称<input value={machineName} onChange={(event) => setMachineName(event.target.value)} required /></label>
+          <label>工艺（非必填）<input value={machineProcess} maxLength={200} onChange={event => setMachineProcess(event.target.value)} /></label><label className="wide-field">配置（非必填）<textarea aria-label="配置（非必填）" value={equipmentNotes} maxLength={1000} onChange={event => setEquipmentNotes(event.target.value)} /></label>
           <label>机型<input value={machineType} onChange={(event) => setMachineType(event.target.value)} /></label>
           <label>位置<input placeholder="例如：一厂装配线 A-03" value={machineLocation} onChange={(event) => setMachineLocation(event.target.value)} /></label>
           <label>机台负责人<input value={machineOwner} onChange={event => setMachineOwner(event.target.value)} maxLength={160} /></label><label>整机阶段<select value={machineStage} onChange={event => setMachineStage(event.target.value)} required>{stages.map(stage => <option key={stage}>{stage}</option>)}</select></label><div className="wide-field"><ChamberFields value={machineChambers} onChange={setMachineChambers} /></div><label className="wide-field">创建原因<input value={machineReason} onChange={(event) => setMachineReason(event.target.value)} required /></label>
@@ -234,7 +243,7 @@ export function MachineWorkspace({ projectId, canWrite = true, isAdmin = false, 
       </div>
     </Modal>
     <Modal title={`编辑机台资料 · ${selectedMachine?.name ?? ''}`} open={canWrite && editOpen && !!selectedMachine} onCancel={() => { if (!update.isPending) setEditOpen(false) }} maskClosable={!update.isPending} width={760} footer={null} className="machine-dialog" destroyOnHidden><div className="machine-edit">
-<form hidden={!canWrite} className="catalog-form" onSubmit={(event) => { event.preventDefault(); update.mutate() }}><label>机台序列号<input value={editSerial} onChange={(event) => setEditSerial(event.target.value)} required /></label><label>机台名称<input value={editName} onChange={(event) => setEditName(event.target.value)} required /></label><label>机型<input value={editType} onChange={(event) => setEditType(event.target.value)} /></label><label>位置<input value={editLocation} onChange={(event) => setEditLocation(event.target.value)} /></label><label>状态<select value={editStatus} onChange={(event) => setEditStatus(event.target.value)}><option value="Active">在用</option><option value="ShortTermCip">短期 CIP</option><option value="LongTermCip">长期 CIP</option><option value="NoProduction">暂未过货</option><option value="Archived">已归档</option></select></label>{['ShortTermCip', 'LongTermCip'].includes(editStatus) && <label>预计恢复时间<input type="datetime-local" value={expectedResumeAt} onChange={event => setExpectedResumeAt(event.target.value)} required /></label>}<label className="wide-field">修改原因<input value={editReason} onChange={(event) => setEditReason(event.target.value)} required /></label><button type="submit" disabled={update.isPending}>{update.isPending ? '正在保存' : '保存资料'}</button></form><p className="form-hint">项目归属创建后固定，不能跨项目移动，以保护既有目标、实际配置和历史事实。</p>{update.isError && <p className="error-strip">{update.error.message}</p>}
+<form hidden={!canWrite} className="catalog-form" onSubmit={(event) => { event.preventDefault(); update.mutate() }}><label>机台序列号<input value={editSerial} onChange={(event) => setEditSerial(event.target.value)} required /></label><label>机台名称<input value={editName} onChange={(event) => setEditName(event.target.value)} required /></label><label>工艺（非必填）<input value={editProcess} maxLength={200} onChange={event => setEditProcess(event.target.value)} /></label><label className="wide-field">配置（非必填）<textarea aria-label="配置（非必填）" value={editConfiguration} maxLength={1000} onChange={event => setEditConfiguration(event.target.value)} /></label><label>机型<input value={editType} onChange={(event) => setEditType(event.target.value)} /></label><label>位置<input value={editLocation} onChange={(event) => setEditLocation(event.target.value)} /></label><label>状态<select value={editStatus} onChange={(event) => setEditStatus(event.target.value)}><option value="Active">在用</option><option value="ShortTermCip">短期 CIP</option><option value="LongTermCip">长期 CIP</option><option value="NoProduction">暂未过货</option><option value="Archived">已归档</option></select></label>{['ShortTermCip', 'LongTermCip'].includes(editStatus) && <label>预计恢复时间<input type="datetime-local" value={expectedResumeAt} onChange={event => setExpectedResumeAt(event.target.value)} required /></label>}<label className="wide-field">修改原因<input value={editReason} onChange={(event) => setEditReason(event.target.value)} required /></label><button type="submit" disabled={update.isPending}>{update.isPending ? '正在保存' : '保存资料'}</button></form><p className="form-hint">项目归属创建后固定，不能跨项目移动，以保护既有目标、实际配置和历史事实。</p>{update.isError && <p className="error-strip">{update.error.message}</p>}
     </div></Modal>
     <Modal title={`${({ configuration: '录入完整配置', observation: '记录局部观察', assign: '指派机台目标', correction: '回退与更正', upgrade: '批量升级', target: '批量目标' } as Record<string, string>)[toolTab ?? ''] ?? ''}${selectedMachine && !['upgrade', 'target'].includes(toolTab ?? '') ? ' · ' + selectedMachine.name : ''}`} open={canWrite && !!toolTab} onCancel={() => { if (!assignTarget.isPending && !recordFacts.isPending) setToolTab(null) }} width={1000} footer={null} className="machine-dialog" destroyOnHidden>
       <div className="machine-tools">

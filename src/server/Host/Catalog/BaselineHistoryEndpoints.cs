@@ -23,7 +23,8 @@ public static partial class CatalogEndpoints
                 revisionNo = item.RevisionNo,
                 seriesCode = database.BaselineSeries.Where(series => series.Id == item.BaselineSeriesId).Select(series => series.SeriesCode).Single(),
                 state = item.State.ToString(),
-                createdAt = item.CreatedAt
+                createdAt = item.CreatedAt,
+                releasedAt = item.ReleasedAt
             }).ToListAsync(cancellationToken);
 
         // Read frozen labels directly, so renames and soft deletion cannot rewrite historical filters.
@@ -46,6 +47,7 @@ public static partial class CatalogEndpoints
             baseline.seriesCode,
             baseline.state,
             baseline.createdAt,
+            baseline.releasedAt,
             itemCount = itemsByBaseline[baseline.id].Count(),
             items = itemsByBaseline[baseline.id].Select(item => new { item.componentId, item.componentName, item.versionId, item.versionNumber })
         }));

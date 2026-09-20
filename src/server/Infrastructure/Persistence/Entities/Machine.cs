@@ -9,6 +9,8 @@ public sealed class Machine
     public required string Name { get; set; }
     public string? MachineType { get; set; }
     public string? Location { get; set; }
+    public string? Process { get; set; }
+    public string? EquipmentConfiguration { get; set; }
     public string? Owner { get; set; }
     public string? Stage { get; set; }
     public DateTimeOffset? DeletedAt { get; set; }

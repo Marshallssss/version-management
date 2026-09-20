@@ -1,3 +1,8 @@
+.project-baseline-history .snapshot-name-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.project-baseline-history .snapshot-name-row h3 { margin: 0; overflow-wrap: anywhere; }
+.project-baseline-history .snapshot-name-row .icon-button { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 30px; width: 30px; height: 30px; padding: 0; border: 1px solid var(--ui-line); border-radius: 4px; background: var(--ui-surface); color: var(--ui-muted); cursor: pointer; }
+.project-baseline-history .snapshot-name-row .icon-button:hover { color: var(--ui-ink); border-color: currentColor; }
+
 .project-baseline-history .baseline-history-filters {
   margin-bottom: 18px;
   padding: 14px 0;
