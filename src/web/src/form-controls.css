@@ -1,0 +1,122 @@
+/* Preserve native form and keyboard behavior, including older-browser fallback. */
+body select:not([multiple]):not([size]):not(.ant-input) {
+  max-width: 100%;
+  border-color: #cbd4e0;
+  border-radius: var(--ui-radius);
+  color: var(--ui-ink);
+  background-color: var(--ui-surface);
+  font-family: inherit;
+  font-size: 14px;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+body select:not([multiple]):not([size]):not(.ant-input):hover:not(:disabled) {
+  border-color: #92a4bd;
+}
+
+body select:not([multiple]):not([size]):not(.ant-input):focus-visible {
+  border-color: var(--ui-primary);
+  outline: 2px solid #b9ceff;
+  outline-offset: 1px;
+}
+
+body select:not([multiple]):not([size]):not(.ant-input):disabled {
+  color: var(--ui-muted);
+  background-color: var(--ui-surface-muted);
+  border-color: var(--ui-line);
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.project-picker-modal .project-picker-field {
+  min-width: 0;
+  gap: 10px;
+}
+
+.project-picker-modal .project-picker-field select {
+  width: 100%;
+  min-height: 46px;
+}
+
+@supports (appearance: base-select) {
+  body select:not([multiple]):not([size]),
+  body select:not([multiple]):not([size])::picker(select) {
+    appearance: base-select;
+  }
+
+  body select:not([multiple]):not([size]) {
+    align-items: center;
+    gap: 14px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  body select::picker-icon {
+    flex: 0 0 auto;
+    margin-inline-start: auto;
+    color: var(--ui-muted);
+    font-size: 12px;
+    transition: rotate 120ms ease;
+  }
+
+  body select:open::picker-icon {
+    rotate: 180deg;
+  }
+
+  body select::picker(select) {
+    inline-size: max(anchor-size(self-inline), 240px);
+    min-inline-size: 0;
+    max-inline-size: calc(100vw - 24px);
+    max-block-size: min(360px, 60dvh);
+    margin-block: 6px;
+    padding: 4px;
+    overflow: auto;
+    border: 1px solid var(--ui-line);
+    border-radius: var(--ui-radius);
+    color: var(--ui-ink);
+    background: var(--ui-surface);
+    box-shadow: 0 8px 24px #17212e1f;
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  body select option {
+    min-block-size: 36px;
+    padding: 8px 10px;
+    gap: 10px;
+    border-radius: 3px;
+    color: var(--ui-ink);
+    background: var(--ui-surface);
+    white-space: normal;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+  }
+
+  body select option:hover,
+  body select option:focus-visible {
+    background: var(--ui-surface-muted);
+    outline: none;
+  }
+
+  body select option:checked {
+    color: var(--ui-primary);
+    background: var(--ui-primary-soft);
+    font-weight: 600;
+  }
+
+  body select option:disabled {
+    color: var(--ui-muted);
+    background: var(--ui-surface);
+    cursor: not-allowed;
+  }
+
+  body select option::checkmark {
+    color: var(--ui-primary);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body select::picker-icon { transition: none; }
+}

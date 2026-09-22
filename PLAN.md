@@ -2,6 +2,20 @@
 
 ## Final Architecture and Product Plan
 
+### 2026-09-22 发布时间维护、项目选择与历史导入设计（验收完成）
+
+- 历史维护编辑真实业务发布时间 ReleasedAt，保留 CreatedAt 与审计操作时间；同步接口、历史筛选与界面。撤回期限仍以实际发布操作时间为准，不因补录发布时间重新开放；所需数据库修正使用新的前进 Migration。
+- 项目切换弹窗加宽、项目选择独占整行；全站下拉选择统一主题、焦点、禁用与选项状态，保留表单及键盘语义，并检查长名称和窄屏布局。
+- 实页复核进一步限制展开菜单宽度，跟随选择框并允许长选项换行，避免被最长名称撑至屏幕边缘；保留小型筛选菜单的基本阅读宽度。
+- 历史基线 Excel 本轮先分析、不改变现有自动扫描语义：同一模板区分测试记录与历史基线，明确完整配置校验、名称/发布时间、权限、手动确认及测试继承隔离。未知历史版本、旧组件范围与现已废弃版本的处理列为待确认边界。
+- 完成后执行前后端构建、Migration/model 检查、自动化回归与真实页面视觉检查，同步文档并提交远端。
+- 发布时间专项已覆盖业务时间精度、真实录入/审计/发布动作保留、幂等、权限、草稿/未来时间拒绝及数据库撤回保护；回归同时修正测试夹具的可选日期参数判断，避免未提供参数时误走时间分支。
+- 项目切换视觉验收发现无项目标准时接口返回 200 空正文，导致新项目总览误报读取失败；改为明确 204 无内容，沿用现有前端空状态，并补接口和真实页面验收。
+- 已应用 EF 生成的前进 Migration `20260922031634_BaselineWithdrawalUsesReleaseActionTime`，UI/预览/API/数据库均用实际发布事件计撤回期限；缺少事件的旧数据不回退到可维护时间。旧客户端传 createdAt 明确拒绝并提示刷新，维护仍受 SuperAdmin + 开关保护。
+- 新增 `baseline-release-time-acceptance.cjs` 与 `project-picker-acceptance.cjs`；33 组 CJS 验收全部通过（修复可选参数夹具后重跑元数据验收），另实际等待 182 秒通过撤回超时验证。最后无标准空响应修正后重新验证项目选择、运行总览、发布时间、影响确认和元数据/Lab。
+- 最终 Release build 0 warning / 0 error、前端 build 无大包警告，Migration 已最新且 EF 无 pending model changes；catalog/background-job、Windows operations preflight（13 脚本）、web compatibility 通过。Host/Worker 运行，live/ready 均正常。
+- 实际 Edge 1440px/390px 长名称、菜单宽度、配色、键盘及必填/禁用截图已复核，说明见 `docs/ui/project-picker-review.md`。历史导入方案见 `docs/historical-baseline-import-design.md`，尚未实施，未改变自动扫描/发布规则；README 同步。PostgreSQL 17 / Windows Production Integration Pending 边界不变。
+
 ### 2026-09-21 版本导入引导与机台 Excel 导入（验收完成）
 
 - 侧栏及页面统一“版本导入”，增加生成模板、填写、首次导入、可选每日扫描的步骤引导，保留已有自动扫描和历史记录。

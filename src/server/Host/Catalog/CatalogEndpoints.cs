@@ -1039,7 +1039,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
     private static async Task<IResult> GetBaselineDetailAsync(Guid baselineId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
     {
         await using var database = await factory.CreateDbContextAsync(cancellationToken);
-        var baseline = await database.ConfigurationBaselines.AsNoTracking().Where(item => item.Id == baselineId).Select(item => new { id = item.Id, projectId = item.ProjectId, code = item.BaselineCode, seriesCode = database.BaselineSeries.Where(series => series.Id == item.BaselineSeriesId).Select(series => series.SeriesCode).Single(), revisionNo = item.RevisionNo, state = item.State.ToString(), item.Description, item.CreatedBy, item.CreatedAt, item.ReleasedBy, item.ReleasedAt, item.ApprovedBy }).SingleOrDefaultAsync(cancellationToken);
+        var baseline = await database.ConfigurationBaselines.AsNoTracking().Where(item => item.Id == baselineId).Select(item => new { id = item.Id, projectId = item.ProjectId, code = item.BaselineCode, seriesCode = database.BaselineSeries.Where(series => series.Id == item.BaselineSeriesId).Select(series => series.SeriesCode).Single(), revisionNo = item.RevisionNo, state = item.State.ToString(), item.Description, item.CreatedBy, item.CreatedAt, item.ReleasedBy, item.ReleasedAt, item.ApprovedBy, releaseRecordedAt = database.BaselineLifecycleTransitions.Where(transition => transition.ConfigurationBaselineId == item.Id && transition.FromState == "Draft" && transition.ToState == "Released").Max(transition => (DateTimeOffset?)transition.OccurredAt) }).SingleOrDefaultAsync(cancellationToken);
         if (baseline is null) return Results.NotFound();
         var items = await database.BaselineItems.AsNoTracking().Where(item => item.ConfigurationBaselineId == baselineId).OrderBy(item => item.LineageKeySnapshot).Select(item => new { id = item.Id, parentItemId = item.ParentBaselineItemId, componentId = item.ConfigurationComponentId, versionId = item.ComponentVersionId, versionNumber = item.VersionNumberSnapshot, componentName = item.ComponentNameSnapshot, lineageKey = item.LineageKeySnapshot, requirement = item.Requirement.ToString(), item.SortOrder }).ToListAsync(cancellationToken);
         var review = await database.BaselineReviews.AsNoTracking().Where(item => item.ConfigurationBaselineId == baselineId).OrderByDescending(item => item.RequestedAt).Select(item => new { id = item.Id, status = item.Status.ToString(), item.RequestedBy, item.RequestedAt, item.RequestReason, item.DecidedBy, item.DecidedAt, item.DecisionReason }).FirstOrDefaultAsync(cancellationToken);
@@ -1090,16 +1090,20 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
     {
         if (!context.RequestServices.GetRequiredService<IConfiguration>().GetValue<bool>("ConfigHub:TestDataMaintenanceEnabled")) return Results.Conflict(new { message = "调测维护已关闭。" });
         if (!request.MaintenanceMode || string.IsNullOrWhiteSpace(request.Reason)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = ["维护模式必须明确开启并填写原因。"] });
-        if (request.CreatedAt is not null && (request.CreatedAt < new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero) || request.CreatedAt > new DateTimeOffset(2100, 1, 1, 0, 0, 0, TimeSpan.Zero))) return Results.ValidationProblem(new Dictionary<string, string[]> { ["createdAt"] = ["录入时间必须在 2000 至 2100 年之间。"] });
+        if (request.Reason.Length > 500) return Results.ValidationProblem(new Dictionary<string, string[]> { ["reason"] = ["维护原因不能超过 500 个字符。"] });
+        if (request.CreatedAt is not null) return Results.ValidationProblem(new Dictionary<string, string[]> { ["createdAt"] = ["历史维护仅可修正发布时间，不能修改实际录入时间；请刷新页面后重试。"] });
+        if (request.ReleasedAt is not null && (request.ReleasedAt < new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero) || request.ReleasedAt > DateTimeOffset.UtcNow)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["releasedAt"] = ["发布时间必须在 2000 年至现在之间。"] });
         var key = context.Request.Headers["Idempotency-Key"].FirstOrDefault();
         if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["维护草稿必须提供不超过 200 个字符的 Idempotency-Key。"] });
         await using var database = await factory.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
+        var baseline = await database.ConfigurationBaselines.FromSqlInterpolated($"SELECT * FROM configuration_baselines WHERE id = {baselineId} FOR UPDATE").SingleOrDefaultAsync(cancellationToken);
+        if (baseline is null) return Results.NotFound();
         var scope = $"baselines.maintenance:{baselineId}";
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request))));
         var replay = await database.IdempotencyRecords.SingleOrDefaultAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
         if (replay is not null) { if (replay.RequestHash != hash) return Results.Conflict(new { message = "同一 Idempotency-Key 不能用于不同请求。" }); if (replay.Result is not null) return TypedResults.Ok(replay.Result.RootElement.Clone()); return Results.Conflict(new { message = "该请求仍在处理。" }); }
-        var baseline = await database.ConfigurationBaselines.SingleOrDefaultAsync(item => item.Id == baselineId, cancellationToken);
-        if (baseline is null) return Results.NotFound();
+        if (request.ReleasedAt is not null && (baseline.State == BaselineState.Draft || baseline.ReleasedAt is null)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["releasedAt"] = ["此基线尚未发布，不能通过历史维护补造发布时间；请先完成发布。"] });
         var selections = request.VersionSelections?.ToArray() ?? [];
         if (selections.Any(item => item.ComponentId == Guid.Empty || item.VersionId == Guid.Empty) || selections.Select(item => item.ComponentId).Distinct().Count() != selections.Length) return Results.ValidationProblem(new Dictionary<string, string[]> { ["versionSelections"] = ["每个组件只能选择一个有效版本。"] });
         var items = await database.BaselineItems.Where(item => item.ConfigurationBaselineId == baselineId).ToListAsync(cancellationToken);
@@ -1108,10 +1112,10 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         var versions = await database.ComponentVersions.Where(item => selectedVersionIds.Contains(item.Id) && item.Maturity == VersionMaturity.Released).ToDictionaryAsync(item => item.Id, cancellationToken);
         if (versions.Count != selectedVersionIds.Distinct().Count() || selections.Any(item => !components.Contains(item.ComponentId) || !versions.TryGetValue(item.VersionId, out var version) || version.ComponentId != item.ComponentId)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["versionSelections"] = ["维护模式只能选择该草稿组件的已发布版本。"] });
         var now = DateTimeOffset.UtcNow;
-        await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
         await database.Database.ExecuteSqlRawAsync("SET LOCAL confighub.baseline_maintenance = 'on';", cancellationToken);
         database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) });
-        if (request.CreatedAt is not null) baseline.CreatedAt = request.CreatedAt.Value.ToUniversalTime();
+        var previousReleasedAt = baseline.ReleasedAt;
+        if (request.ReleasedAt is not null) baseline.ReleasedAt = request.ReleasedAt.Value.ToUniversalTime();
         foreach (var selection in selections)
         {
             var item = items.Single(item => item.ConfigurationComponentId == selection.ComponentId);
@@ -1119,14 +1123,14 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
             item.ComponentVersionId = version.Id;
             item.VersionNumberSnapshot = version.VersionNumber;
         }
-        AddAuditEvent(database, context, "HistoricalBaselineMaintained", "ConfigurationBaseline", baseline.Id, new { baselineState = baseline.State.ToString(), reason = request.Reason.Trim(), createdAt = baseline.CreatedAt, versionSelectionCount = selections.Length, maintenanceMode = true });
+        AddAuditEvent(database, context, "HistoricalBaselineMaintained", "ConfigurationBaseline", baseline.Id, new { baselineState = baseline.State.ToString(), reason = request.Reason.Trim(), createdAt = baseline.CreatedAt, previousReleasedAt, releasedAt = baseline.ReleasedAt, versionSelectionCount = selections.Length, maintenanceMode = true });
         await database.SaveChangesAsync(cancellationToken);
         var record = await database.IdempotencyRecords.SingleAsync(item => item.Scope == scope && item.IdempotencyKey == key, cancellationToken);
         record.Status = IdempotencyRecordStatus.Completed;
-        record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = baseline.Id, createdAt = baseline.CreatedAt }));
+        record.Result = JsonDocument.Parse(JsonSerializer.Serialize(new { id = baseline.Id, createdAt = baseline.CreatedAt, releasedAt = baseline.ReleasedAt }));
         await database.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        return TypedResults.Ok(new { id = baseline.Id, createdAt = baseline.CreatedAt });
+        return TypedResults.Ok(new { id = baseline.Id, createdAt = baseline.CreatedAt, releasedAt = baseline.ReleasedAt });
     }
 
     private static async Task<IResult> CreateBaselineAsync(
@@ -1375,7 +1379,8 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
             return Results.Conflict(new { message = "该请求仍在处理。" });
         }
         var now = DateTimeOffset.UtcNow;
-        if (baseline.State != BaselineState.Released || baseline.ReleasedAt is null || now - baseline.ReleasedAt > TimeSpan.FromMinutes(3))
+        var releaseRecordedAt = await GetBaselineReleaseRecordedAtAsync(db, baselineId, cancellationToken);
+        if (baseline.State != BaselineState.Released || releaseRecordedAt is null || releaseRecordedAt > now || now - releaseRecordedAt > TimeSpan.FromMinutes(3))
             return Results.Conflict(new { message = "仅可在基线正式发布后 3 分钟内撤回。" });
         if (await db.ProjectStandardAssignments.AnyAsync(item => item.ConfigurationBaselineId == baselineId, cancellationToken)
             || await db.MachineTargetAssignments.AnyAsync(item => item.ConfigurationBaselineId == baselineId, cancellationToken)
@@ -1513,7 +1518,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
             .Where(item => item.ProjectId == projectId && item.ValidTo == null)
             .Select(item => new { baselineId = item.ConfigurationBaselineId, validFrom = item.ValidFrom, baselineCode = database.ConfigurationBaselines.Where(baseline => baseline.Id == item.ConfigurationBaselineId).Select(baseline => baseline.BaselineCode).Single() })
             .SingleOrDefaultAsync(cancellationToken);
-        return TypedResults.Ok(current);
+        return current is null ? Results.NoContent() : TypedResults.Ok(current);
     }
 
     private static async Task<IResult> AssignProjectStandardAsync(Guid projectId, AssignProjectStandardRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
@@ -2140,7 +2145,7 @@ public sealed record MoveComponentRequest(Guid? ParentComponentId, string? Reaso
 public sealed record ReorderComponentRequest(string? Direction, string? Reason);
 public sealed record CreateBaselineRequest(string? SeriesCode, string? BaselineCode, string? Description, string? Reason, IReadOnlyList<BaselineVersionSelectionRequest>? VersionSelections = null, IReadOnlyList<Guid>? TestingVersionIds = null, bool PublishImmediately = false);
 public sealed record BaselineVersionSelectionRequest(Guid ComponentId, Guid VersionId);
-public sealed record MaintainBaselineDraftRequest(DateTimeOffset? CreatedAt, IReadOnlyList<BaselineVersionSelectionRequest>? VersionSelections, string? Reason, bool MaintenanceMode);
+public sealed record MaintainBaselineDraftRequest(DateTimeOffset? ReleasedAt, IReadOnlyList<BaselineVersionSelectionRequest>? VersionSelections, string? Reason, bool MaintenanceMode, DateTimeOffset? CreatedAt = null);
 public sealed record SetBaselineItemRequirementRequest(string? Requirement, string? Reason);
 public sealed record BaselineReviewRequest(string? Reason);
 public sealed record BaselineCreationUndoRequest(string? Reason);

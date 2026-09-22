@@ -130,14 +130,14 @@ async function main() {
     const versionUrl = `/api/v1/component-versions/${version.id}`
     const baselineUrl = `/api/v1/baselines/${baseline.id}`
     const versionMaintenance = { versionNumber: 'V1-historical', maturity: 'Released', createdAt: '2001-01-01T00:00:00Z', releasedAt: '2002-01-01T00:00:00Z', maintenanceMode: true, reason: '开关开放时的历史版本修正' }
-    const baselineMaintenance = { createdAt: '2003-01-01T00:00:00Z', versionSelections: [{ componentId: component.id, versionId: version.id }], maintenanceMode: true, reason: '开关开放时的历史基线修正' }
+    const baselineMaintenance = { releasedAt: '2003-01-01T00:00:00Z', versionSelections: [{ componentId: component.id, versionId: version.id }], maintenanceMode: true, reason: '开关开放时的历史基线修正' }
     const versionKey = randomUUID()
     const baselineKey = randomUUID()
     await call(open.request, versionUrl + '/maintenance', versionMaintenance, 200, versionKey)
     await call(open.request, baselineUrl + '/maintenance', baselineMaintenance, 200, baselineKey)
     const before = { version: await get(open.request, versionUrl), baseline: await get(open.request, baselineUrl) }
     assert.equal(before.version.version.versionNumber, 'V1-historical')
-    assert(before.baseline.baseline.createdAt.startsWith('2003-01-01'))
+    assert(before.baseline.baseline.releasedAt.startsWith('2003-01-01'))
     for (const [url, data, key] of [[versionUrl, versionMaintenance, versionKey], [baselineUrl, baselineMaintenance, baselineKey]]) {
       const replay = await call(closed.request, url + '/maintenance', data, 409, key)
       assert.equal(replay.message, '调测维护已关闭。', 'Closed switch must take precedence over successful idempotency replay')

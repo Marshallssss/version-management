@@ -8,6 +8,7 @@ import './styles.css'
 import './future-theme.css'
 import './project-future.css'
 import './machine-future.css'
+import './form-controls.css'
 
 const queryClient = new QueryClient({
   defaultOptions: {

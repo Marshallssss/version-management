@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][Guid]$BaselineId, [DateTimeOffset]$ReleasedAt, [switch]$VerifyRenameGuard)
+param([Parameter(Mandatory=$true)][Guid]$BaselineId, [DateTimeOffset]$ReleasedAt, [switch]$VerifyRenameGuard, [DateTimeOffset]$ReleaseRecordedAt, [switch]$RemoveReleaseRecord, [switch]$VerifyWithdrawalGuard)
 $ErrorActionPreference = 'Stop'
 $config = Get-Content "$env:LOCALAPPDATA/ConfigHub/appsettings.local.json" -Raw | ConvertFrom-Json
 $connection = [System.Data.Common.DbConnectionStringBuilder]::new()
@@ -28,12 +28,19 @@ function Invoke-FixtureSql([string]$Sql, [switch]$ExpectGuard) {
 }
 $code = Invoke-FixtureSql "SELECT p.code FROM projects p JOIN configuration_baselines b ON b.project_id=p.id WHERE b.id='$BaselineId';"
 if ($code.Trim() -notmatch '^(BASELINE-FILTER-|META-)') { throw 'This fixture is restricted to its isolated acceptance projects.' }
-if ($VerifyRenameGuard) {
+if ($VerifyWithdrawalGuard) {
+    Invoke-FixtureSql "BEGIN; UPDATE configuration_baselines SET state='Deprecated' WHERE id='$BaselineId'; ROLLBACK;" -ExpectGuard | Out-Null
+} elseif ($RemoveReleaseRecord) {
+    Invoke-FixtureSql "DELETE FROM baseline_lifecycle_transitions WHERE configuration_baseline_id='$BaselineId' AND from_state='Draft' AND to_state='Released';" | Out-Null
+} elseif ($PSBoundParameters.ContainsKey('ReleaseRecordedAt')) {
+    $timestamp = $ReleaseRecordedAt.ToUniversalTime().ToString('o')
+    Invoke-FixtureSql "UPDATE baseline_lifecycle_transitions SET occurred_at='$timestamp' WHERE configuration_baseline_id='$BaselineId' AND from_state='Draft' AND to_state='Released';" | Out-Null
+} elseif ($VerifyRenameGuard) {
     Invoke-FixtureSql "BEGIN; SET LOCAL confighub.baseline_rename='on'; UPDATE configuration_baselines SET description='must remain frozen' WHERE id='$BaselineId'; ROLLBACK;" -ExpectGuard | Out-Null
     Invoke-FixtureSql "BEGIN; UPDATE configuration_baselines SET baseline_code='unauthorized rename' WHERE id='$BaselineId'; ROLLBACK;" -ExpectGuard | Out-Null
     Write-Output 'Frozen content and unscoped rename guards passed.'
 } else {
-    if ($ReleasedAt -eq [DateTimeOffset]::MinValue) { throw 'ReleasedAt is required.' }
+    if (-not $PSBoundParameters.ContainsKey('ReleasedAt')) { throw 'ReleasedAt is required.' }
     $timestamp = $ReleasedAt.ToUniversalTime().ToString('o')
     Invoke-FixtureSql "BEGIN; SET LOCAL confighub.baseline_maintenance='on'; UPDATE configuration_baselines SET released_at='$timestamp' WHERE id='$BaselineId' AND state='Released'; COMMIT;" | Out-Null
 }

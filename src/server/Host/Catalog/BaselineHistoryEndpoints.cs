@@ -15,7 +15,7 @@ public static partial class CatalogEndpoints
             return Results.NotFound(new { message = "项目不存在。" });
 
         var projectBaselines = database.ConfigurationBaselines.AsNoTracking().Where(item => item.ProjectId == projectId);
-        var baselines = await projectBaselines.OrderByDescending(item => item.CreatedAt).ThenBy(item => item.Id)
+        var baselines = await projectBaselines.OrderByDescending(item => item.ReleasedAt != null).ThenByDescending(item => item.ReleasedAt).ThenBy(item => item.Id)
             .Select(item => new
             {
                 id = item.Id,

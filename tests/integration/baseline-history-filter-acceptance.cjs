@@ -1,4 +1,3 @@
-const { execFileSync } = require('node:child_process')
 const { chromium } = require('playwright')
 const { readFileSync, mkdirSync } = require('node:fs')
 const { randomUUID } = require('node:crypto')
@@ -52,13 +51,12 @@ async function main() {
     const a2 = await version(control, 'A2-frozen')
     const b1 = await version(driver, 'B1')
     const b2 = await version(driver, 'B2')
-    const baseline = async (code, a, b, createdAt) => {
+    const baseline = async (code, a, b, releasedAt) => {
       const result = await write(`/api/v1/projects/${project.id}/baselines`, {
         seriesCode: 'HISTORY', baselineCode: code, publishImmediately: true, reason: '历史筛选验收',
         versionSelections: [{ componentId: control.id, versionId: a.id }, { componentId: driver.id, versionId: b.id }]
       })
-      await write(`/api/v1/baselines/${result.id}/maintenance`, { createdAt, maintenanceMode: true, reason: '仅构造验收项目历史录入时间' })
-      execFileSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.resolve('tests/integration/baseline-metadata-fixture.ps1'), '-BaselineId', result.id, '-ReleasedAt', createdAt], { windowsHide: true })
+      await write(`/api/v1/baselines/${result.id}/maintenance`, { releasedAt, maintenanceMode: true, reason: '构造验收项目历史发布时间' })
       return result
     }
     const oldest = await baseline('历史-01', a1, b1, '2020-01-10T00:01:00+08:00')

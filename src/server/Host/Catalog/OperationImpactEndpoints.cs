@@ -123,9 +123,11 @@ public static partial class CatalogEndpoints
             await BuildOperationImpactGroupAsync("deployment-history", "基线配置录入历史", deployments, cancellationToken),
             await BuildOperationImpactGroupAsync("successors", "后续基线修订", successors, cancellationToken)
         ];
-        var withdrawUntil = baseline.ReleasedAt?.AddMinutes(3);
+        var releaseRecordedAt = await GetBaselineReleaseRecordedAtAsync(db, baselineId, cancellationToken);
+        var withdrawUntil = releaseRecordedAt?.AddMinutes(3);
         List<string> blockedReasons = [];
-        if (baseline.State != BaselineState.Released || withdrawUntil is null) blockedReasons.Add("只有正式发布的基线可以撤回。");
+        if (baseline.State != BaselineState.Released) blockedReasons.Add("只有正式发布的基线可以撤回。");
+        else if (withdrawUntil is null || releaseRecordedAt > DateTimeOffset.UtcNow) blockedReasons.Add("缺少有效的发布操作记录，不能撤回。");
         else if (DateTimeOffset.UtcNow > withdrawUntil) blockedReasons.Add("已超过发布后 3 分钟的撤回期限。");
         foreach (var group in groups.Where(group => group.Total > 0)) blockedReasons.Add($"已有{group.Label}引用，不能撤回。");
         return Results.Ok(new BaselineOperationImpact(baseline.Id, baseline.BaselineCode, baseline.State.ToString(),

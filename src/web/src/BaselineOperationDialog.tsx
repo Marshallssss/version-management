@@ -20,7 +20,7 @@ export function BaselineOperationDialog({ action, baseline, changes, timeChange,
     {action === 'withdraw' && impact.data && !impact.isFetching && <>{impact.data.blockedReasons.map(reason => <p key={reason} className="error-strip">{reason}</p>)}{impact.data.withdrawUntil && <p className="impact-footnote">撤回期限：{new Date(impact.data.withdrawUntil).toLocaleString('zh-CN')}</p>}</>}
     {action === 'maintenance' && <>
       {impact.data && !impact.data.maintenanceEnabled && <p className="error-strip">调测维护已关闭。</p>}
-      {timeChange && <p className="operation-time-change">录入时间：{timeChange.before} → {timeChange.after}</p>}
+      {timeChange && <p className="operation-time-change">发布时间：{timeChange.before} → {timeChange.after}</p>}
       {changes.length > 0 ? <div className="operation-changes"><table><thead><tr><th>组件</th><th>原版本</th><th>修正为</th></tr></thead><tbody>{changes.map((change, index) => <tr key={index}><th>{change.componentName}</th><td>{change.before}</td><td>{change.after}</td></tr>)}</tbody></table></div> : <p className="impact-footnote">组件版本保持不变。</p>}
     </>}
     <p className="operation-reason">原因：{reason}</p>
