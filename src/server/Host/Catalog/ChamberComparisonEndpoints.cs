@@ -51,7 +51,7 @@ public static partial class CatalogEndpoints
         var chambers = await LoadEffectiveChambersAsync(db, [machineId], states, ct);
         if (chambers.Length == 0) return [];
         var expected = baseline.ToDictionary(item => item.Key,
-            item => new ChamberConfigurationValue(item.Value.ComponentVersionId, "Present", "Baseline"));
+            item => new ChamberConfigurationValue(item.Value.ComponentVersionId, item.Value.NotConfigured ? "Absent" : "Present", "Baseline"));
         var values = chambers.SelectMany(chamber => chamber.Items.Values).Concat(expected.Values).ToArray();
         var versions = await LoadChamberComparisonVersionsAsync(db, values, ct);
         var componentIds = chambers.SelectMany(chamber => chamber.Items.Keys).Union(expected.Keys).ToArray();

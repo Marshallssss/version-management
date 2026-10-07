@@ -18,6 +18,7 @@ public sealed class ConfigurationBaseline
     public DateTimeOffset? ReleasedAt { get; set; }
     public string? ReleaseReason { get; set; }
     public string? ApprovedBy { get; set; }
+    public bool IsHistorical { get; set; }
 }
 
 public enum BaselineState

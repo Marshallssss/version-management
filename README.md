@@ -1,12 +1,18 @@
 # ConfigHub
 
+### 历史基线 Excel 导入
+
+- “版本导入”新生成的模板可选择“测试版本”或“历史基线”。历史列填写完整组件版本、基线名称、发布时间（`YYYY-MM-DD HH:mm`，北京时间）和说明；特殊缺项填写“当时未配置”。
+- Admin/SuperAdmin 使用“历史基线预览”确认导入。缺失版本补录为已发布，版本创建时间使用历史发布时间；现有版本状态/风险保持原值，历史快照显示“历史已发布”。测试列继续使用原扫描入口，每日扫描不会自行发布历史。
+- 部署前需备份并应用 Migration `20260922155138_HistoricalBaselineExcelImport`。完整操作与时间语义见 [历史基线导入说明](docs/historical-baseline-import-design.md)。PostgreSQL 17 / Production Integration Pending 边界不变。
+
 ### 2026-09-22 发布时间维护与项目选择
 
 - 基线“历史维护”编辑的是发布时间，实际创建时间和审计发生时间不改。草稿不能通过改时间冒充已发布；三分钟撤回仍从真实发布操作计时，补录日期不会重开期限。
 - 项目选择弹窗加宽、选择框占满一行；下拉菜单统一浅色主题、选中态和禁用态。现代 Edge/Chrome 使用同主题选项面板，旧浏览器保留原生选项兼容。
 - 无项目标准的新项目不再误报读取失败，正常显示“尚未设定”。项目下拉的视觉与键盘验收见 [项目选择复核](docs/ui/project-picker-review.md)。
 - 本次新增 Migration `20260922031634_BaselineWithdrawalUsesReleaseActionTime`，其他部署环境须先备份并执行现有数据库升级流程，再启动 Host/Worker。PostgreSQL 17 / Windows Production Integration Pending 验收边界不变。
-- 历史基线 Excel 目前是设计方案，尚未开放导入；建议同一模板明确区分测试版本和完整历史基线，后者必须管理员手动预览确认。字段、校验、扫描隔离与待确认边界见 [历史基线导入设计](docs/historical-baseline-import-design.md)。
+- 历史基线 Excel 当时仅完成方案分析；后续实现与当前使用规则见本文顶部及 [历史基线导入说明](docs/historical-baseline-import-design.md)。
 
 ### 2026-09-20 项目资料与批量上机
 

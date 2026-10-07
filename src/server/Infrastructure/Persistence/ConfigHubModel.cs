@@ -244,6 +244,7 @@ internal static class ConfigHubModel
             entity.Property(baseline => baseline.ReleasedAt).HasColumnName("released_at");
             entity.Property(baseline => baseline.ReleaseReason).HasColumnName("release_reason").HasMaxLength(500);
             entity.Property(baseline => baseline.ApprovedBy).HasColumnName("approved_by").HasMaxLength(160);
+            entity.Property(baseline => baseline.IsHistorical).HasColumnName("is_historical");
             entity.HasIndex(baseline => new { baseline.ProjectId, baseline.NormalizedBaselineCode }).IsUnique().HasDatabaseName("ux_configuration_baselines_project_code");
             entity.HasIndex(baseline => new { baseline.BaselineSeriesId, baseline.RevisionNo }).IsUnique().HasDatabaseName("ux_configuration_baselines_series_revision");
             entity.HasIndex(baseline => baseline.TopComponentVersionId).HasDatabaseName("ix_configuration_baselines_top_version");
@@ -255,13 +256,15 @@ internal static class ConfigHubModel
 
         modelBuilder.Entity<BaselineItem>(entity =>
         {
-            entity.ToTable("baseline_items");
+            entity.ToTable("baseline_items", table => table.HasCheckConstraint("ck_baseline_item_not_configured", "NOT not_configured OR (component_version_id IS NULL AND historical_version_state IS NULL)"));
             entity.HasKey(item => item.Id);
             entity.Property(item => item.Id).HasColumnName("id");
             entity.Property(item => item.ConfigurationBaselineId).HasColumnName("configuration_baseline_id");
             entity.Property(item => item.ConfigurationComponentId).HasColumnName("configuration_component_id");
             entity.Property(item => item.ComponentVersionId).HasColumnName("component_version_id");
             entity.Property(item => item.VersionNumberSnapshot).HasColumnName("version_number_snapshot").HasMaxLength(200);
+            entity.Property(item => item.NotConfigured).HasColumnName("not_configured");
+            entity.Property(item => item.HistoricalVersionState).HasColumnName("historical_version_state").HasMaxLength(32);
             entity.Property(item => item.ParentBaselineItemId).HasColumnName("parent_baseline_item_id");
             entity.Property(item => item.ComponentCodeSnapshot).HasColumnName("component_code_snapshot").HasMaxLength(80);
             entity.Property(item => item.ComponentNameSnapshot).HasColumnName("component_name_snapshot").HasMaxLength(200);

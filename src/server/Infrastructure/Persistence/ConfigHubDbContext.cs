@@ -56,6 +56,7 @@ public sealed class ConfigHubDbContext(DbContextOptions<ConfigHubDbContext> opti
     public DbSet<MatrixImportRun> MatrixImportRuns => Set<MatrixImportRun>();
     public DbSet<MatrixImportCombination> MatrixImportCombinations => Set<MatrixImportCombination>();
     public DbSet<MatrixImportReference> MatrixImportReferences => Set<MatrixImportReference>();
+    public DbSet<MatrixHistoricalRecord> MatrixHistoricalRecords => Set<MatrixHistoricalRecord>();
     public DbSet<LaboratoryValidation> LaboratoryValidations => Set<LaboratoryValidation>();
     public DbSet<VersionExposureSnapshot> VersionExposureSnapshots => Set<VersionExposureSnapshot>();
     public DbSet<VersionExposureMachine> VersionExposureMachines => Set<VersionExposureMachine>();

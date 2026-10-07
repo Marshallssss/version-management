@@ -7,6 +7,19 @@ public static class MatrixImportModel
 {
     public static void Configure(ModelBuilder builder)
     {
+        builder.Entity<MatrixHistoricalRecord>(e =>
+        {
+            e.ToTable("matrix_historical_records"); e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("id");
+            e.Property(x => x.TemplateId).HasColumnName("template_id");
+            e.Property(x => x.RowKey).HasColumnName("row_key").HasMaxLength(100);
+            e.Property(x => x.ContentHash).HasColumnName("content_hash").HasMaxLength(64);
+            e.Property(x => x.BaselineId).HasColumnName("baseline_id");
+            e.Property(x => x.RecordedAt).HasColumnName("recorded_at");
+            e.HasIndex(x => new { x.TemplateId, x.RowKey }).IsUnique();
+            e.HasOne<MatrixImportTemplate>().WithMany().HasForeignKey(x => x.TemplateId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<ConfigurationBaseline>().WithMany().HasForeignKey(x => x.BaselineId).OnDelete(DeleteBehavior.Restrict);
+        });
         builder.Entity<MatrixImportReference>(e =>
         {
             e.ToTable("matrix_import_references"); e.HasKey(x => x.Id);
@@ -18,6 +31,7 @@ public static class MatrixImportModel
         });
         builder.Entity<MatrixImportTemplate>(e =>
         {
+            e.Property(x => x.SupportsHistory).HasColumnName("supports_history");
             e.ToTable("matrix_import_templates"); e.HasKey(x => x.Id);
             e.Property(x => x.Id).HasColumnName("id"); e.Property(x => x.ProjectId).HasColumnName("project_id");
             e.Property(x => x.CreatedAt).HasColumnName("created_at"); e.Property(x => x.CreatedBy).HasColumnName("created_by").HasMaxLength(160);

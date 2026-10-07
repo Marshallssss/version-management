@@ -4,6 +4,7 @@ namespace ConfigHub.Infrastructure.Persistence.Entities;
 
 public sealed class MatrixImportTemplate
 {
+    public bool SupportsHistory { get; set; }
     public Guid Id { get; set; }
     public Guid ProjectId { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
@@ -65,4 +66,14 @@ public sealed class MatrixImportReference
     public Guid? CombinationId { get; set; }
     public Guid ComponentId { get; set; }
     public Guid? VersionId { get; set; }
+}
+
+public sealed class MatrixHistoricalRecord
+{
+    public Guid Id { get; set; }
+    public Guid TemplateId { get; set; }
+    public required string RowKey { get; set; }
+    public required string ContentHash { get; set; }
+    public Guid BaselineId { get; set; }
+    public DateTimeOffset RecordedAt { get; set; }
 }

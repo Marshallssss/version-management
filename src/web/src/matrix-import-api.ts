@@ -74,11 +74,23 @@ export interface MatrixCombination {
 }
 
 export interface MatrixWorkspace {
+  historicalRecords: Array<{ baselineId: string; name: string; releasedAt: string; recordedAt: string }>
   templates: MatrixTemplate[]
   sources: MatrixSource[]
   runs: MatrixRun[]
   combinations: MatrixCombination[]
 }
+
+export interface HistoricalPreviewItem {
+  componentId: string; parentComponentId: string | null; name: string; sortOrder: number; isCategory: boolean
+  versionNumber: string | null; versionId: string | null; notConfigured: boolean; currentMaturity: string; currentSafety: string; willCreate: boolean
+}
+export interface HistoricalPreviewRecord {
+  rowKey: string; position: string; name: string; releasedAt: string; reason: string; items: HistoricalPreviewItem[]; imported: boolean; baselineId: string | null
+}
+export interface HistoricalPreview { id: string; records: HistoricalPreviewRecord[]; testingRecordCount?: number }
+export const previewHistoricalWorkbook = (projectId: string, input: { templateId: string; contentBase64: string; fileName: string; reason: string }) => request<HistoricalPreview>(`${endpoint(projectId)}/history/preview`, json('POST', input))
+export const commitHistoricalWorkbook = (projectId: string, batchId: string, reason: string) => request<HistoricalPreview>(`${endpoint(projectId)}/history/${batchId}/commit`, json('POST', { reason }))
 
 const endpoint = (projectId: string) => `/api/v1/projects/${projectId}/matrix-import`
 const json = (method: string, input: unknown): RequestInit => ({
@@ -89,7 +101,7 @@ const json = (method: string, input: unknown): RequestInit => ({
 
 export const getMatrixWorkspace = (projectId: string) => request<MatrixWorkspace>(endpoint(projectId))
 export const getMatrixCombination = (projectId: string, combinationId: string) => request<MatrixCombination>(`${endpoint(projectId)}/combinations/${combinationId}`)
-export const createMatrixTemplate = (projectId: string, reason: string) => request<{ id: string; downloadUrl: string }>(`${endpoint(projectId)}/templates`, json('POST', { reason }))
+export const createMatrixTemplate = (projectId: string, reason: string) => request<{ id: string; downloadUrl: string }>(`${endpoint(projectId)}/templates`, json('POST', { reason, supportsHistory: true }))
 export const scanMatrixWorkbook = (projectId: string, input: { templateId: string; contentBase64: string; fileName: string; reason: string }) => request<MatrixRun>(`${endpoint(projectId)}/scan`, json('POST', input))
 export const saveMatrixSource = (projectId: string, input: { templateId: string; path: string; localTime: string; timeZoneId: string; enabled: boolean; reason: string }) => request<MatrixSource>(`${endpoint(projectId)}/source`, json('PUT', input))
 export const scanMatrixSource = (projectId: string, reason: string) => request<MatrixRun>(`${endpoint(projectId)}/source/scan`, json('POST', { reason }))

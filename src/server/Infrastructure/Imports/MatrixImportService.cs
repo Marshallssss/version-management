@@ -62,6 +62,13 @@ public static class MatrixImportService
             if (source is not null) bytes = await ReadStableFileAsync(source.Path, ct);
             var components = Read<List<MatrixComponent>>(template.Components);
             var rows = MatrixWorkbook.Read(bytes ?? throw new InvalidDataException("未收到 Excel 文件。"), templateId, components);
+            var history = await db.MatrixHistoricalRecords.Where(x => x.TemplateId == templateId).ToDictionaryAsync(x => x.RowKey, ct);
+            foreach (var row in rows.Where(x => x.RecordType == "HistoricalBaseline"))
+            {
+                if (!history.TryGetValue(row.RowKey, out var imported)) throw new InvalidDataException($"{row.SourceLabel}包含未确认的历史基线，请管理员先预览确认历史，本轮未录入任何新内容。");
+                if (imported.ContentHash != HistoricalBaselineCommands.RowHash(row)) throw new InvalidDataException($"{row.SourceLabel}已录入历史基线，内容不能改写。");
+                run.SkippedCount++;
+            }
             var currentComponentIds = await db.ConfigurationComponents.Where(x => x.ProjectId == projectId).Select(x => x.Id).ToListAsync(ct);
             if (components.Any(x => !currentComponentIds.Contains(x.ComponentId))) throw new InvalidDataException("模板中的组件已被删除，请重新生成模板。");
             var committed = await db.MatrixImportCombinations.Where(x => x.TemplateId == templateId).OrderBy(x => x.SequenceNo).ToListAsync(ct);
@@ -73,6 +80,8 @@ public static class MatrixImportService
             var waiting = false;
             foreach (var row in rows)
             {
+                if (row.RecordType == "HistoricalBaseline") continue;
+                if (history.ContainsKey(row.RowKey)) throw new InvalidDataException($"{row.SourceLabel}已作为历史基线录入，不能更改记录类型。");
                 var position = row.SourceLabel ?? $"第 {row.RowNumber} 行";
                 var contentHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { row.RecordDate, row.Reason, values = row.Values.OrderBy(x => x.Key) }, Json))));
                 if (knownRows.TryGetValue(row.RowKey, out var old))

@@ -249,11 +249,20 @@ namespace ConfigHub.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("configuration_component_id");
 
+                    b.Property<string>("HistoricalVersionState")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("historical_version_state");
+
                     b.Property<string>("LineageKeySnapshot")
                         .IsRequired()
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)")
                         .HasColumnName("lineage_key_snapshot");
+
+                    b.Property<bool>("NotConfigured")
+                        .HasColumnType("boolean")
+                        .HasColumnName("not_configured");
 
                     b.Property<Guid?>("ParentBaselineItemId")
                         .HasColumnType("uuid")
@@ -290,7 +299,10 @@ namespace ConfigHub.Infrastructure.Persistence.Migrations
                     b.HasIndex("ConfigurationBaselineId", "ParentBaselineItemId", "SortOrder")
                         .HasDatabaseName("ix_baseline_items_baseline_parent_sort");
 
-                    b.ToTable("baseline_items", (string)null);
+                    b.ToTable("baseline_items", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_baseline_item_not_configured", "NOT not_configured OR (component_version_id IS NULL AND historical_version_state IS NULL)");
+                        });
                 });
 
             modelBuilder.Entity("ConfigHub.Infrastructure.Persistence.Entities.BaselineLifecycleTransition", b =>
@@ -621,6 +633,10 @@ namespace ConfigHub.Infrastructure.Persistence.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)")
                         .HasColumnName("description");
+
+                    b.Property<bool>("IsHistorical")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_historical");
 
                     b.Property<string>("NormalizedBaselineCode")
                         .IsRequired()
@@ -1445,6 +1461,47 @@ namespace ConfigHub.Infrastructure.Persistence.Migrations
                     b.ToTable("machine_target_assignments", (string)null);
                 });
 
+            modelBuilder.Entity("ConfigHub.Infrastructure.Persistence.Entities.MatrixHistoricalRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("BaselineId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("baseline_id");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("content_hash");
+
+                    b.Property<DateTimeOffset>("RecordedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("recorded_at");
+
+                    b.Property<string>("RowKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("row_key");
+
+                    b.Property<Guid>("TemplateId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("template_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BaselineId");
+
+                    b.HasIndex("TemplateId", "RowKey")
+                        .IsUnique();
+
+                    b.ToTable("matrix_historical_records", (string)null);
+                });
+
             modelBuilder.Entity("ConfigHub.Infrastructure.Persistence.Entities.MatrixImportCombination", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1708,6 +1765,10 @@ namespace ConfigHub.Infrastructure.Persistence.Migrations
                         .HasMaxLength(160)
                         .HasColumnType("character varying(160)")
                         .HasColumnName("reference_baseline_code");
+
+                    b.Property<bool>("SupportsHistory")
+                        .HasColumnType("boolean")
+                        .HasColumnName("supports_history");
 
                     b.HasKey("Id");
 
@@ -2568,6 +2629,21 @@ namespace ConfigHub.Infrastructure.Persistence.Migrations
                     b.HasOne("ConfigHub.Infrastructure.Persistence.Entities.Machine", null)
                         .WithMany()
                         .HasForeignKey("MachineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ConfigHub.Infrastructure.Persistence.Entities.MatrixHistoricalRecord", b =>
+                {
+                    b.HasOne("ConfigHub.Infrastructure.Persistence.Entities.ConfigurationBaseline", null)
+                        .WithMany()
+                        .HasForeignKey("BaselineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ConfigHub.Infrastructure.Persistence.Entities.MatrixImportTemplate", null)
+                        .WithMany()
+                        .HasForeignKey("TemplateId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

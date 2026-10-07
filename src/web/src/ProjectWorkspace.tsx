@@ -16,7 +16,7 @@ type InitialMaturity = 'Draft' | 'Testing' | 'Released' | 'Maintenance' | 'Depre
 type InspectorTab = 'versions' | 'status' | 'patches' | 'impact'
 
 function maturityText(value: string) {
-  return ({ Draft: '草稿', Testing: '测试中', Released: '已发布', Maintenance: '维护中', Deprecated: '已废弃' } as Record<string, string>)[value] ?? value
+  return ({ HistoricalRecord: '历史补录', Draft: '草稿', Testing: '测试中', Released: '已发布', Maintenance: '维护中', Deprecated: '已废弃' } as Record<string, string>)[value] ?? value
 }
 
 function safetyText(value: string) {
@@ -75,7 +75,7 @@ export function ProjectWorkspace({ canWrite = true, detail, focusedVersionId, fo
   const selectedVersion = selected?.versions.find(version => version.id === selectedVersionId) ?? null
   const projectStandard = useQuery({ queryKey: ['workspace-project-standard', detail.project.id], queryFn: () => getProjectStandard(detail.project.id) })
   const standardBaseline = useQuery({ queryKey: ['baseline-detail', projectStandard.data?.baselineId], queryFn: () => getBaselineDetail(projectStandard.data!.baselineId), enabled: projectStandard.data != null })
-  const standardVersionByComponent = useMemo(() => new Map((standardBaseline.data?.items ?? []).map(item => [item.componentId, item.versionNumber])), [standardBaseline.data?.items])
+  const standardVersionByComponent = useMemo(() => new Map((standardBaseline.data?.items ?? []).map(item => [item.componentId, item.notConfigured ? '当时未配置' : item.versionNumber])), [standardBaseline.data?.items])
   const standardVersionIdByComponent = useMemo(() => new Map((standardBaseline.data?.items ?? []).flatMap(item => item.versionId ? [[item.componentId, item.versionId] as const] : [])), [standardBaseline.data?.items])
   const children = useMemo(() => {
     const map = new Map<string | null, ConfigurationComponent[]>()

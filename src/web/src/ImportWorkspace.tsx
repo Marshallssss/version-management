@@ -6,6 +6,7 @@ import { LegacyImportWorkspace } from './LegacyImportWorkspace'
 import { createMatrixTemplate, downloadMatrixTemplate, getMatrixCombination, getMatrixWorkspace, saveMatrixSource, scanMatrixSource, scanMatrixWorkbook, workbookBase64, type MatrixCombination, type MatrixComponent, type MatrixMessage, type MatrixRun, type MatrixSource } from './matrix-import-api'
 import './matrix-import.css'
 import { ImportSteps } from './ImportSteps'
+import { HistoricalImportDialog } from './HistoricalImportDialog'
 
 const formatTime = (value: string | null | undefined) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '尚无记录'
 const stateText = (value: string | null | undefined) => ({ Succeeded: '扫描完成', Failed: '扫描失败', Running: '扫描中', Pending: '待扫描', Skipped: '无新内容', Completed: '扫描完成', Imported: '已录入' }[value ?? ''] ?? '待扫描')
@@ -15,7 +16,7 @@ const combinationSource = (combination: MatrixCombination) => combination.source
 const changeText = (message: MatrixMessage) => message.componentName ? `${message.componentName} 从 ${message.previousVersionNumber ?? '未指定'} 变为 ${message.versionNumber ?? '未指定'}` : message.message
 const componentAnchor = (combinationId: string, componentId: string) => `matrix-combination-${combinationId}-${componentId}`
 
-export function ImportWorkspace({ projectId, projectName, isAdmin = false, canImport = false, onOpenVersion }: { projectId: string; projectName: string; isAdmin?: boolean; canImport?: boolean; onOpenVersion?: (componentId: string, versionId: string) => void }) {
+export function ImportWorkspace({ projectId, projectName, isAdmin = false, canImport = false, onOpenVersion, onOpenBaseline }: { projectId: string; projectName: string; isAdmin?: boolean; canImport?: boolean; onOpenVersion?: (componentId: string, versionId: string) => void; onOpenBaseline?: (id: string) => void }) {
   const client = useQueryClient()
   const input = useRef<HTMLInputElement>(null)
   const [file, setFile] = useState<File | null>(null)
@@ -34,6 +35,7 @@ export function ImportWorkspace({ projectId, projectName, isAdmin = false, canIm
   const [sourceScanDialog, setSourceScanDialog] = useState(false)
   const [sourceScanReason, setSourceScanReason] = useState('')
   const [notice, setNotice] = useState('')
+  const [historyImportOpen, setHistoryImportOpen] = useState(false)
   const workspace = useQuery({ queryKey: ['matrix-import', projectId], queryFn: () => getMatrixWorkspace(projectId), refetchInterval: 30000 })
   const templates = workspace.data?.templates ?? []
   const activeTemplateId = templateId || templates[0]?.id || ''
@@ -54,6 +56,7 @@ export function ImportWorkspace({ projectId, projectName, isAdmin = false, canIm
     await client.invalidateQueries({ queryKey: ['project-version-detail'] })
     await client.invalidateQueries({ queryKey: ['laboratory-history', projectId] })
     await client.invalidateQueries({ queryKey: ['laboratory-versions', projectId] })
+    await client.invalidateQueries({ queryKey: ['project-baseline-history', projectId] })
   }
   const onScanned = async (run: MatrixRun) => {
     setLatestRun(run)
@@ -104,23 +107,24 @@ export function ImportWorkspace({ projectId, projectName, isAdmin = false, canIm
   }
 
   return <section className="status-panel catalog-panel import-workspace matrix-import-workspace">
+    {historyImportOpen && file && <HistoricalImportDialog projectId={projectId} templateId={activeTemplateId} file={file} reason={reason} onClose={() => setHistoryImportOpen(false)} onImported={refresh} onOpenBaseline={onOpenBaseline} />}
     <div className="panel-heading"><div><span className="section-index">{projectName}</span><h3><FileExcelOutlined aria-hidden />版本导入</h3></div><div className="toolbar-actions"><button type="button" className="icon-button" aria-label="刷新导入记录" title="刷新导入记录" disabled={workspace.isFetching} onClick={() => { void workspace.refetch() }}><ReloadOutlined spin={workspace.isFetching} /></button>{canImport && <button type="button" onClick={() => { generate.reset(); setTemplateDialog(true) }}><DownloadOutlined aria-hidden />生成项目模板</button>}</div></div>
     <ImportSteps current={!templates.length ? 0 : !file && !runs.some(run => run.status === 'Succeeded') ? 1 : !runs.some(run => run.status === 'Succeeded') ? 2 : 3} />
-    <p className="import-guidance">首次使用：先生成并下载当前项目模板，在 Excel 中填写版本、记录日期（YYYY-MM-DD）和变更说明，保存后选择文件并扫描录入。确认结果正确后，再按需配置每日扫描；无需每天重新生成模板。</p>
+    <p className="import-guidance">首次使用：先生成并下载当前项目模板，在 Excel 中填写版本、记录日期（YYYY-MM-DD）和变更说明，测试记录保存后扫描录入；历史基线需填全组件版本、基线名称和发布时间（YYYY-MM-DD HH:mm，北京时间），再由管理员点击“历史基线预览”确认。确认结果正确后，再按需配置每日扫描；无需每天重新生成模板。</p>
     {workspace.isLoading && <p className="empty-state" role="status">正在读取项目模板与扫描记录。</p>}
     {workspace.isError && <p className="error-strip" role="alert">{workspace.error.message}</p>}
     {notice && <p className="success-strip" role="status">{notice}</p>}
     {download.isError && <p className="error-strip" role="alert">{download.error.message}</p>}
     {canImport ? <form className="matrix-upload-form" aria-label="Excel 扫描录入" onSubmit={event => { event.preventDefault(); setNotice(''); scan.mutate() }}>
       <div className="matrix-file-row"><label className="matrix-template-field">项目模板<select aria-label="项目模板" value={activeTemplateId} onChange={event => { setTemplateId(event.target.value); scan.reset() }} disabled={busy || !templates.length} required><option value="" disabled>请先生成项目模板</option>{templates.map(item => <option value={item.id} key={item.id}>{formatTime(item.createdAt)} · {item.referenceBaselineCode || '无参考基线'}</option>)}</select></label><button type="button" className="matrix-download" title="下载所选模板" aria-label="下载所选模板" onClick={() => download.mutate(activeTemplateId)} disabled={!activeTemplateId || download.isPending}><DownloadOutlined /></button><div className="matrix-file-picker"><input ref={input} type="file" accept=".xlsx" aria-label="填写后的 Excel 文件" disabled={busy} onChange={chooseFile} /><button type="button" onClick={() => input.current?.click()} disabled={busy || !activeTemplateId}><UploadOutlined aria-hidden />选择 Excel</button><span title={file?.name}>{file?.name ?? '尚未选择文件'}</span></div></div>
-      <div className="matrix-upload-bottom"><label>本次录入原因<input aria-label="本次录入原因" value={reason} maxLength={500} onChange={event => setReason(event.target.value)} disabled={busy} required placeholder="例如：本周实验室版本登记" /></label><button type="submit" className="primary-action" disabled={busy || !file || !activeTemplateId || !reason.trim()}><ImportOutlined aria-hidden />{scan.isPending ? '正在扫描并录入' : '扫描并录入'}</button></div>
-      {activeTemplate && <div className="matrix-semantic-note"><span>{activeTemplate.componentCount} 个组件</span><span>新版本仅登记为测试中</span><span>空白继承上一套组合</span><span>新版模板无需提交标记；旧版仍需标记“可导入”</span></div>}
+      <div className="matrix-upload-bottom"><label>本次录入原因<input aria-label="本次录入原因" value={reason} maxLength={500} onChange={event => setReason(event.target.value)} disabled={busy} required placeholder="例如：本周实验室版本登记" /></label><button type="submit" className="primary-action" disabled={busy || !file || !activeTemplateId || !reason.trim()}><ImportOutlined aria-hidden />{scan.isPending ? '正在扫描并录入' : '扫描并录入'}</button>{isAdmin && <button type="button" disabled={busy || !file || !activeTemplateId || !reason.trim()} onClick={() => setHistoryImportOpen(true)}><HistoryOutlined aria-hidden />历史基线预览</button>}</div>
+      {activeTemplate && <div className="matrix-semantic-note"><span>{activeTemplate.componentCount} 个组件</span><span>测试：新版本进入测试中，空白沿用</span><span>历史：完整配置、名称和发布时间，管理员预览确认</span><span>新版模板无需提交标记；旧版仍需标记“可导入”</span></div>}
       {(fileError || scan.isError) && <p className="error-strip" role="alert">{fileError || scan.error?.message}</p>}
     </form> : <p className="empty-state">模板生成与测试版本录入需要高级工程师权限。你可以查看已有的测试组合和扫描结果。</p>}
 
     <section className="matrix-source-band" aria-label="每日文件扫描"><div className="matrix-source-label"><ClockCircleOutlined aria-hidden /><div><strong>每日文件扫描 <span className={`matrix-status ${source?.enabled ? 'enabled' : ''}`}>{source?.enabled ? '已启用' : source ? '已暂停' : '未配置'}</span></strong>{source ? <><small title={source.path}>{source.path}</small><small>每天 {source.localTime} · {source.timeZoneId === 'China Standard Time' || source.timeZoneId === 'Asia/Shanghai' ? '北京时间' : source.timeZoneId} · 下次 {source.enabled ? formatTime(source.nextScanAt) : '暂停'}</small><small>最近扫描 {formatTime(source.lastScanAt)}{source.lastStatus ? ` · ${stateText(source.lastStatus)}` : ''}</small></> : <small>可选：首次导入确认后，把填写好的 Excel 放在部署电脑的固定位置，再由管理员配置每日扫描。</small>}</div></div>{isAdmin && <div className="toolbar-actions">{source && <button type="button" disabled={busy} onClick={() => { scanSource.reset(); setSourceScanReason(''); setSourceScanDialog(true) }}><ReloadOutlined aria-hidden />立即扫描</button>}<button type="button" onClick={() => openSource(source)} disabled={busy || !templates.length}><SettingOutlined aria-hidden />{source ? '扫描设置' : '配置扫描'}</button></div>}</section>
 
-    <nav className="matrix-tabs" aria-label="Excel 导入记录"><button type="button" aria-current={tab === 'combinations' ? 'page' : undefined} onClick={() => setTab('combinations')}><CheckCircleOutlined aria-hidden />测试组合 <span>{combinations.length}</span></button><button type="button" aria-current={tab === 'runs' ? 'page' : undefined} onClick={() => setTab('runs')}><HistoryOutlined aria-hidden />扫描记录 <span>{runs.length}</span></button></nav>
+    {!!workspace.data?.historicalRecords?.length && <section className="matrix-historical-records" aria-label="已导入历史基线"><h4>已导入历史基线</h4>{workspace.data.historicalRecords.map(record => <button type="button" key={record.baselineId} onClick={() => onOpenBaseline?.(record.baselineId)} disabled={!onOpenBaseline}><strong>{record.name}</strong><span>发布时间 {formatTime(record.releasedAt)}</span></button>)}</section>}<nav className="matrix-tabs" aria-label="Excel 导入记录"><button type="button" aria-current={tab === 'combinations' ? 'page' : undefined} onClick={() => setTab('combinations')}><CheckCircleOutlined aria-hidden />测试组合 <span>{combinations.length}</span></button><button type="button" aria-current={tab === 'runs' ? 'page' : undefined} onClick={() => setTab('runs')}><HistoryOutlined aria-hidden />扫描记录 <span>{runs.length}</span></button></nav>
     {tab === 'combinations' && (visibleCombinations.length || selectedCombinationId ? <div className="matrix-history-layout"><div className="matrix-history-list" aria-label="测试组合列表">{visibleCombinations.map(item => <button type="button" key={item.id} aria-pressed={selectedCombination?.id === item.id} onClick={() => { setSelectedCombinationId(item.id); setFocusedComponent({ id: '', request: 0 }) }}><strong>第 {item.sequenceNo} 套 <span>{item.items.filter(component => component.changed).length} 项变更</span></strong><small>{item.recordDate} · Excel {combinationSource(item)}</small><span>{item.reason}</span></button>)}</div>{selectedCombination ? <CombinationTree combination={selectedCombination} focusedComponent={focusedComponent} onOpenVersion={onOpenVersion} /> : historicalCombination.isError ? <div className="matrix-combination-load-error"><p className="error-strip" role="alert">无法读取所选测试组合：{historicalCombination.error.message}</p><button type="button" onClick={() => { void historicalCombination.refetch() }}>重新读取</button></div> : <p className="empty-state" role="status">正在读取所选测试组合。</p>}</div> : <p className="empty-state">尚无测试组合。填写项目模板并扫描后，组合记录将显示在这里。</p>)}
     {tab === 'runs' && (runs.length || latestRun ? <div className="matrix-history-layout"><div className="matrix-history-list" aria-label="扫描记录列表">{(latestRun && !runs.some(item => item.id === latestRun.id) ? [latestRun, ...runs] : runs).map(run => <button type="button" key={run.id} aria-pressed={selectedRun?.id === run.id} onClick={() => setSelectedRunId(run.id)}><strong>{run.fileName || '固定文件扫描'}<span className={hasError(run) ? 'matrix-error-text' : ''}>{stateText(run.status)}</span></strong><small>{formatTime(run.createdAt)}</small><span>新增 {run.importedCount} 套 · 跳过 {run.skippedCount} 条记录</span></button>)}</div>{selectedRun && <RunResult run={selectedRun} onOpenCombination={openCombination} />}</div> : <p className="empty-state">尚无扫描记录。</p>)}
 

@@ -7,9 +7,9 @@ using System.Xml.Linq;
 namespace ConfigHub.Infrastructure.ExcelImport;
 
 public sealed record MatrixComponent(Guid ComponentId, Guid? ParentComponentId, string ComponentName, int SortOrder, bool IsCategory, Guid? VersionId, string? VersionNumber, bool Changed = false, Guid? PreviousVersionId = null, string? PreviousVersionNumber = null, bool VersionAvailable = true);
-public sealed record MatrixInputRow(string RowKey, int RowNumber, string RecordDate, string Reason, bool Submit, IReadOnlyDictionary<Guid, string> Values, string? SourceLabel = null);
+public sealed record MatrixInputRow(string RowKey, int RowNumber, string RecordDate, string Reason, bool Submit, IReadOnlyDictionary<Guid, string> Values, string? SourceLabel = null, string RecordType = "Testing", string? BaselineName = null, string? ReleasedAt = null);
 
-public static class MatrixWorkbook
+public static partial class MatrixWorkbook
 {
     public const int MaximumBytes = 10 * 1024 * 1024;
     public const int MaximumRows = 2000;
@@ -117,6 +117,7 @@ public static class MatrixWorkbook
     {
         var cells = ReadCells(bytes, out var rowNumbers);
         string Value(int c, int r) => cells.GetValueOrDefault(Column(c) + r).Text ?? "";
+        if (Value(1, 1) == $"ConfigHub.Matrix.v3:{templateId:D}") return ReadHistoricalVertical(cells, templateId, components);
         if (Value(1, 1) == $"ConfigHub.Matrix.v2:{templateId:D}") return ReadVertical(cells, templateId, components);
         if (Value(1, 1) != $"ConfigHub.Matrix.v1:{templateId:D}") throw new InvalidDataException("Excel 不属于当前项目所选模板，请切换到原项目及对应模板，或重新下载当前项目模板。");
         var expected = components.Where(x => !x.IsCategory).ToDictionary(x => x.ComponentId);

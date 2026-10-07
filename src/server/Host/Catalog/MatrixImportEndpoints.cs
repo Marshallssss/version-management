@@ -19,6 +19,8 @@ public static partial class CatalogEndpoints
         group.MapPost("/templates", CreateMatrixTemplateAsync).RequireAuthorization("SeniorEngineer");
         group.MapGet("/templates/{templateId:guid}/download", DownloadMatrixTemplateAsync);
         group.MapPost("/scan", ScanMatrixUploadAsync).RequireAuthorization("SeniorEngineer");
+        group.MapPost("/history/preview", PreviewHistoricalWorkbookAsync).RequireAuthorization("Admin");
+        group.MapPost("/history/{batchId:guid}/commit", CommitHistoricalWorkbookAsync).RequireAuthorization("Admin");
         group.MapPut("/source", SaveMatrixSourceAsync).RequireAuthorization("Admin");
         group.MapPost("/source/scan", ScanMatrixSourceAsync).RequireAuthorization("Admin");
     }
@@ -75,7 +77,12 @@ public static partial class CatalogEndpoints
         return Results.Ok(new
         {
             templates = templates.Select(x => new { x.Id, x.CreatedAt, x.ReferenceBaselineCode, componentCount = MatrixImportService.Read<List<MatrixComponent>>(x.Components).Count(c => !c.IsCategory), components = x.Components.RootElement }),
-            sources, runs, combinations = combinations.Select(combination => views[combination.Id])
+            sources, runs, combinations = combinations.Select(combination => views[combination.Id]),
+            historicalRecords = await (from record in db.MatrixHistoricalRecords.AsNoTracking()
+                join baseline in db.ConfigurationBaselines on record.BaselineId equals baseline.Id
+                where baseline.ProjectId == projectId
+                orderby baseline.ReleasedAt descending
+                select new { record.BaselineId, name = baseline.BaselineCode, baseline.ReleasedAt, record.RecordedAt }).Take(200).ToListAsync(ct)
         });
     }
 
@@ -126,7 +133,7 @@ public static partial class CatalogEndpoints
         });
     }
 
-    private static Task<IResult> CreateMatrixTemplateAsync(Guid projectId, MatrixReason request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken ct) => MatrixResult(async () =>
+    private static Task<IResult> CreateMatrixTemplateAsync(Guid projectId, MatrixTemplateRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken ct) => MatrixResult(async () =>
     {
         if (ValidateRequired(request.Reason, "生成原因", 500) is { } error) return Results.ValidationProblem(error);
         var key = MatrixKey(context);
@@ -136,7 +143,7 @@ public static partial class CatalogEndpoints
         if (project is null) return Results.NotFound();
         if (!await MatrixImportService.CanImportAsync(db, MatrixUser(context), projectId, ct)) return Results.Forbid();
         var scope = $"matrix.template:{projectId}";
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(request.Reason!)));
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request))));
         var replay = await db.IdempotencyRecords.SingleOrDefaultAsync(x => x.Scope == scope && x.IdempotencyKey == key, ct);
         if (replay is not null) return replay.RequestHash == hash && replay.Result is not null ? Results.Ok(replay.Result.RootElement.Clone()) : Results.Conflict(new { message = "幂等键已用于其他模板。" });
         var all = await db.ConfigurationComponents.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct);
@@ -150,7 +157,7 @@ public static partial class CatalogEndpoints
         var reference = standard is Guid bid ? await db.BaselineItems.AsNoTracking().Where(x => x.ConfigurationBaselineId == bid).ToDictionaryAsync(x => x.ConfigurationComponentId, ct) : [];
         var components = ordered.Select(x => new MatrixComponent(x.Id, x.ParentComponentId, x.Name, x.SortOrder, !versioned.Contains(x.Id) && all.Any(c => c.ParentComponentId == x.Id), reference.GetValueOrDefault(x.Id)?.ComponentVersionId, reference.GetValueOrDefault(x.Id)?.VersionNumberSnapshot)).ToList();
         if (components.Count(x => !x.IsCategory) is 0 or > 496) return Results.BadRequest(new { message = "模板需要 1 至 496 个可登记版本的组件。请先建立项目组件。" });
-        var template = new MatrixImportTemplate { Id = Guid.NewGuid(), ProjectId = projectId, CreatedAt = DateTimeOffset.UtcNow, CreatedBy = context.User.Identity!.Name!, ReferenceBaselineCode = baseline?.BaselineCode, Components = MatrixImportService.Document(components) };
+        var template = new MatrixImportTemplate { SupportsHistory = request.SupportsHistory, Id = Guid.NewGuid(), ProjectId = projectId, CreatedAt = DateTimeOffset.UtcNow, CreatedBy = context.User.Identity!.Name!, ReferenceBaselineCode = baseline?.BaselineCode, Components = MatrixImportService.Document(components) };
         db.MatrixImportTemplates.Add(template);
         foreach (var item in components) db.MatrixImportReferences.Add(new() { Id = Guid.NewGuid(), TemplateId = template.Id, ComponentId = item.ComponentId, VersionId = item.VersionId });
         var result = MatrixImportService.Document(new { id = template.Id, downloadUrl = $"/api/v1/projects/{projectId}/matrix-import/templates/{template.Id}/download" });
@@ -166,7 +173,7 @@ public static partial class CatalogEndpoints
         var project = await db.Projects.AsNoTracking().SingleOrDefaultAsync(x => x.Id == projectId && x.Status == ProjectStatus.Active, ct);
         var template = await db.MatrixImportTemplates.AsNoTracking().SingleOrDefaultAsync(x => x.Id == templateId && x.ProjectId == projectId, ct);
         if (project is null || template is null) return Results.NotFound();
-        return Results.File(MatrixWorkbook.Create(template.Id, project.Name, MatrixImportService.Read<List<MatrixComponent>>(template.Components), template.ReferenceBaselineCode ?? "无参考基线"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "project-version-template.xlsx");
+        return Results.File((template.SupportsHistory ? MatrixWorkbook.CreateWithHistory : (Func<Guid, string, IReadOnlyList<MatrixComponent>, string, byte[]>)MatrixWorkbook.Create)(template.Id, project.Name, MatrixImportService.Read<List<MatrixComponent>>(template.Components), template.ReferenceBaselineCode ?? "无参考基线"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "project-version-template.xlsx");
     });
 
     private static Task<IResult> ScanMatrixUploadAsync(Guid projectId, MatrixScanRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken ct) => MatrixResult(async () =>
@@ -219,5 +226,6 @@ public static partial class CatalogEndpoints
 }
 
 public sealed record MatrixReason(string? Reason);
+public sealed record MatrixTemplateRequest(string? Reason, bool SupportsHistory = false);
 public sealed record MatrixScanRequest(Guid TemplateId, string ContentBase64, string FileName, string? Reason);
 public sealed record MatrixSourceRequest(Guid TemplateId, string Path, string LocalTime, string TimeZoneId, bool Enabled, string? Reason);
