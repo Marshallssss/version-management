@@ -4,7 +4,7 @@ import type { ConfigurationComponent } from './catalog-api'
 import { useQuery } from '@tanstack/react-query'
 import { SwapOutlined } from '@ant-design/icons'
 import { compareBaselines, compareMachines, compareMachineToBaseline, getBaselineDetail, getBaselines, getMachines, type ChamberComparison, type ChamberComparisonItem, type ChamberComparisonState, type ChamberComparisonSource } from './catalog-api'
-import { ComparisonTreeTable, hierarchyChanged, type ComparisonNode } from './ComparisonTreeTable'
+import { ComparisonTreeTable, hierarchyChanged, snapshotNodes, type ComparisonNode } from './ComparisonTreeTable'
 
 type Side = { kind: 'Machine' | 'Baseline'; id: string }
 type Row = { componentId: string; componentName: string; left: string | null; right: string | null; leftVersionId: string | null; rightVersionId: string | null; matched: boolean }
@@ -17,8 +17,7 @@ const sourceNames = { Machine: '沿用整机', Override: 'PM 特例', Baseline: 
 async function snapshotTree(side: Side): Promise<ComparisonNode[] | undefined> {
   if (side.kind !== 'Baseline') return undefined
   const detail = await getBaselineDetail(side.id)
-  const componentByItem = new Map(detail.items.map(item => [item.id, item.componentId]))
-  return detail.items.map(item => ({ id: item.componentId, parentId: item.parentItemId ? componentByItem.get(item.parentItemId) ?? null : null, name: item.componentName, sortOrder: item.sortOrder }))
+  return snapshotNodes(detail.items)
 }
 
 function orientChambers(chambers: ChamberComparison[], reverse = false): Chamber[] {

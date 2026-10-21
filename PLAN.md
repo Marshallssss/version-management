@@ -2,13 +2,21 @@
 
 ## Final Architecture and Product Plan
 
+### 2026-10-21 关联页面层级统一（验收完成）
+
+- 用户已批准整改此前列出的三处：机台目标/标准对比、时间点实际配置及历史对比、基线历史变更。复用树形表格，保留差异祖先、排序、折叠和补丁入口，不改变配置事实和权限。
+- 机台目标/标准使用对应冻结基线层级；时间点历史明确按当前目录分组，不伪造历史层级；基线历史按新快照分组、保留已移除项并附旧归属路径，识别父级/名称变化。
+- 已接入共用树表，基线快照变更同时区分当时未配置、结构分类、未纳入和必选性/排序变化；对比只加载当前及相邻快照，复用查询缓存，不批量读取全部详情。新增三处真实流程、冻结路径、完整快照缺失、历史安装时间不变及 Viewer 验收。
+- 验收通过：扩展 `compare-hierarchy-acceptance.cjs`（包含原独立对比与新增三处，1440px/390px 共 12 张截图）、`history-patches-acceptance.cjs`、`baseline-history-filter-acceptance.cjs`、`pm-compare-ui-acceptance.cjs`、`configuration-patches-acceptance.cjs`；catalog、background-job、Windows operations preflight（13 脚本）、web compatibility 均通过。桌面与窄屏截图人工检查无重叠/裁切。
+- 本地服务占用 DLL 的首次构建失败已处理：停本工作区 Host/Worker 后重新 Release build，0 warning / 0 error；前端 build、真实 Migration（已最新）、EF pending model changes（无变化）通过，Host/Worker 已恢复。无数据库修改，PostgreSQL 17 / Production Integration Pending 不变。
+
 ### 2026-10-21 配置对比组件层级（验收完成）
 
 - 本轮仅修改独立“配置比对”页面的配置差异展示，恢复根/子层级、排序与折叠；只看差异时保留祖先上下文。整机和 PM 同步，基线层级读取冻结快照，双方路径不同时明确展示；版本匹配与风险保持独立。
 - 版本差异与层级/名称变化分别计数；同版本但父级变化仍在“只看差异”中展示，同时保持版本匹配结果。
 - 新增 `tests/integration/compare-hierarchy-acceptance.cjs`，实测三层树、分类根、根排序、折叠、差异祖先保留、无关分支隐藏、机台/PM/基线交叉对比、左右交换、冻结快照的名称及父级、同版本层级变化与 Viewer 只读；1440px/390px 共 6 张截图人工检查通过，无页面溢出或表格裁切。
 - 验收通过：Release build 0 warning / 0 error、真实 Migration（已是最新）、EF pending model changes（无变化）、前端 build；`pm-compare-ui-acceptance.cjs`、`pm-compare-acceptance.cjs`、`configuration-patches-acceptance.cjs`、`catalog-acceptance.ps1`、`background-job-acceptance.ps1`、Windows operations preflight（13 个脚本）、web compatibility。仅前端展示变更，无新 Migration；PostgreSQL 17 / Production Integration Pending 状态不变。
-- 只读排查确认以下 3 处类似问题，未修改，等待用户后续指令：
+- 当时只读排查确认以下 3 处类似问题；后续已获用户批准并在上方“关联页面层级统一”中完成整改：
   1. 机台详情“目标与对比”：`MachineVersionComparison.tsx` 仍逐行平铺，分类父级及差异组件的祖先上下文缺失。
   2. 机台“时间点实际配置”及“与当前实际对比”：`HistoricalConfigurationPanel.tsx` 和共用对比表缺少层级，历史接口按组件 ID 排序；事实记录没有冻结组件树，后续需明确“按当前目录分组”与“历史真实层级”的区别，不伪造历史结构。
   3. 基线历史“展开新旧版本”：完整快照已有树，但 `ProjectBaselineHistory.tsx` 的变更清单仍平铺，且当前接口只比较版本/当时未配置，单纯父级变更不会进入清单。
