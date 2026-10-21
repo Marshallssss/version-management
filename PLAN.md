@@ -2,6 +2,17 @@
 
 ## Final Architecture and Product Plan
 
+### 2026-10-21 配置对比组件层级（验收完成）
+
+- 本轮仅修改独立“配置比对”页面的配置差异展示，恢复根/子层级、排序与折叠；只看差异时保留祖先上下文。整机和 PM 同步，基线层级读取冻结快照，双方路径不同时明确展示；版本匹配与风险保持独立。
+- 版本差异与层级/名称变化分别计数；同版本但父级变化仍在“只看差异”中展示，同时保持版本匹配结果。
+- 新增 `tests/integration/compare-hierarchy-acceptance.cjs`，实测三层树、分类根、根排序、折叠、差异祖先保留、无关分支隐藏、机台/PM/基线交叉对比、左右交换、冻结快照的名称及父级、同版本层级变化与 Viewer 只读；1440px/390px 共 6 张截图人工检查通过，无页面溢出或表格裁切。
+- 验收通过：Release build 0 warning / 0 error、真实 Migration（已是最新）、EF pending model changes（无变化）、前端 build；`pm-compare-ui-acceptance.cjs`、`pm-compare-acceptance.cjs`、`configuration-patches-acceptance.cjs`、`catalog-acceptance.ps1`、`background-job-acceptance.ps1`、Windows operations preflight（13 个脚本）、web compatibility。仅前端展示变更，无新 Migration；PostgreSQL 17 / Production Integration Pending 状态不变。
+- 只读排查确认以下 3 处类似问题，未修改，等待用户后续指令：
+  1. 机台详情“目标与对比”：`MachineVersionComparison.tsx` 仍逐行平铺，分类父级及差异组件的祖先上下文缺失。
+  2. 机台“时间点实际配置”及“与当前实际对比”：`HistoricalConfigurationPanel.tsx` 和共用对比表缺少层级，历史接口按组件 ID 排序；事实记录没有冻结组件树，后续需明确“按当前目录分组”与“历史真实层级”的区别，不伪造历史结构。
+  3. 基线历史“展开新旧版本”：完整快照已有树，但 `ProjectBaselineHistory.tsx` 的变更清单仍平铺，且当前接口只比较版本/当时未配置，单纯父级变更不会进入清单。
+
 ### 2026-09-23 至 2026-10-07 历史基线 Excel 导入（验收完成）
 
 - 用户确认缺失历史版本补录为 Released，版本 CreatedAt 使用历史基线发布时间，真实录入时刻保存在审计；已有版本不改创建时间、不恢复废弃、不解除阻断、不扰动当前 Testing。历史基线快照单独记录“历史已发布”状态及来源。

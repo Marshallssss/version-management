@@ -3,15 +3,23 @@ import { PatchBadge } from './VersionRecordTools'
 import type { ConfigurationComponent } from './catalog-api'
 import { useQuery } from '@tanstack/react-query'
 import { SwapOutlined } from '@ant-design/icons'
-import { compareBaselines, compareMachines, compareMachineToBaseline, getBaselines, getMachines, type ChamberComparison, type ChamberComparisonItem, type ChamberComparisonState, type ChamberComparisonSource } from './catalog-api'
+import { compareBaselines, compareMachines, compareMachineToBaseline, getBaselineDetail, getBaselines, getMachines, type ChamberComparison, type ChamberComparisonItem, type ChamberComparisonState, type ChamberComparisonSource } from './catalog-api'
+import { ComparisonTreeTable, hierarchyChanged, type ComparisonNode } from './ComparisonTreeTable'
 
 type Side = { kind: 'Machine' | 'Baseline'; id: string }
 type Row = { componentId: string; componentName: string; left: string | null; right: string | null; leftVersionId: string | null; rightVersionId: string | null; matched: boolean }
 type Chamber = Omit<ChamberComparison, 'leftInstalled'> & { leftInstalled: boolean | null }
-type Comparison = { rows: Row[]; risk: string | null; chambers: Chamber[] }
+type Comparison = { rows: Row[]; risk: string | null; chambers: Chamber[]; leftTree?: ComparisonNode[]; rightTree?: ComparisonNode[] }
 const riskNames: Record<string, string> = { None: '无', High: '高', Critical: '严重', Unknown: '未知' }
 const matchNames = { Matched: '匹配', Mismatch: '不匹配', Unknown: '信息不足' }
 const sourceNames = { Machine: '沿用整机', Override: 'PM 特例', Baseline: '基线快照', NotInstalled: '' }
+
+async function snapshotTree(side: Side): Promise<ComparisonNode[] | undefined> {
+  if (side.kind !== 'Baseline') return undefined
+  const detail = await getBaselineDetail(side.id)
+  const componentByItem = new Map(detail.items.map(item => [item.id, item.componentId]))
+  return detail.items.map(item => ({ id: item.componentId, parentId: item.parentItemId ? componentByItem.get(item.parentItemId) ?? null : null, name: item.componentName, sortOrder: item.sortOrder }))
+}
 
 function orientChambers(chambers: ChamberComparison[], reverse = false): Chamber[] {
   return chambers.map(chamber => !reverse ? chamber : {
@@ -53,23 +61,38 @@ export function ConfigurationCompare({ projectId, components, onOpenPatches }: {
     enabled: !!projectId && !!left.id && !!right.id && !same,
     refetchOnMount: 'always',
     queryFn: async (): Promise<Comparison> => {
+      const trees = Promise.allSettled([snapshotTree(left), snapshotTree(right)])
+      const withTrees = async (result: Comparison) => {
+        const [leftTree, rightTree] = await trees
+        if (leftTree.status === 'rejected') throw leftTree.reason
+        if (rightTree.status === 'rejected') throw rightTree.reason
+        return { ...result, leftTree: leftTree.value, rightTree: rightTree.value }
+      }
       if (left.kind === 'Machine' && right.kind === 'Machine') {
         const data = await compareMachines(left.id, right.id)
-        return { risk: data.riskSeverity, chambers: orientChambers(data.chambers), rows: data.items.map(item => ({ ...item, left: item.leftVersionNumber, right: item.rightVersionNumber, matched: item.status === 'Matched' })) }
+        return withTrees({ risk: data.riskSeverity, chambers: orientChambers(data.chambers), rows: data.items.map(item => ({ ...item, left: item.leftVersionNumber, right: item.rightVersionNumber, matched: item.status === 'Matched' })) })
       }
       if (left.kind === 'Baseline' && right.kind === 'Baseline') {
         const data = await compareBaselines(left.id, right.id)
-        return { risk: null, chambers: [], rows: data.items.map(item => ({ ...item, left: item.leftVersionNumber ?? (item.status === 'Added' ? null : '结构分类节点'), right: item.rightVersionNumber ?? (item.status === 'Removed' ? null : '结构分类节点'), matched: item.status === 'Same' })) }
+        return withTrees({ risk: null, chambers: [], rows: data.items.map(item => ({ ...item, left: item.leftVersionNumber ?? (item.status === 'Added' ? null : '结构分类节点'), right: item.rightVersionNumber ?? (item.status === 'Removed' ? null : '结构分类节点'), matched: item.status === 'Same' })) })
       }
       const machineOnLeft = left.kind === 'Machine'
       const data = await compareMachineToBaseline(machineOnLeft ? left.id : right.id, machineOnLeft ? right.id : left.id)
-      return { risk: data.riskSeverity, chambers: orientChambers(data.chambers, !machineOnLeft), rows: data.items.map(item => ({ ...item, leftVersionId: machineOnLeft ? item.actualVersionId : item.expectedVersionId, rightVersionId: machineOnLeft ? item.expectedVersionId : item.actualVersionId, left: machineOnLeft ? item.actualVersionNumber : item.expectedVersionNumber, right: machineOnLeft ? item.expectedVersionNumber : item.actualVersionNumber, matched: item.status === 'Matched' })) }
+      return withTrees({ risk: data.riskSeverity, chambers: orientChambers(data.chambers, !machineOnLeft), rows: data.items.map(item => ({ ...item, leftVersionId: machineOnLeft ? item.actualVersionId : item.expectedVersionId, rightVersionId: machineOnLeft ? item.expectedVersionId : item.actualVersionId, left: machineOnLeft ? item.actualVersionNumber : item.expectedVersionNumber, right: machineOnLeft ? item.expectedVersionNumber : item.actualVersionNumber, matched: item.status === 'Matched' })) })
     },
   })
   const selectSide = (side: Side, setSide: (side: Side) => void, label: string) => <div className="compare-side"><div className="compare-side-heading"><strong>{label}</strong><div className="compare-kind" role="group" aria-label={label + '类型'}>{(['Machine', 'Baseline'] as const).map(kind => <button type="button" aria-pressed={side.kind === kind} key={kind} onClick={() => { if (kind === side.kind) return; setSide({ kind, id: '' }); const other = label === '左侧' ? right : left; if (kind === 'Machine' && other.kind === 'Baseline' && other.id && !baselines.data?.some(baseline => baseline.id === other.id && baseline.state === 'Released')) (label === '左侧' ? setRight : setLeft)({ ...other, id: '' }) }}>{kind === 'Machine' ? '机台' : '基线'}</button>)}</div></div><select aria-label={label + '配置'} value={side.id} onChange={event => setSide({ ...side, id: event.target.value })}><option value="">选择{side.kind === 'Machine' ? '机台' : '基线'}</option>{side.kind === 'Machine' ? projectMachines.map(machine => <option key={machine.id} value={machine.id}>{machine.name} · {machine.serialNumber}</option>) : baselines.data?.filter(baseline => left.kind === 'Machine' || right.kind === 'Machine' ? baseline.state === 'Released' : true).map(baseline => <option key={baseline.id} value={baseline.id}>{baseline.code} · 修订 {baseline.revisionNo}{baseline.state === 'Draft' ? ' · 草稿' : baseline.state === 'Deprecated' ? ' · 已撤回' : ''}</option>)}</select></div>
-  const rows = comparison.data?.rows.filter(row => !onlyDifferences || !row.matched) ?? []
+  const rows = comparison.data?.rows ?? []
   const chamber = comparison.data?.chambers.find(item => item.number === scope)
-  const chamberRows = chamber?.items.filter(item => !onlyDifferences || item.status !== 'Matched') ?? []
+  const chamberRows = chamber?.items ?? []
+  const currentTree = components.map(component => ({ id: component.id, name: component.name, parentId: component.parentComponentId, sortOrder: component.sortOrder }))
+  const leftNodes = comparison.data?.leftTree ?? currentTree
+  const rightNodes = comparison.data?.rightTree ?? currentTree
+  const primary = left.kind === 'Baseline' ? leftNodes : right.kind === 'Baseline' ? rightNodes : leftNodes
+  const secondary = primary === leftNodes ? rightNodes : leftNodes
+  const treeProps = { primary, secondary, leftNodes, rightNodes, onlyDifferences }
+  const treeKey = `${left.kind}:${left.id}:${right.kind}:${right.id}:${scope}:${onlyDifferences}`
+  const structureCount = (chamber ? chamberRows : rows).filter(row => hierarchyChanged(leftNodes, rightNodes, row.componentId)).length
   const scopeLabel = left.kind === 'Baseline' && right.kind === 'Baseline' ? '基线' : '整机'
   const nameOf = (side: Side) => side.kind === 'Machine' ? projectMachines.find(machine => machine.id === side.id)?.name : baselines.data?.find(baseline => baseline.id === side.id)?.code
   const leftName = nameOf(left); const rightName = nameOf(right)
@@ -79,8 +102,9 @@ export function ConfigurationCompare({ projectId, components, onOpenPatches }: {
   if (!projectId) return <section className="configuration-compare"><p className="empty-state">请先在顶部选择项目。</p></section>
   return <section className="configuration-compare">
     <div className="compare-selectors">{selectSide(left, setLeft, '左侧')}<button className="compare-swap" type="button" title="交换左右配置" aria-label="交换左右配置" onClick={() => { setLeft(right); setRight(left) }}><SwapOutlined /></button>{selectSide(right, setRight, '右侧')}</div>
-    <div className="compare-results-heading"><div><strong>配置差异</strong>{ready && <span>{chamber ? `${chamber.items.length} 个组件 · ${chamber.items.filter(item => item.status !== 'Matched' && item.status !== 'Unknown').length} 项差异 · ${chamber.items.filter(item => item.status === 'Unknown').length} 项待确认` : `${comparison.data!.rows.length} 个组件 · ${comparison.data!.rows.filter(row => !row.matched).length} 项差异`}</span>}</div><label><input type="checkbox" checked={onlyDifferences} onChange={event => setOnlyDifferences(event.target.checked)} />只看差异</label></div>
+    <div className="compare-results-heading"><div><strong>配置差异</strong>{ready && <span>{chamber ? `${chamber.items.length} 个组件 · ${chamber.items.filter(item => item.status !== 'Matched' && item.status !== 'Unknown').length} 项版本差异 · ${chamber.items.filter(item => item.status === 'Unknown').length} 项待确认` : `${comparison.data!.rows.length} 个组件 · ${comparison.data!.rows.filter(row => !row.matched).length} 项版本差异`}</span>}</div><label><input type="checkbox" checked={onlyDifferences} onChange={event => setOnlyDifferences(event.target.checked)} />只看差异</label></div>
     {ready && <>
+      <div className="comparison-structure-summary"><span>{left.kind === 'Baseline' ? '左侧基线层级' : right.kind === 'Baseline' ? '右侧基线层级' : '项目组件层级'}</span>{structureCount > 0 && <span>{structureCount} 项层级或名称不同</span>}</div>
       <div className="compare-scope-tabs" role="tablist" aria-label="配置范围" onKeyDown={event => {
         if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
         const tabs = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'))
@@ -95,11 +119,15 @@ export function ConfigurationCompare({ projectId, components, onOpenPatches }: {
       </div>
       {!chamber ? <div role="tabpanel" id="compare-whole-panel" aria-label={`${scopeLabel}配置对比`}>
         <div className="compare-summary"><span>版本匹配：{comparison.data!.rows.length === 0 ? '无可比配置' : comparison.data!.rows.every(row => row.matched) ? '匹配' : '不匹配'}</span><span className={comparison.data!.risk === 'Critical' ? 'compare-critical' : ''}>风险：{comparison.data!.risk === null ? '此对比不评估风险' : riskNames[comparison.data!.risk] ?? '未知'}</span></div>
-        <div className="comparison-table-wrap"><table className="comparison-table"><thead><tr><th scope="col">组件</th><th scope="col">左侧版本<small>{leftName}</small></th><th scope="col">右侧版本<small>{rightName}</small></th><th scope="col">结果</th></tr></thead><tbody>{rows.map(row => <tr key={row.componentId} className={row.matched ? '' : 'changed'}><th scope="row">{row.componentName}</th><td>{row.left ?? '未配置'}{patchBadge(row.leftVersionId, row.left, left)}</td><td>{row.right ?? '未配置'}{patchBadge(row.rightVersionId, row.right, right)}</td><td>{row.matched ? '相同' : row.left === null ? '仅右侧' : row.right === null ? '仅左侧' : '版本不同'}</td></tr>)}</tbody></table>{rows.length === 0 && <p className="empty-state">{onlyDifferences ? '没有配置差异。' : '暂无可对比的组件配置。'}</p>}</div>
+        <ComparisonTreeTable key={treeKey} {...treeProps} rows={rows} className="comparison-table" isDifferent={row => !row.matched} rowClass={row => row.matched ? '' : 'changed'} emptyText={onlyDifferences ? '没有配置差异。' : '暂无可对比的组件配置。'}
+          header={<tr><th scope="col">组件</th><th scope="col">左侧版本<small>{leftName}</small></th><th scope="col">右侧版本<small>{rightName}</small></th><th scope="col">结果</th></tr>}
+          renderCells={row => <><td>{row.left ?? '未配置'}{patchBadge(row.leftVersionId, row.left, left)}</td><td>{row.right ?? '未配置'}{patchBadge(row.rightVersionId, row.right, right)}</td><td>{row.matched ? '相同' : row.left === null ? '仅右侧' : row.right === null ? '仅左侧' : '版本不同'}{hierarchyChanged(leftNodes, rightNodes, row.componentId) && <small className="compare-source">层级或名称不同</small>}</td></>} />
       </div> : <div role="tabpanel" id={`compare-pm-${chamber.number}`} aria-label={`PM${chamber.number} 配置对比`}>
         <div className="chamber-comparison-summary"><strong>PM{chamber.number}</strong><span>版本匹配：{matchNames[chamber.matchStatus]}</span><span className={chamber.riskSeverity === 'Critical' ? 'compare-critical' : ''}>风险：{riskNames[chamber.riskSeverity] ?? '未知'}</span></div>
-        <table className="chamber-comparison-table"><thead><tr><th scope="col">组件</th><th scope="col">左侧版本<small>{leftName} · {chamber.leftInstalled === null ? '基线快照' : chamber.leftInstalled ? `PM${chamber.number} 已安装` : '未安装'}</small></th><th scope="col">右侧版本<small>{rightName} · {chamber.rightInstalled === null ? '基线快照' : chamber.rightInstalled ? `PM${chamber.number} 已安装` : '未安装'}</small></th><th scope="col">结果</th></tr></thead><tbody>{chamberRows.map(item => <tr key={item.componentId} className={item.status === 'Matched' ? '' : item.status === 'Unknown' ? 'unconfirmed' : 'changed'}><th scope="row">{item.componentName}</th><td><ChamberValue version={item.leftVersionNumber} state={item.leftState} source={item.leftSource} />{patchBadge(item.leftVersionId, item.leftVersionNumber, left)}</td><td><ChamberValue version={item.rightVersionNumber} state={item.rightState} source={item.rightSource} />{patchBadge(item.rightVersionId, item.rightVersionNumber, right)}</td><td>{chamberResult(item)}</td></tr>)}</tbody></table>
-        {chamberRows.length === 0 && <p className="empty-state">{chamber.items.length ? '此腔室没有配置差异。' : chamber.leftInstalled === false || chamber.rightInstalled === false ? '两侧腔室安装情况不同，暂无组件配置记录。' : '尚无组件配置记录，无法确认版本是否匹配。'}</p>}
+        <ComparisonTreeTable key={treeKey} {...treeProps} rows={chamberRows} className="chamber-comparison-table" isDifferent={item => item.status !== 'Matched'} rowClass={item => item.status === 'Matched' ? '' : item.status === 'Unknown' ? 'unconfirmed' : 'changed'} emptyText={onlyDifferences && chamber.items.length ? '此腔室没有配置差异。' : chamber.leftInstalled === false || chamber.rightInstalled === false ? '两侧腔室安装情况不同，暂无组件配置记录。' : '尚无组件配置记录，无法确认版本是否匹配。'}
+          header={<tr><th scope="col">组件</th><th scope="col">左侧版本<small>{leftName} · {chamber.leftInstalled === null ? '基线快照' : chamber.leftInstalled ? `PM${chamber.number} 已安装` : '未安装'}</small></th><th scope="col">右侧版本<small>{rightName} · {chamber.rightInstalled === null ? '基线快照' : chamber.rightInstalled ? `PM${chamber.number} 已安装` : '未安装'}</small></th><th scope="col">结果</th></tr>}
+          renderCells={item => <><td><ChamberValue version={item.leftVersionNumber} state={item.leftState} source={item.leftSource} />{patchBadge(item.leftVersionId, item.leftVersionNumber, left)}</td><td><ChamberValue version={item.rightVersionNumber} state={item.rightState} source={item.rightSource} />{patchBadge(item.rightVersionId, item.rightVersionNumber, right)}</td><td>{chamberResult(item)}{hierarchyChanged(leftNodes, rightNodes, item.componentId) && <small className="compare-source">层级或名称不同</small>}</td></>} />
+
       </div>}
     </>}
     {!left.id || !right.id ? <p className="empty-state">选择左右配置后显示对比结果。</p> : same ? <p className="empty-state">请选择两个不同的配置。</p> : comparison.isLoading ? <p className="empty-state">正在对比配置。</p> : comparison.isError ? <p className="error-strip" role="alert">{comparison.error.message}</p> : null}

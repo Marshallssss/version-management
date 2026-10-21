@@ -1,0 +1,21 @@
+.comparison-tree-table .comparison-component-column { width: 36%; }
+.comparison-tree-table .comparison-result-column { width: 16%; }
+.comparison-tree-table .comparison-tree-label { display: flex; align-items: flex-start; gap: 6px; padding-left: calc(var(--tree-depth) * 18px); }
+.comparison-tree-label > div { min-width: 0; overflow-wrap: anywhere; }
+.configuration-compare .comparison-tree-toggle { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; flex: 0 0 24px; min-height: 0; margin: 0; padding: 0; border: 0; border-radius: 4px; color: var(--ui-muted); background: transparent; font-size: 12px; cursor: pointer; }
+.configuration-compare .comparison-tree-toggle:hover { background: var(--ui-primary-soft); color: var(--ui-primary); }
+.comparison-tree-toggle:focus-visible { outline: 2px solid var(--ui-primary); outline-offset: 2px; }
+.comparison-tree-leaf { display: block; flex: 0 0 24px; width: 24px; height: 20px; border-left: 1px solid var(--ui-line); border-bottom: 1px solid var(--ui-line); transform: translateY(-7px); }
+.comparison-tree-root .comparison-tree-leaf { border: 0; }
+.configuration-compare .comparison-tree-root { background: var(--ui-surface-muted); border-top: 1px solid var(--ui-line); }
+.configuration-compare .comparison-tree-table :is(th, td) { padding-top: 11px; padding-bottom: 11px; }
+.comparison-tree-context-label, .comparison-tree-path { display: block; color: var(--ui-muted); font-size: 12px; font-weight: 400; }
+.comparison-tree-path { margin-top: 4px; }
+.comparison-tree-row.hierarchy-changed .comparison-tree-path { color: var(--ui-lab); }
+.comparison-structure-summary { display: flex; flex-wrap: wrap; gap: 12px 24px; padding-bottom: 12px; color: var(--ui-muted); font-size: 12px; }
+@media (max-width: 600px) {
+  .comparison-tree-table .comparison-component-column { width: 40%; }
+  .comparison-tree-table .comparison-result-column { width: 17%; }
+  .comparison-tree-table .comparison-tree-label { gap: 3px; padding-left: calc(var(--tree-depth) * 8px); }
+  .configuration-compare .comparison-tree-toggle, .comparison-tree-leaf { width: 18px; flex-basis: 18px; }
+}
