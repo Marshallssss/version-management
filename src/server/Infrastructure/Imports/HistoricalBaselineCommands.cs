@@ -21,14 +21,18 @@ public static class HistoricalBaselineCommands
         ? Hash(new { row.RecordDate, row.Reason, values = row.Values.OrderBy(x => x.Key) })
         : Hash(new { row.RecordType, row.RecordDate, row.Reason, row.BaselineName, row.ReleasedAt, values = row.Values.OrderBy(x => x.Key) });
 
-    public static async Task<List<HistoricalPreviewRecord>> ValidateAsync(ConfigHubDbContext db, Guid projectId, Guid templateId,
+    public static async Task<List<HistoricalPreviewRecord>> ValidateAsync(ConfigHubDbContext db, Guid projectId, Guid? templateId,
         IReadOnlyList<MatrixComponent> template, IReadOnlyList<MatrixInputRow> rows, CancellationToken ct)
     {
         var components = await db.ConfigurationComponents.Where(x => x.ProjectId == projectId).OrderBy(x => x.Id).ToListAsync(ct);
         var ids = components.Select(x => x.Id).ToArray();
         var versions = await db.ComponentVersions.Where(x => ids.Contains(x.ComponentId)).ToListAsync(ct);
-        var existing = await db.MatrixHistoricalRecords.Where(x => x.TemplateId == templateId).ToDictionaryAsync(x => x.RowKey, ct);
-        var testingKeys = (await db.MatrixImportCombinations.Where(x => x.TemplateId == templateId).Select(x => x.RowKey).ToListAsync(ct)).ToHashSet();
+        var existing = templateId is Guid historyTemplateId
+            ? await db.MatrixHistoricalRecords.Where(x => x.TemplateId == historyTemplateId).ToDictionaryAsync(x => x.RowKey, ct)
+            : new Dictionary<string, MatrixHistoricalRecord>();
+        var testingKeys = templateId is Guid testingTemplateId
+            ? (await db.MatrixImportCombinations.Where(x => x.TemplateId == testingTemplateId).Select(x => x.RowKey).ToListAsync(ct)).ToHashSet()
+            : new HashSet<string>();
         var names = (await db.ConfigurationBaselines.Where(x => x.ProjectId == projectId).Select(x => x.NormalizedBaselineCode).ToListAsync(ct)).ToHashSet();
         var result = new List<HistoricalPreviewRecord>();
         foreach (var row in rows.Where(x => x.RecordType == "HistoricalBaseline"))
@@ -43,7 +47,9 @@ public static class HistoricalBaselineCommands
             }
             if (components.Count != template.Count || components.Any(c => !template.Any(t => t.ComponentId == c.Id && t.ParentComponentId == c.ParentComponentId
                 && t.ComponentName == c.Name && t.SortOrder == c.SortOrder && t.IsCategory == (!versions.Any(v => v.ComponentId == c.Id) && components.Any(child => child.ParentComponentId == c.Id)))))
-                throw new InvalidDataException($"{position}组件树已变化，请重新生成模板，历史基线必须校验完整组件结构。");
+                throw new InvalidDataException(templateId is null
+                    ? "组件树已变化，请重新打开历史基线补录并预览，未录入任何历史基线。"
+                    : $"{position}组件树已变化，请重新生成模板，历史基线必须校验完整组件结构。");
             var name = row.BaselineName?.Trim() ?? "";
             if (name.Length is 0 or > 100 || name.Any(char.IsControl)) throw new InvalidDataException($"{position}基线名称必填且最多 100 字。");
             if (!names.Add(name.ToUpperInvariant())) throw new InvalidDataException($"{position}基线名称「{name}」已存在或在文件内重复。");
@@ -74,7 +80,7 @@ public static class HistoricalBaselineCommands
         return time;
     }
 
-    public static async Task<Guid> ExecuteAsync(ConfigHubDbContext db, Guid userId, Guid projectId, Guid templateId,
+    public static async Task<Guid> ExecuteAsync(ConfigHubDbContext db, Guid userId, Guid projectId, Guid? templateId,
         MatrixInputRow row, HistoricalPreviewRecord record, VersionWriteContext actor, CancellationToken ct)
     {
         if (db.Database.CurrentTransaction is null) throw new InvalidOperationException("历史基线命令必须在事务内执行。");
@@ -101,8 +107,9 @@ public static class HistoricalBaselineCommands
         await db.SaveChangesAsync(ct);
         baseline.State = BaselineState.Released; baseline.ReleasedAt = record.ReleasedAt; baseline.ReleasedBy = actor.Actor; baseline.ReleaseReason = record.Reason;
         db.BaselineLifecycleTransitions.Add(new() { Id = Guid.NewGuid(), ConfigurationBaselineId = baseline.Id, FromState = "HistoricalRecord", ToState = "Released", Actor = actor.Actor, Reason = record.Reason, OccurredAt = now });
-        db.MatrixHistoricalRecords.Add(new() { Id = Guid.NewGuid(), TemplateId = templateId, RowKey = row.RowKey, ContentHash = RowHash(row), BaselineId = baseline.Id, RecordedAt = now });
-        MatrixImportService.Audit(db, actor, "HistoricalBaselineImported", baseline.Id, new { projectId, templateId, row.RowKey, publishedAt = record.ReleasedAt, record.Reason, record.Items });
+        if (templateId is Guid importedTemplateId)
+            db.MatrixHistoricalRecords.Add(new() { Id = Guid.NewGuid(), TemplateId = importedTemplateId, RowKey = row.RowKey, ContentHash = RowHash(row), BaselineId = baseline.Id, RecordedAt = now });
+        MatrixImportService.Audit(db, actor, "HistoricalBaselineImported", baseline.Id, new { projectId, templateId, row.RowKey, publishedAt = record.ReleasedAt, record.Reason, record.Items, source = templateId is null ? "ManualUI" : "Excel" });
         await db.SaveChangesAsync(ct);
         return baseline.Id;
     }

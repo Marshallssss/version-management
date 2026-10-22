@@ -1,5 +1,6 @@
 import { Modal } from 'antd'
 import { BaselineHistoryChanges } from './BaselineHistoryChanges'
+import { ManualHistoricalBaselineDialog } from './ManualHistoricalBaselineDialog'
 import { EditOutlined, FilterOutlined, PlusOutlined, CloseOutlined, HistoryOutlined } from '@ant-design/icons'
 import { getBaselineHistoryIndex, snapshotVersionKey } from './baseline-history-api'
 import './baseline-history.css'
@@ -18,6 +19,7 @@ export function ProjectBaselineHistory({ canWrite = true, detail, isAdmin, isSup
   const queryClient = useQueryClient()
   const maintenanceCapabilities = useQuery({ queryKey: ['maintenance-capabilities'], queryFn: getMaintenanceCapabilities })
   const [renameOpen, setRenameOpen] = useState(false)
+  const [historicalEntryOpen, setHistoricalEntryOpen] = useState(false)
   const [newName, setNewName] = useState('')
   const [renameReason, setRenameReason] = useState('')
   const [selectedBaselineId, setSelectedBaselineId] = useState('')
@@ -75,7 +77,7 @@ export function ProjectBaselineHistory({ canWrite = true, detail, isAdmin, isSup
     setSelectedBaselineId('')
   }
   useEffect(() => { if (!selectedBaselineId && visibleBaselines.length) setSelectedBaselineId(visibleBaselines[0].id) }, [selectedBaselineId, visibleBaselines])
-  useEffect(() => { resetFilters(); setSortDirection('newest') }, [detail.project.id])
+  useEffect(() => { resetFilters(); setSortDirection('newest'); setHistoricalEntryOpen(false) }, [detail.project.id])
   const currentStandard = useQuery({ queryKey: ['project-standard', detail.project.id], queryFn: () => getProjectStandard(detail.project.id) })
   const baselineDetail = useQuery({ queryKey: ['baseline-detail', selectedBaselineId], queryFn: () => getBaselineDetail(selectedBaselineId), enabled: selectedBaselineId !== '' })
   const standardDetail = useQuery({ queryKey: ['baseline-detail', currentStandard.data?.baselineId], queryFn: () => getBaselineDetail(currentStandard.data!.baselineId), enabled: currentStandard.data != null })
@@ -145,7 +147,8 @@ export function ProjectBaselineHistory({ canWrite = true, detail, isAdmin, isSup
     {renderTestingBranch(component.id, depth + 1)}
   </div>)
   return <section className="project-baseline-history" id="project-baseline-history">
-    <div className="baseline-history-heading"><div><span className="section-index">整体版本</span><h2><HistoryOutlined aria-hidden /> 基线历史</h2></div>{canWrite && <button className="primary-action" type="button" onClick={openComposer}><PlusOutlined aria-hidden /> 从测试版本创建基线</button>}</div>
+    <div className="baseline-history-heading"><div><span className="section-index">整体版本</span><h2><HistoryOutlined aria-hidden /> 基线历史</h2></div><div className="toolbar-actions">{isAdmin && <button type="button" onClick={() => setHistoricalEntryOpen(true)}><HistoryOutlined aria-hidden /> 补录历史基线</button>}{canWrite && <button className="primary-action" type="button" onClick={openComposer}><PlusOutlined aria-hidden /> 从测试版本创建基线</button>}</div></div>
+    {isAdmin && historicalEntryOpen && <ManualHistoricalBaselineDialog detail={detail} onClose={() => setHistoricalEntryOpen(false)} onImported={async baselineId => { await refresh(); resetFilters(); setSelectedBaselineId(baselineId); setHistoricalEntryOpen(false); onSuccess('历史基线已补录，发布时间和缺失版本已补全，现有测试版本及机台配置保持不变。') }} />}
     {canWrite && composerOpen && <section className="baseline-composer" id="baseline-composer"><div><span className="section-index">基线选项</span><h3>选择测试版本</h3><p>其余组件默认沿用当前项目标准；可在下方手动修正。</p></div><div className="lab-root-grid composer-tree">{renderTestingBranch(null)}</div><details className="composer-overrides"><summary>手动修正其他组件版本</summary><div>{detail.components.map(component => { const released = component.versions.filter(version => version.maturity === 'Released').sort((left, right) => right.sequenceNo - left.sequenceNo); return released.length && !testingSelection.some(id => component.versions.some(version => version.id === id)) ? <label key={component.id}>{component.name}<select value={composerOverrides[component.id] ?? standardDetail.data?.items.find(item => item.componentId === component.id)?.versionId ?? released[0].id} onChange={event => setComposerOverrides(current => ({ ...current, [component.id]: event.target.value }))}>{released.map(version => <option key={version.id} value={version.id}>{version.versionNumber}</option>)}</select></label> : null })}</div></details><form hidden={!canWrite} className="compact-form" onSubmit={event => { event.preventDefault(); createFromTesting.mutate() }}><label>基线名称<input value={baselineCode} maxLength={100} onChange={event => setBaselineCode(event.target.value)} required /></label><label className="wide-field">创建原因<input value={baselineReason} maxLength={500} onChange={event => setBaselineReason(event.target.value)} required /></label><div className="form-actions"><button type="button" onClick={() => setComposerOpen(false)}>取消</button><button className="primary-action" type="submit" disabled={testingSelection.length === 0 || createFromTesting.isPending || currentStandard.isPending || currentStandard.isError || !!currentStandard.data && (standardDetail.isPending || standardDetail.isError)}>{createFromTesting.isPending ? '正在生成' : `发布 ${testingSelection.length} 个测试版本并创建基线`}</button></div>{createFromTesting.isError && <p className="error-strip wide-field">{createFromTesting.error.message}</p>}</form></section>}
     <section className="baseline-history-filters" aria-label="基线筛选">
       <div className="baseline-filter-toolbar">

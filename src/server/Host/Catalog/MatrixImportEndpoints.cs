@@ -23,6 +23,10 @@ public static partial class CatalogEndpoints
         group.MapPost("/history/{batchId:guid}/commit", CommitHistoricalWorkbookAsync).RequireAuthorization("Admin");
         group.MapPut("/source", SaveMatrixSourceAsync).RequireAuthorization("Admin");
         group.MapPost("/source/scan", ScanMatrixSourceAsync).RequireAuthorization("Admin");
+
+        var manualHistory = endpoints.MapGroup("/api/v1/projects/{projectId:guid}/historical-baselines").RequireAuthorization("Admin");
+        manualHistory.MapPost("/preview", PreviewManualHistoricalBaselineAsync);
+        manualHistory.MapPost("/{batchId:guid}/commit", CommitManualHistoricalBaselineAsync);
     }
 
     private static Guid MatrixUser(HttpContext context) => Guid.Parse(context.User.FindFirstValue(ClaimTypes.NameIdentifier)!);

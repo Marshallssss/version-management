@@ -2,6 +2,19 @@
 
 ## Final Architecture and Product Plan
 
+### 持续执行规则（2026-10-22 更新）
+
+- 后续已获批准的任务按“实施 → 验收 → 同步 PLAN → 提交并推送”执行。若因额度上限中断，读取实际额度刷新时刻，更新同一续跑任务到刷新后两分钟继续；不购买额度或使用重置信用。任务完成后暂停续跑，避免重复修改；无变化不通知，仅在完成、失败或需要用户决定时通知。
+
+### 2026-10-22 界面补录历史基线（验收完成）
+
+- 用户要求无需 Excel，直接输入过去已发布的组件版本关系，并统一使用一个整体发布时间。基线页增加管理员“补录历史基线”，按完整组件树填写/选择版本，特殊缺项显式“当时未配置”，填写名称、北京时间及原因后预览确认。
+- 复用历史基线/版本领域命令；新增缺失版本为 Released，CreatedAt 取整体历史发布时间，基线 ReleasedAt 使用同一时间；已有版本状态/创建时间不变，快照标记历史已发布，真实审计/录入时间为现在。不产生 Lab 或机台事实、不改变当前 Testing、项目标准和机台目标。
+- 独立 JSON 预览/提交入口，不伪造 Excel 模板；后端完整项目/组件校验、Admin 重验、预览指纹、事务及幂等，提交时重验变化。已实现直接填写/选择版本的树形弹窗和保存后历史定位；README 同步使用方式及时间语义。
+- 新增 `manual-historical-baseline-acceptance.cjs` 真实 API/界面验收通过：统一历史时间、新版本补录、已有状态保留、机台/Lab/标准隔离、管理员权限及撤权、并发幂等、过期预览、返回修改后重新确认。修正验收对列表名称字段的断言，阻断版本在快照中保留版本号及风险说明。
+- 窄屏组件分行展示，统一按钮样式，修复原生输入样式污染 AutoComplete 的双边框并加入回归断言。1440px/390px 填写、预览、保存结果及滚动后的组件/操作区域共 14 张截图已检查（`artifacts/manual-historical-baseline`）；独立只读审查未发现阻断问题。
+- 最终回归通过：手工历史补录、真实历史 XLSX 导入、compare-hierarchy、baseline-history-filter、history-patches，以及 catalog、background-job、Windows operations preflight（13 脚本）、web compatibility。前端 build 无警告；Release build 0 warning / 0 error；真实 Migration 已最新，EF pending model changes 无变化。仅接口/界面改动，无新增 Migration，Host/Worker 已运行；PostgreSQL 17 / Production Integration Pending 仍保持原验收边界。
+
 ### 2026-10-21 关联页面层级统一（验收完成）
 
 - 用户已批准整改此前列出的三处：机台目标/标准对比、时间点实际配置及历史对比、基线历史变更。复用树形表格，保留差异祖先、排序、折叠和补丁入口，不改变配置事实和权限。
