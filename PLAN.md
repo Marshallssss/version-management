@@ -2,6 +2,12 @@
 
 ## Final Architecture and Product Plan
 
+### 2026-11-13 本地环境恢复
+
+- 已找到原环境位于 `%LOCALAPPDATA%/Packages/OpenAI.Codex_2p2nqsd0c76g0/LocalCache/Local/ConfigHub`，其中 `postgres-data` 与 `PostgreSQL17` 均完整，配置也仍在。此前仅检查普通 LocalAppData 路径造成误判，并非数据库丢失，也不依赖 Docker。
+- 保留原数据目录，使用原 PostgreSQL 17 启动数据库；仅在普通 `%LOCALAPPDATA%/ConfigHub/appsettings.local.json` 不存在时复制已有配置，未重建数据库、未修改密码、未覆盖原配置。Host/Worker 已启动，5080 health 为 Healthy，管理员登录成功且读取到 435 个项目；真实 Migration 检查数据库已最新。
+- 原 PDF 页面对接验收的环境阻塞已解除，续验可使用恢复后的普通 LocalAppData 配置继续。数据库仍使用原隔离目录，不要删除该目录；本次是恢复运行，未新增开机自启服务。
+
 ### 2026-11-11 基线 PDF 导出
 
 - 自动续验：真实 PDF 共 5 页，已使用 Poppler 逐页渲染检查，中文、重复表头、行分页及末页完整；Release build 0 warning / 0 error，EF pending model changes 无变化。实际 Migration/登录页面回归暂受本机环境阻塞：127.0.0.1:5432 拒绝连接，无 PostgreSQL Windows 服务，Docker 引擎未运行，原 LOCALAPPDATA/ConfigHub 配置也不存在。没有创建替代数据库或覆盖配置，后续需恢复本地运行环境再继续，未宣称完整验收。
