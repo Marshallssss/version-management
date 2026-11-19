@@ -19,7 +19,7 @@ public static partial class CatalogEndpoints
             .SingleOrDefaultAsync(cancellationToken);
         if (version is null) return Results.NotFound();
 
-        // This preview mirrors every deletion blocker, including historical references hidden from active machine lists.
+        // History is retained; only baselines and current configurations block removal.
         var baselines = db.ConfigurationBaselines.AsNoTracking()
             .Where(item => item.TopComponentVersionId == versionId || db.BaselineItems.Any(snapshot =>
                 snapshot.ConfigurationBaselineId == item.Id && snapshot.ComponentVersionId == versionId))
@@ -46,6 +46,13 @@ public static partial class CatalogEndpoints
             select new OperationImpactItem(fact.Id, machine.Name,
                 "PM" + chamber.Number + (chamber.Installed ? " 特例历史" : " 特例历史（腔室已移除）"),
                 machine.Id, null, machine.DeletedAt != null);
+        var currentChambers = from fact in db.MachineChamberVersions.AsNoTracking()
+            join chamber in db.MachineChambers.AsNoTracking() on fact.ChamberId equals chamber.Id
+            join machine in db.Machines.IgnoreQueryFilters().AsNoTracking() on chamber.MachineId equals machine.Id
+            where fact.VersionId == versionId && chamber.Installed
+                && !db.MachineChamberVersions.Any(later => later.ChamberId == fact.ChamberId && later.ComponentId == fact.ComponentId && later.Sequence > fact.Sequence)
+            orderby machine.Name, chamber.Number
+            select new OperationImpactItem(fact.Id, machine.Name, "PM" + chamber.Number + " 当前特例", machine.Id, null, machine.DeletedAt != null);
         var exposures = db.VersionExposureSnapshots.AsNoTracking().Where(item => item.ComponentVersionId == versionId)
             .OrderByDescending(item => item.BlockedAt).ThenBy(item => item.Id)
             .Select(item => new OperationImpactItem(item.Id, "风险影响快照", item.Reason, null, null, false));
@@ -71,19 +78,20 @@ public static partial class CatalogEndpoints
         [
             await BuildOperationImpactGroupAsync("baselines", "引用基线", baselines, cancellationToken),
             await BuildOperationImpactGroupAsync("current-machines", "整机当前配置", currentMachines, cancellationToken),
-            await BuildOperationImpactGroupAsync("machine-history", "整机配置历史", machineHistory, cancellationToken),
-            await BuildOperationImpactGroupAsync("chamber-history", "PM 特例历史", chamberHistory, cancellationToken),
-            await BuildOperationImpactGroupAsync("exposure-snapshots", "风险影响快照", exposures, cancellationToken),
+            await BuildOperationImpactGroupAsync("current-chambers", "腔室当前特例（阻止删除）", currentChambers, cancellationToken),
+            await BuildOperationImpactGroupAsync("machine-history", "整机配置历史（保留，不阻止删除）", machineHistory, cancellationToken),
+            await BuildOperationImpactGroupAsync("chamber-history", "PM 特例历史（保留）", chamberHistory, cancellationToken),
+            await BuildOperationImpactGroupAsync("exposure-snapshots", "风险影响快照（保留，不阻止删除）", exposures, cancellationToken),
             await BuildOperationImpactGroupAsync("matrix-templates", "Excel 模板参考（保留快照，不阻止删除）", templates, cancellationToken),
             await BuildOperationImpactGroupAsync("matrix-combinations", "Excel 测试组合（保留快照，不阻止删除）", combinations, cancellationToken),
-            await BuildOperationImpactGroupAsync("laboratory-validations", "Lab 验证记录", laboratory, cancellationToken)
+            await BuildOperationImpactGroupAsync("laboratory-validations", "Lab 验证记录（保留，不阻止删除）", laboratory, cancellationToken)
         ];
         var cleanupCounts = new VersionCleanupCounts(
             await db.VersionPatches.CountAsync(item => item.ComponentVersionId == versionId, cancellationToken),
             await db.VersionLifecycleTransitions.CountAsync(item => item.ComponentVersionId == versionId, cancellationToken),
             await db.VersionRecommendations.CountAsync(item => item.ComponentVersionId == versionId, cancellationToken));
         return Results.Ok(new VersionOperationImpact(version.Id, version.VersionNumber, version.ComponentId,
-            version.ComponentName, groups.Where(group => group.Kind is not ("matrix-templates" or "matrix-combinations")).All(group => group.Total == 0),
+            version.ComponentName, !await HasProtectedVersionUsageAsync(db, versionId, cancellationToken),
             configuration.GetValue<bool>("ConfigHub:TestDataMaintenanceEnabled"), cleanupCounts, groups));
     }
 

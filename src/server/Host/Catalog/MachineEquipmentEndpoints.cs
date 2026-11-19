@@ -136,7 +136,7 @@ public static partial class CatalogEndpoints
         var chambers = await db.MachineChambers.AsNoTracking().Where(x => x.MachineId == machineId).OrderBy(x => x.Number).ToListAsync(ct);
         var chamberIds = chambers.Select(x => x.Id).ToArray();
         var facts = await db.MachineChamberVersions.AsNoTracking().Where(x => chamberIds.Contains(x.ChamberId)).OrderByDescending(x => x.Sequence).ToListAsync(ct);
-        var versions = await db.ComponentVersions.AsNoTracking().Where(x => db.ConfigurationComponents.Any(c => c.Id == x.ComponentId && c.ProjectId == machine.ProjectId)).ToDictionaryAsync(x => x.Id, ct);
+        var versions = await db.ComponentVersions.IgnoreQueryFilters().AsNoTracking().Where(x => db.ConfigurationComponents.Any(c => c.Id == x.ComponentId && c.ProjectId == machine.ProjectId)).ToDictionaryAsync(x => x.Id, ct);
         var components = await db.ConfigurationComponents.AsNoTracking().Where(x => x.ProjectId == machine.ProjectId).ToDictionaryAsync(x => x.Id, ct);
         var target = await db.MachineTargetAssignments.AsNoTracking().SingleOrDefaultAsync(x => x.MachineId == machineId && x.ValidTo == null, ct);
         var items = target is null ? [] : await db.BaselineItems.AsNoTracking().Where(x => x.ConfigurationBaselineId == target.ConfigurationBaselineId).ToListAsync(ct);

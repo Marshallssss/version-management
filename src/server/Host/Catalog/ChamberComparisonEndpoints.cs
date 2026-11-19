@@ -87,7 +87,7 @@ public static partial class CatalogEndpoints
         ConfigHubDbContext db, IEnumerable<ChamberConfigurationValue> values, CancellationToken ct)
     {
         var versionIds = values.Where(value => value.VersionId is not null).Select(value => value.VersionId!.Value).Distinct().ToArray();
-        return await db.ComponentVersions.AsNoTracking().Where(version => versionIds.Contains(version.Id))
+        return await db.ComponentVersions.IgnoreQueryFilters().AsNoTracking().Where(version => versionIds.Contains(version.Id))
             .ToDictionaryAsync(version => version.Id, version => new ChamberComparisonVersion(version.VersionNumber, version.Safety), ct);
     }
 

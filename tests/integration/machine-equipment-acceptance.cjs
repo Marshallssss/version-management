@@ -59,7 +59,8 @@ async function main() {
     const special = (await get(equipmentUrl)).chambers.find(x => x.number === 6).overrides[0]
     assert.equal(special.match, 'Matched'); assert.equal(special.risk, 'Critical')
     assert.deepEqual(await get(`/api/v1/machines/${machine.id}/configuration`), wholeBefore)
-    assert.equal((await call(`/api/v1/component-versions/${v2.id}`, { reason: '保护特例历史' }, 'DELETE')).status(), 409)
+    assert.equal((await call(`/api/v1/component-versions/${v2.id}`, { reason: '移除仅有特例历史的版本，保留历史' }, 'DELETE')).status(), 200)
+    assert.equal((await get(`/api/v1/component-versions/${v2.id}`)).version.versionNumber, 'V2-lab')
     for (const role of ['Viewer', 'Engineer']) {
       const userName = role + randomUUID().slice(0, 8); const password = randomUUID()
       await write('/api/v1/admin/users', { userName, displayName: '权限验收', password, role, reason: '验收' })

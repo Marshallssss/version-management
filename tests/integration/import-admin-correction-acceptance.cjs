@@ -71,7 +71,7 @@ async function main() {
     const removed = await read(await call(deletionUrl, deletionRequest, 'DELETE', accounts.Admin.client, deleteKey, deleteCorrelation))
     assert.equal(removed.deleted, true)
     assert.deepEqual(await read(await call(deletionUrl, deletionRequest, 'DELETE', accounts.Admin.client, deleteKey)), removed)
-    assert.equal((await api.get(deletionUrl)).status(), 404)
+    assert.equal((await api.get(deletionUrl)).status(), 200, 'Retained version details remain readable')
     assert.equal((await scan()).importedCount, 0, 'Rescanning committed columns never recreates a deleted version')
     const after = (await get(route)).combinations.sort((x, y) => x.sequenceNo - y.sequenceNo)
     assert.deepEqual(after.map(combo => ({ id: combo.id, rowKey: combo.rowKey, sequenceNo: combo.sequenceNo, reason: combo.reason, items: combo.items.map(item => ({ componentId: item.componentId, versionId: item.versionId, versionNumber: item.versionNumber, changed: item.changed })) })), frozen)
@@ -105,7 +105,7 @@ async function main() {
     assert.equal(restoredVersion.transitions.filter(item => item.axis === 'Maturity' && item.fromState === 'Deprecated' && item.toState === 'Testing').length, 1)
     assert.equal(replacedVersion.transitions.filter(item => item.axis === 'Maturity' && item.fromState === 'Testing' && item.toState === 'Deprecated').length, 1)
     assert.equal((await get(`/api/v1/audit?entityId=${importedB.versionId}`)).filter(item => item.action === 'VersionMaturityChanged' && item.correlationId === restoreCorrelation).length, 1)
-    assert.equal((await call(`/api/v1/component-versions/${importedB.versionId}`, deletionRequest, 'DELETE', accounts.Admin.client)).status(), 409, 'Risk exposure remains protected')
+    assert.equal((await get(`/api/v1/component-versions/${importedB.versionId}/operation-impact`)).canDelete, true, 'Risk history alone no longer blocks deletion')
 
     await write(`/api/v1/admin/users/${accounts.Admin.id}/role`, { role: 'SeniorEngineer', reason: '即时撤权与幂等重放验收' })
     assert.equal((await call(deletionUrl, deletionRequest, 'DELETE', accounts.Admin.client, deleteKey)).status(), 403, 'Revoked administrators cannot replay a completed deletion with an old session')

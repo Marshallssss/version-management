@@ -161,6 +161,15 @@ app.UseWhen(_ => redirectPort is not null || app.Services.GetRequiredService<ISe
         address.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) == true,
     branch => branch.UseHttpsRedirection());
 app.UseAuthentication();
+app.Use(async (context, next) =>
+{
+    try { await next(context); }
+    catch (Microsoft.EntityFrameworkCore.DbUpdateException exception) when (exception.InnerException is Npgsql.PostgresException { ConstraintName: "ck_retained_version_reference" })
+    {
+        context.Response.StatusCode = StatusCodes.Status409Conflict;
+        await context.Response.WriteAsJsonAsync(new { message = "版本已删除或仍被当前配置/基线使用，本次操作未保存。请刷新后重试。" });
+    }
+});
 app.UseAuthorization();
 app.UseDefaultFiles();
 app.UseStaticFiles();

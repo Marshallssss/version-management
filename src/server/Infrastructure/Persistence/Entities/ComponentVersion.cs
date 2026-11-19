@@ -10,6 +10,7 @@ public sealed class ComponentVersion
     public VersionMaturity Maturity { get; set; } = VersionMaturity.Draft;
     public VersionSafety Safety { get; set; } = VersionSafety.Clear;
     public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset? DeletedAt { get; set; }
 }
 
 public enum VersionMaturity

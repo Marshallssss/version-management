@@ -1,6 +1,6 @@
 import { Modal } from 'antd'
 import { MachineImportDialog } from './MachineImportDialog'
-import { FileExcelOutlined, PlusOutlined, EditOutlined, ArrowLeftOutlined, HistoryOutlined, SettingOutlined, SwapOutlined, UnorderedListOutlined, EnvironmentOutlined, CloudUploadOutlined, AimOutlined, SearchOutlined, ClearOutlined } from '@ant-design/icons'
+import { FileExcelOutlined, PlusOutlined, EditOutlined, ArrowUpOutlined, HistoryOutlined, SettingOutlined, SwapOutlined, UnorderedListOutlined, EnvironmentOutlined, CloudUploadOutlined, AimOutlined, SearchOutlined, ClearOutlined } from '@ant-design/icons'
 import { MachineVersionComparison } from './MachineVersionComparison'
 import { ConfigurationTree } from './ConfigurationTree'
 import { ChamberFields, MachineEquipmentPanel, stages } from './MachineEquipmentPanel'
@@ -50,6 +50,7 @@ export function MachineWorkspace({ projectId, canWrite = true, canImport = false
   const [editName, setEditName] = useState('')
   const [editType, setEditType] = useState('')
   const [editLocation, setEditLocation] = useState('')
+  const [editOwner, setEditOwner] = useState('')
   const [editStatus, setEditStatus] = useState('Active')
   const [expectedResumeAt, setExpectedResumeAt] = useState('')
   const [editReason, setEditReason] = useState('')
@@ -107,6 +108,7 @@ export function MachineWorkspace({ projectId, canWrite = true, canImport = false
     setEditName(selectedMachine.name)
     setEditType(selectedMachine.machineType ?? '')
     setEditLocation(selectedMachine.location ?? '')
+    setEditOwner(selectedMachine.owner ?? '')
     setEditProcess(selectedMachine.process ?? '')
     setEditConfiguration(selectedMachine.equipmentConfiguration ?? '')
     setEditStatus(selectedMachine.status)
@@ -153,7 +155,7 @@ export function MachineWorkspace({ projectId, canWrite = true, canImport = false
     },
   })
   const update = useMutation({
-    mutationFn: () => updateMachine(selectedMachineId, { serialNumber: editSerial, name: editName, machineType: editType, process: editProcess, equipmentConfiguration: editConfiguration, location: editLocation, status: editStatus, expectedResumeAt: ['ShortTermCip', 'LongTermCip'].includes(editStatus) && expectedResumeAt ? new Date(expectedResumeAt).toISOString() : null, reason: editReason }),
+    mutationFn: () => updateMachine(selectedMachineId, { serialNumber: editSerial, name: editName, machineType: editType, process: editProcess, equipmentConfiguration: editConfiguration, location: editLocation, owner: editOwner, status: editStatus, expectedResumeAt: ['ShortTermCip', 'LongTermCip'].includes(editStatus) && expectedResumeAt ? new Date(expectedResumeAt).toISOString() : null, reason: editReason }),
     onSuccess: async () => {
       setEditOpen(false); setEditReason(''); onSuccess('机台资料已更新，变更已写入审计记录。')
       await invalidateMachineData()
@@ -175,6 +177,7 @@ export function MachineWorkspace({ projectId, canWrite = true, canImport = false
   })
 
   return <div className={`machine-workspace${selectedMachine ? ' has-selection' : ' machine-unselected'}`}>
+    {selectedMachine && <div className="machine-return-bar toolbar-actions"><button type="button" onClick={() => { onSelectMachine(''); window.scrollTo({ top: 0, behavior: 'smooth' }) }}><ArrowUpOutlined aria-hidden />返回机台列表</button><span>{selectedMachine.name}</span></div>}
     <section className="machine-registry-panel">
       <div className="panel-heading machine-heading"><strong>机台管理 <span className="workspace-count">{projectMachines.length} 台</span></strong><div className="toolbar-actions">{canImport && projectId && <button type="button" onClick={() => setImportOpen(true)}><FileExcelOutlined aria-hidden />Excel 导入机台</button>}{canWrite && projectId && <><button type="button" className="primary-action" aria-label="新建机台 / 从已有机台复制资料" onClick={() => setCreateOpen(true)}><PlusOutlined aria-hidden />新建机台</button><button type="button" onClick={() => setToolTab('upgrade')}><CloudUploadOutlined aria-hidden />批量升级</button><button type="button" onClick={() => setToolTab('target')}><AimOutlined aria-hidden />批量目标</button></>}</div></div>
     </section>
@@ -206,7 +209,7 @@ export function MachineWorkspace({ projectId, canWrite = true, canImport = false
     </section>
     <section hidden={!selectedMachine} className="machine-detail-panel">
       {selectedMachine && <>
-        <div className="machine-detail-header"><div><span className="section-index">已选机台</span><h3>{selectedMachine.name}</h3>{(selectedMachine.process || selectedMachine.equipmentConfiguration) && <p className="machine-extra-info">工艺：{selectedMachine.process || '未填写'} · 配置：{selectedMachine.equipmentConfiguration || '未填写'}</p>}<p>{selectedMachine.serialNumber}{selectedMachine.machineType ? ` · ${selectedMachine.machineType}` : ''}{selectedMachine.location ? ` · ${selectedMachine.location}` : ''}</p></div><div className="toolbar-actions">{canWrite && <button type="button" aria-label="编辑机台资料" onClick={() => setEditOpen(true)}><EditOutlined />编辑资料</button>}<button type="button" onClick={() => onSelectMachine('')}><ArrowLeftOutlined />返回机台列表</button></div></div>
+        <div className="machine-detail-header"><div><span className="section-index">已选机台</span><h3>{selectedMachine.name}</h3>{(selectedMachine.process || selectedMachine.equipmentConfiguration) && <p className="machine-extra-info">工艺：{selectedMachine.process || '未填写'} · 配置：{selectedMachine.equipmentConfiguration || '未填写'}</p>}<p>{selectedMachine.serialNumber}{selectedMachine.machineType ? ` · ${selectedMachine.machineType}` : ''}{selectedMachine.location ? ` · ${selectedMachine.location}` : ''}</p></div><div className="toolbar-actions">{canWrite && <button type="button" aria-label="编辑机台资料" onClick={() => setEditOpen(true)}><EditOutlined />编辑资料</button>}</div></div>
         <div className="machine-statuses"><span>{machineStatusText[selectedMachine.status]}{selectedMachine.expectedResumeAt && ` · 预计恢复 ${formatTime(selectedMachine.expectedResumeAt)}`}</span><span data-match={machineDrift.data?.matchStatus}>匹配 {matchText[machineDrift.data?.matchStatus ?? 'Unknown']}</span><span data-risk={machineDrift.data?.riskSeverity}>风险 {riskText[machineDrift.data?.riskSeverity ?? 'Unknown']}</span><span>阶段 {selectedMachine.stage ?? '未登记'}</span><span>负责人 {selectedMachine.owner || '未填写'}</span></div>
         <nav className="workspace-tabs" aria-label="机台详情">
           {[['configuration', '当前配置', <UnorderedListOutlined aria-hidden />], ['target', '目标与对比', <SwapOutlined aria-hidden />], ['equipment', '阶段与腔室', <SettingOutlined aria-hidden />], ['history', '历史', <HistoryOutlined aria-hidden />]].map(([id, label, icon]) => <button type="button" key={String(id)} aria-pressed={detailTab === id} onClick={() => setDetailTab(String(id))}>{icon}{label}</button>)}
@@ -246,7 +249,7 @@ export function MachineWorkspace({ projectId, canWrite = true, canImport = false
       </div>
     </Modal>
     <Modal title={`编辑机台资料 · ${selectedMachine?.name ?? ''}`} open={canWrite && editOpen && !!selectedMachine} onCancel={() => { if (!update.isPending) setEditOpen(false) }} maskClosable={!update.isPending} width={760} footer={null} className="machine-dialog" destroyOnHidden><div className="machine-edit">
-<form hidden={!canWrite} className="catalog-form" onSubmit={(event) => { event.preventDefault(); update.mutate() }}><label>机台序列号<input value={editSerial} onChange={(event) => setEditSerial(event.target.value)} required /></label><label>机台名称<input value={editName} onChange={(event) => setEditName(event.target.value)} required /></label><label>工艺（非必填）<input value={editProcess} maxLength={200} onChange={event => setEditProcess(event.target.value)} /></label><label className="wide-field">配置（非必填）<textarea aria-label="配置（非必填）" value={editConfiguration} maxLength={1000} onChange={event => setEditConfiguration(event.target.value)} /></label><label>机型<input value={editType} onChange={(event) => setEditType(event.target.value)} /></label><label>位置<input value={editLocation} onChange={(event) => setEditLocation(event.target.value)} /></label><label>状态<select value={editStatus} onChange={(event) => setEditStatus(event.target.value)}><option value="Active">在用</option><option value="ShortTermCip">短期 CIP</option><option value="LongTermCip">长期 CIP</option><option value="NoProduction">暂未过货</option><option value="Archived">已归档</option></select></label>{['ShortTermCip', 'LongTermCip'].includes(editStatus) && <label>预计恢复时间<input type="datetime-local" value={expectedResumeAt} onChange={event => setExpectedResumeAt(event.target.value)} required /></label>}<label className="wide-field">修改原因<input value={editReason} onChange={(event) => setEditReason(event.target.value)} required /></label><button type="submit" disabled={update.isPending}>{update.isPending ? '正在保存' : '保存资料'}</button></form><p className="form-hint">项目归属创建后固定，不能跨项目移动，以保护既有目标、实际配置和历史事实。</p>{update.isError && <p className="error-strip">{update.error.message}</p>}
+<form hidden={!canWrite} className="catalog-form" onSubmit={(event) => { event.preventDefault(); update.mutate() }}><label>机台序列号<input value={editSerial} onChange={(event) => setEditSerial(event.target.value)} required /></label><label>机台名称<input value={editName} onChange={(event) => setEditName(event.target.value)} required /></label><label>工艺（非必填）<input value={editProcess} maxLength={200} onChange={event => setEditProcess(event.target.value)} /></label><label className="wide-field">配置（非必填）<textarea aria-label="配置（非必填）" value={editConfiguration} maxLength={1000} onChange={event => setEditConfiguration(event.target.value)} /></label><label>机型<input value={editType} onChange={(event) => setEditType(event.target.value)} /></label><label>机台负责人<input value={editOwner} maxLength={160} onChange={event => setEditOwner(event.target.value)} /></label><label>位置<input value={editLocation} onChange={(event) => setEditLocation(event.target.value)} /></label><label>状态<select value={editStatus} onChange={(event) => setEditStatus(event.target.value)}><option value="Active">在用</option><option value="ShortTermCip">短期 CIP</option><option value="LongTermCip">长期 CIP</option><option value="NoProduction">暂未过货</option><option value="Archived">已归档</option></select></label>{['ShortTermCip', 'LongTermCip'].includes(editStatus) && <label>预计恢复时间<input type="datetime-local" value={expectedResumeAt} onChange={event => setExpectedResumeAt(event.target.value)} required /></label>}<label className="wide-field">修改原因<input value={editReason} onChange={(event) => setEditReason(event.target.value)} required /></label><button type="submit" disabled={update.isPending}>{update.isPending ? '正在保存' : '保存资料'}</button></form><p className="form-hint">项目归属创建后固定，不能跨项目移动，以保护既有目标、实际配置和历史事实。</p>{update.isError && <p className="error-strip">{update.error.message}</p>}
     </div></Modal>
     <Modal title={`${({ configuration: '录入完整配置', observation: '记录局部观察', assign: '指派机台目标', correction: '回退与更正', upgrade: '批量升级', target: '批量目标' } as Record<string, string>)[toolTab ?? ''] ?? ''}${selectedMachine && !['upgrade', 'target'].includes(toolTab ?? '') ? ' · ' + selectedMachine.name : ''}`} open={canWrite && !!toolTab} onCancel={() => { if (!assignTarget.isPending && !recordFacts.isPending) setToolTab(null) }} width={1000} footer={null} className="machine-dialog" destroyOnHidden>
       <div className="machine-tools">

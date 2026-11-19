@@ -2,6 +2,15 @@
 
 ## Final Architecture and Product Plan
 
+### 2026-11-20 版本纠错与机台操作优化（完成）
+
+- 管理员可删除仅有历史引用的组件版本：从日常目录和可选版本中移除，原版本、补丁、生命周期、导入、机台与验证历史保留。任何基线（含草稿）、整机当前配置、已安装腔室当前特例仍阻止删除；影响预览区分当前引用和保留历史。原版本号保持占用，避免历史同名混淆；已删除版本不可重新使用或修改。保留版本历史的组件也不能物理删除。
+- 管理员在“版本 → 组件 → 登记新版本”勾选“补录历史已发布版本”，填写本地历史登记时间与原因；后端实时校验管理员身份、幂等键、时间范围及重复版本号，复用历史领域命令。版本创建时间为指定时刻，审计和补录操作时间为现在；不废弃当前测试版、不伪造 Lab 验证或机台事实。
+- 机台详情顶部共用“↑ 返回机台列表”，跨所有详情页签并随滚动固定；编辑资料中可修改负责人，复用阶段/负责人历史并刷新列表。旧客户端省略负责人字段时保留原负责人，空字符串可清空。
+- EF 从真实模型生成前进 Migration `20261119083517_RetainDeletedComponentVersions`，已对 PostgreSQL 17 执行。数据库触发器通过锁保护删除与新增引用竞争，禁止复用已删除版本及改写删除标记；历史读取显式保留版本关系。既有 Migration 未改写。
+- 验收通过：Release build 0 warning / 0 error、前端 build、真实 Migration、EF pending model changes、catalog、background-job、version-delete、operation-impact（API/UI）、machine-equipment、import-admin-correction。
+- 新增 `version-correction-acceptance.cjs` 与 `retained-version-database-acceptance.ps1`：覆盖历史时间/真实审计、权限与重放、基线/整机/PM 当前引用保护、历史删除后仍可读取、禁止再引用、数据库直接写入拦截（测试事务回滚）、负责人 API/页面操作、四个详情页签的返回入口与滚动固定、历史补录页面。页面截图位于本地 `artifacts/version-correction`；未将部署生产环境验收标记为通过。
+
 ### 2026-11-13 本地环境恢复
 
 - 已找到原环境位于 `%LOCALAPPDATA%/Packages/OpenAI.Codex_2p2nqsd0c76g0/LocalCache/Local/ConfigHub`，其中 `postgres-data` 与 `PostgreSQL17` 均完整，配置也仍在。此前仅检查普通 LocalAppData 路径造成误判，并非数据库丢失，也不依赖 Docker。

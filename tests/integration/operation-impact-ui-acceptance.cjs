@@ -175,7 +175,7 @@ async function main() {
     assert((await dialog.innerText()).includes('1 条补丁'))
     await dialog.getByRole('button', { name: '确认删除版本' }).click()
     await dialog.waitFor({ state: 'hidden' })
-    assert.equal((await context.request.get(`/api/v1/component-versions/${removable.id}`)).status(), 404)
+    assert.equal((await context.request.get(`/api/v1/component-versions/${removable.id}`)).status(), 200)
 
     const originalVersionDetail = await read(`/api/v1/component-versions/${version.id}`)
     const releasedTransitions = detail => detail.transitions.filter(item => item.axis === 'Maturity' && item.toState === 'Released').map(item => ({ id: item.id, occurredAt: item.occurredAt }))

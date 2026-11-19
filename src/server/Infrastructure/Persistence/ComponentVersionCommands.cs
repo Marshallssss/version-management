@@ -10,7 +10,7 @@ public sealed record CreateVersionCommandResult(ComponentVersion? Version, bool 
 public static class ComponentVersionCommands
 {
     public static async Task<ComponentVersion> RegisterHistoricalAsync(ConfigHubDbContext database, Guid componentId,
-        string number, DateTimeOffset publishedAt, string reason, VersionWriteContext context, CancellationToken ct)
+        string number, DateTimeOffset publishedAt, string reason, VersionWriteContext context, CancellationToken ct, string source = "HistoricalBaseline")
     {
         if (database.Database.CurrentTransaction is null) throw new InvalidOperationException("历史补录必须在事务内执行。");
         if (publishedAt < new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero) || publishedAt > DateTimeOffset.UtcNow
@@ -18,17 +18,18 @@ public static class ComponentVersionCommands
             || string.IsNullOrWhiteSpace(context.Actor) || string.IsNullOrWhiteSpace(context.CorrelationId)) throw new ArgumentException("历史版本的时间、版本号、原因或操作者不合法。");
         var normalized = number.Trim().ToUpperInvariant();
         var existing = database.ComponentVersions.Local.FirstOrDefault(x => x.ComponentId == componentId && x.NormalizedVersionNumber == normalized)
-            ?? await database.ComponentVersions.SingleOrDefaultAsync(x => x.ComponentId == componentId && x.NormalizedVersionNumber == normalized, ct);
+            ?? await database.ComponentVersions.IgnoreQueryFilters().SingleOrDefaultAsync(x => x.ComponentId == componentId && x.NormalizedVersionNumber == normalized, ct);
+        if (existing?.DeletedAt is not null) throw new ArgumentException("该版本已删除，历史名称保留，不能重新使用。请使用不同的版本号。");
         if (existing is not null) return existing;
         if (!await database.ConfigurationComponents.AnyAsync(x => x.Id == componentId, ct)) throw new ArgumentException("历史组件不存在。");
         // Historical records precede live sequences, so a backfill cannot become the default latest release.
-        var persisted = await database.ComponentVersions.Where(x => x.ComponentId == componentId).Select(x => (long?)x.SequenceNo).MinAsync(ct) ?? 0;
+        var persisted = await database.ComponentVersions.IgnoreQueryFilters().Where(x => x.ComponentId == componentId).Select(x => (long?)x.SequenceNo).MinAsync(ct) ?? 0;
         var local = database.ComponentVersions.Local.Where(x => x.ComponentId == componentId).Select(x => x.SequenceNo).DefaultIfEmpty().Min();
         var version = new ComponentVersion { Id = Guid.NewGuid(), ComponentId = componentId, VersionNumber = number.Trim(), NormalizedVersionNumber = normalized,
             SequenceNo = Math.Min(0, Math.Min(persisted, local)) - 10, Maturity = VersionMaturity.Released, CreatedAt = publishedAt.ToUniversalTime() };
         database.ComponentVersions.Add(version);
         database.VersionLifecycleTransitions.Add(new() { Id = Guid.NewGuid(), ComponentVersionId = version.Id, Axis = LifecycleAxis.Maturity, FromState = "HistoricalRecord", ToState = "Released", Reason = reason, Actor = context.Actor, OccurredAt = DateTimeOffset.UtcNow });
-        Audit(database, context, "HistoricalComponentVersionRegistered", version.Id, new { version.ComponentId, version.VersionNumber, version.SequenceNo, historicalCreatedAt = version.CreatedAt, reason, source = "HistoricalBaseline" });
+        Audit(database, context, "HistoricalComponentVersionRegistered", version.Id, new { version.ComponentId, version.VersionNumber, version.SequenceNo, historicalCreatedAt = version.CreatedAt, reason, source });
         return version;
     }
 
@@ -44,16 +45,16 @@ public static class ComponentVersionCommands
         if (component is null) return new(null, true, false);
         var normalized = versionNumber.Trim().ToUpperInvariant();
         if (database.ComponentVersions.Local.Any(x => x.ComponentId == componentId && x.NormalizedVersionNumber == normalized)
-            || await database.ComponentVersions.AnyAsync(x => x.ComponentId == componentId && x.NormalizedVersionNumber == normalized, cancellationToken))
+            || await database.ComponentVersions.IgnoreQueryFilters().AnyAsync(x => x.ComponentId == componentId && x.NormalizedVersionNumber == normalized, cancellationToken))
             return new(null, false, true);
-        var persistedMax = await database.ComponentVersions.Where(x => x.ComponentId == componentId).Select(x => (long?)x.SequenceNo).MaxAsync(cancellationToken) ?? 0;
+        var persistedMax = await database.ComponentVersions.IgnoreQueryFilters().Where(x => x.ComponentId == componentId).Select(x => (long?)x.SequenceNo).MaxAsync(cancellationToken) ?? 0;
         var localMax = database.ComponentVersions.Local.Where(x => x.ComponentId == componentId).Select(x => x.SequenceNo).DefaultIfEmpty().Max();
         var now = DateTimeOffset.UtcNow;
         var version = new ComponentVersion { Id = Guid.NewGuid(), ComponentId = componentId, VersionNumber = versionNumber.Trim(), NormalizedVersionNumber = normalized, SequenceNo = Math.Max(persistedMax, localMax) + 10, Maturity = maturity, CreatedAt = now };
         if (maturity == VersionMaturity.Testing)
         {
-            var previous = await database.ComponentVersions.Where(x => x.ComponentId == componentId && x.Maturity == VersionMaturity.Testing).ToListAsync(cancellationToken);
-            foreach (var old in previous.Concat(database.ComponentVersions.Local.Where(x => x.ComponentId == componentId && x.Maturity == VersionMaturity.Testing)).DistinctBy(x => x.Id))
+            var previous = await database.ComponentVersions.Where(x => x.ComponentId == componentId && x.DeletedAt == null && x.Maturity == VersionMaturity.Testing).ToListAsync(cancellationToken);
+            foreach (var old in previous.Concat(database.ComponentVersions.Local.Where(x => x.ComponentId == componentId && x.DeletedAt == null && x.Maturity == VersionMaturity.Testing)).DistinctBy(x => x.Id))
             {
                 if (old.Maturity != VersionMaturity.Testing) continue;
                 old.Maturity = VersionMaturity.Deprecated;

@@ -121,6 +121,8 @@ internal static class ConfigHubModel
         modelBuilder.Entity<ComponentVersion>(entity =>
         {
             entity.ToTable("component_versions");
+            entity.HasQueryFilter(version => version.DeletedAt == null);
+            entity.Property(version => version.DeletedAt).HasColumnName("deleted_at");
             entity.HasKey(version => version.Id);
             entity.Property(version => version.Id).HasColumnName("id");
             entity.Property(version => version.ComponentId).HasColumnName("component_id");
@@ -135,7 +137,7 @@ internal static class ConfigHubModel
             entity.HasIndex(version => new { version.ComponentId, version.SequenceNo })
                 .IsUnique().HasDatabaseName("ux_component_versions_sequence_no");
             entity.HasIndex(version => version.ComponentId)
-                .IsUnique().HasFilter("maturity = 'Testing'")
+                .IsUnique().HasFilter("maturity = 'Testing' AND deleted_at IS NULL")
                 .HasDatabaseName("ux_component_versions_one_testing_per_component");
             entity.HasOne<ConfigurationComponent>().WithMany().HasForeignKey(version => version.ComponentId).OnDelete(DeleteBehavior.Restrict);
         });

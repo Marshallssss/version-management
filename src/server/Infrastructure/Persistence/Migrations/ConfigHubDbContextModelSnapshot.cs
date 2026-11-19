@@ -551,6 +551,10 @@ namespace ConfigHub.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at");
+
                     b.Property<string>("Maturity")
                         .IsRequired()
                         .HasMaxLength(32)
@@ -584,7 +588,7 @@ namespace ConfigHub.Infrastructure.Persistence.Migrations
                     b.HasIndex("ComponentId")
                         .IsUnique()
                         .HasDatabaseName("ux_component_versions_one_testing_per_component")
-                        .HasFilter("maturity = 'Testing'");
+                        .HasFilter("maturity = 'Testing' AND deleted_at IS NULL");
 
                     b.HasIndex("ComponentId", "NormalizedVersionNumber")
                         .IsUnique()

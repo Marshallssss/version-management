@@ -187,3 +187,8 @@
   .machine-row-versions { grid-column: 1; grid-row: 3; }
   .machine-row-health { grid-column: 2; grid-row: 3; }
 }
+.machine-return-bar { position: sticky; top: 8px; z-index: 12; display: flex; align-items: center; gap: 12px; padding: 8px 12px; margin-bottom: 12px; background: var(--ui-surface); border-bottom: 1px solid var(--ui-line); }
+.machine-return-bar { grid-column: 1 / -1; align-self: start; }
+.machine-return-bar > span { color: var(--ui-muted); overflow-wrap: anywhere; }
+.workspace-form label.historical-registration-toggle { display: flex; align-items: center; gap: 8px; }
+.workspace-form .historical-registration-toggle input { width: 16px; min-height: 16px; height: 16px; margin: 0; flex: 0 0 16px; }
