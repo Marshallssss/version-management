@@ -601,6 +601,59 @@ namespace ConfigHub.Infrastructure.Persistence.Migrations
                     b.ToTable("component_versions", (string)null);
                 });
 
+            modelBuilder.Entity("ConfigHub.Infrastructure.Persistence.Entities.ComponentVersionRevision", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Actor")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)")
+                        .HasColumnName("actor");
+
+                    b.Property<Guid>("ComponentVersionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("component_version_id");
+
+                    b.Property<string>("CorrelationId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("correlation_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<JsonDocument>("Patches")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("patches");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("reason");
+
+                    b.Property<int>("RevisionNo")
+                        .HasColumnType("integer")
+                        .HasColumnName("revision_no");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ComponentVersionId", "RevisionNo")
+                        .IsUnique();
+
+                    b.ToTable("component_version_revisions", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_revision_number", "revision_no >= 0");
+                        });
+                });
+
             modelBuilder.Entity("ConfigHub.Infrastructure.Persistence.Entities.ConfigurationBaseline", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2419,6 +2472,15 @@ namespace ConfigHub.Infrastructure.Persistence.Migrations
                     b.HasOne("ConfigHub.Infrastructure.Persistence.Entities.ConfigurationComponent", null)
                         .WithMany()
                         .HasForeignKey("ComponentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ConfigHub.Infrastructure.Persistence.Entities.ComponentVersionRevision", b =>
+                {
+                    b.HasOne("ConfigHub.Infrastructure.Persistence.Entities.ComponentVersion", null)
+                        .WithMany()
+                        .HasForeignKey("ComponentVersionId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

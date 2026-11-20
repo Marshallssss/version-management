@@ -18,6 +18,7 @@ public sealed class ConfigHubDbContext(DbContextOptions<ConfigHubDbContext> opti
     public DbSet<ConfigurationComponent> ConfigurationComponents => Set<ConfigurationComponent>();
 
     public DbSet<ComponentVersion> ComponentVersions => Set<ComponentVersion>();
+    public DbSet<ComponentVersionRevision> ComponentVersionRevisions => Set<ComponentVersionRevision>();
 
     public DbSet<VersionPatch> VersionPatches => Set<VersionPatch>();
 
@@ -67,6 +68,21 @@ public sealed class ConfigHubDbContext(DbContextOptions<ConfigHubDbContext> opti
         base.OnModelCreating(builder);
         ConfigHubModel.Configure(builder);
         MachineEquipmentModel.Configure(builder);
+        builder.Entity<ComponentVersionRevision>(entity =>
+        {
+            entity.ToTable("component_version_revisions", table => table.HasCheckConstraint("ck_revision_number", "revision_no >= 0"));
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.ComponentVersionId).HasColumnName("component_version_id");
+            entity.Property(x => x.RevisionNo).HasColumnName("revision_no");
+            entity.Property(x => x.Patches).HasColumnName("patches").HasColumnType("jsonb");
+            entity.Property(x => x.Reason).HasColumnName("reason").HasMaxLength(500);
+            entity.Property(x => x.Actor).HasColumnName("actor").HasMaxLength(160);
+            entity.Property(x => x.CorrelationId).HasColumnName("correlation_id").HasMaxLength(128);
+            entity.Property(x => x.CreatedAt).HasColumnName("created_at");
+            entity.HasIndex(x => new { x.ComponentVersionId, x.RevisionNo }).IsUnique();
+            entity.HasOne<ComponentVersion>().WithMany().HasForeignKey(x => x.ComponentVersionId).OnDelete(DeleteBehavior.Restrict);
+        });
         MatrixImportModel.Configure(builder);
         LaboratoryModel.Configure(builder);
         builder.Entity<ConfigurationComponent>(entity =>

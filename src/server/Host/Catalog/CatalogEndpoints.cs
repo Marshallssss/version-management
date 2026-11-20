@@ -17,6 +17,8 @@ public static partial class CatalogEndpoints
         MapMatrixImportEndpoints(endpoints);
         MapMachineImportEndpoints(endpoints);
         MapLaboratoryEndpoints(endpoints);
+        endpoints.MapGet("/api/v1/component-versions/{versionId:guid}/revisions", ListVersionRevisionsAsync).RequireAuthorization();
+        endpoints.MapPost("/api/v1/component-versions/{versionId:guid}/revisions", PublishVersionRevisionAsync).RequireAuthorization("SeniorEngineer");
         endpoints.MapPost("/api/v1/version-patches/{patchId:guid}/manage", ManageVersionPatchAsync).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/component-versions/{versionId:guid}/maintenance", MaintainVersionAsync).RequireAuthorization("SuperAdmin");
         endpoints.MapGet("/api/v1/component-versions/{versionId:guid}/operation-impact", GetVersionOperationImpactAsync).RequireAuthorization("Admin");
@@ -1863,6 +1865,8 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
             return Results.Conflict(new { message = "该组件保留了已删除版本的历史记录，不能删除组件及其追溯关系。" });
         var versions = await database.ComponentVersions.Where(item => item.ComponentId == componentId).ToListAsync(cancellationToken);
         var versionIds = versions.Select(item => item.Id).ToArray();
+        if (await database.ComponentVersionRevisions.AnyAsync(item => versionIds.Contains(item.ComponentVersionId), cancellationToken))
+            return Results.Conflict(new { message = "组件包含已冻结的发布修订，不能删除其追溯关系。" });
         if (await database.VersionExposureSnapshots.AnyAsync(item => versionIds.Contains(item.ComponentVersionId), cancellationToken)
             || await database.ConfigurationBaselines.AnyAsync(item => item.TopComponentVersionId != null && versionIds.Contains(item.TopComponentVersionId.Value), cancellationToken))
             return Results.Conflict(new { message = "组件版本已有阻断影响快照或基线引用，不能删除。" });

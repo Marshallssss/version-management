@@ -1,0 +1,47 @@
+const { chromium } = require('playwright')
+const { readFileSync } = require('node:fs')
+const { randomUUID } = require('node:crypto')
+const path = require('node:path')
+const assert = require('node:assert/strict')
+async function main() {
+  const config = JSON.parse(readFileSync(path.join(process.env.LOCALAPPDATA, 'ConfigHub/appsettings.local.json'), 'utf8').replace(/^\uFEFF/, ''))
+  const browser = await chromium.launch({ channel: 'msedge', headless: true })
+  const ctx = await browser.newContext({ baseURL: 'http://127.0.0.1:5080' })
+  const api = ctx.request, reason = '累计修订验收'
+  const call = (url, data, key = randomUUID()) => api.post(url, { data, headers: { 'Idempotency-Key': key } })
+  const post = async (url, data, key) => { const r = await call(url, data, key); assert(r.ok(), await r.text()); return r.status() === 204 ? null : r.json() }
+  let project
+  try {
+    await post('/api/v1/auth/login', { email: config.ConfigHub.BootstrapAdmin.Email, password: config.ConfigHub.BootstrapAdmin.Password })
+    project = await post('/api/v1/projects', { code: 'REV-' + randomUUID().slice(0,8), name: reason, reason })
+    const c = await post(`/api/v1/projects/${project.id}/components`, { name: '控制软件', reason })
+    const v = await post(`/api/v1/components/${c.id}/versions`, { versionNumber: 'V1', historicalCreatedAt: '2020-01-01T00:00:00Z', reason })
+    const patch = code => post(`/api/v1/component-versions/${v.id}/patches`, { patchCode: code, title: code, issueDescription: '问题', resolutionDescription: '冻结修复说明', status: 'Released' })
+    const p1 = await patch('P1'), p2 = await patch('P2')
+    const route = `/api/v1/component-versions/${v.id}/revisions`, key = randomUUID()
+    const rev1 = await post(route, { patchIds: [p1.id], reason }, key)
+    assert.equal(rev1.revisionNo, 1)
+    assert.equal((await post(route, { patchIds: [p1.id], reason }, key)).id, rev1.id)
+    let revisions = await (await api.get(route)).json()
+    assert.deepEqual(revisions.map(x => x.revisionNo), [0,1]); assert.equal(revisions[0].patches.length, 0)
+    const frozen = revisions[1]
+    await post(`/api/v1/version-patches/${p1.id}/manage`, { action: 'withdraw', reason })
+    const rev2 = await post(route, { patchIds: [p1.id,p2.id], reason })
+    assert.equal(rev2.revisionNo, 2)
+    revisions = await (await api.get(route)).json()
+    assert.deepEqual(revisions[1], frozen)
+    assert.equal(revisions[2].patches.length, 2)
+    assert.equal((await call(route, { patchIds: [p2.id], reason })).status(), 409)
+    assert.equal((await call(route, { patchIds: [p1.id,p2.id], reason })).status(), 409)
+    const page = await ctx.newPage()
+    await page.goto('/'); await page.evaluate(id => localStorage.setItem('confighub.selected-project-id', id), project.id); await page.reload()
+    await page.locator('.nav-item').filter({ hasText: /^版本$/ }).click(); await page.locator('.root-node').first().click()
+    await page.getByRole('button', { name: '补丁', exact: true }).click()
+    await page.getByRole('heading', { name: '累计补丁修订', exact: true }).waitFor()
+    assert(await page.getByText('修订 2 · 2 个补丁', { exact: true }).isVisible())
+    await post(`/api/v1/component-versions/${v.id}/safety`, { state: 'Blocked', reason })
+    assert.equal((await call(route, { patchIds: [], reason })).status(), 409)
+    console.log('Version revision acceptance passed: original/cumulative snapshots, withdrawal isolation, duplicate prevention, replay, blocked state and real UI.')
+  } finally { if (project) await post(`/api/v1/projects/${project.id}/archive`, { reason }); await browser.close() }
+}
+main().catch(e => { console.error(e); process.exitCode=1 })
