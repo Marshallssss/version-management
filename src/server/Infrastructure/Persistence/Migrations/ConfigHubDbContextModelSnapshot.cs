@@ -933,6 +933,10 @@ namespace ConfigHub.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(32)")
                         .HasColumnName("result");
 
+                    b.Property<Guid?>("RevisionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("revision_id");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ConfigurationComponentId");
@@ -944,7 +948,12 @@ namespace ConfigHub.Infrastructure.Persistence.Migrations
                     b.HasIndex("NewComponentVersionId", "Result")
                         .HasDatabaseName("ix_deployment_items_version_result");
 
-                    b.ToTable("deployment_items", (string)null);
+                    b.HasIndex("RevisionId", "NewComponentVersionId");
+
+                    b.ToTable("deployment_items", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_deployment_revision_version", "revision_id IS NULL OR (new_component_version_id IS NOT NULL AND result = 'Succeeded')");
+                        });
                 });
 
             modelBuilder.Entity("ConfigHub.Infrastructure.Persistence.Entities.IdempotencyRecord", b =>
@@ -1363,6 +1372,10 @@ namespace ConfigHub.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("known_installed_at");
 
+                    b.Property<Guid?>("RevisionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("revision_id");
+
                     b.Property<Guid>("SourceDeploymentItemId")
                         .HasColumnType("uuid")
                         .HasColumnName("source_deployment_item_id");
@@ -1386,7 +1399,12 @@ namespace ConfigHub.Infrastructure.Persistence.Migrations
                     b.HasIndex("ComponentVersionId", "MachineId")
                         .HasDatabaseName("ix_machine_current_configurations_version_machine");
 
-                    b.ToTable("machine_current_configurations", (string)null);
+                    b.HasIndex("RevisionId", "ComponentVersionId");
+
+                    b.ToTable("machine_current_configurations", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_current_revision_version", "revision_id IS NULL OR (component_version_id IS NOT NULL AND state = 'Present')");
+                        });
                 });
 
             modelBuilder.Entity("ConfigHub.Infrastructure.Persistence.Entities.MachineDriftSummary", b =>
@@ -2561,6 +2579,12 @@ namespace ConfigHub.Infrastructure.Persistence.Migrations
                         .WithMany()
                         .HasForeignKey("NewComponentVersionId")
                         .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ConfigHub.Infrastructure.Persistence.Entities.ComponentVersionRevision", null)
+                        .WithMany()
+                        .HasForeignKey("RevisionId", "NewComponentVersionId")
+                        .HasPrincipalKey("Id", "ComponentVersionId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("ConfigHub.Infrastructure.Persistence.Entities.ImportBatch", b =>
@@ -2664,6 +2688,12 @@ namespace ConfigHub.Infrastructure.Persistence.Migrations
                         .HasForeignKey("SourceDeploymentItemId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("ConfigHub.Infrastructure.Persistence.Entities.ComponentVersionRevision", null)
+                        .WithMany()
+                        .HasForeignKey("RevisionId", "ComponentVersionId")
+                        .HasPrincipalKey("Id", "ComponentVersionId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("ConfigHub.Infrastructure.Persistence.Entities.MachineDriftSummary", b =>

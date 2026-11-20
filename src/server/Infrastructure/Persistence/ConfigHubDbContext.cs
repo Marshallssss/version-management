@@ -72,6 +72,7 @@ public sealed class ConfigHubDbContext(DbContextOptions<ConfigHubDbContext> opti
         {
             entity.ToTable("component_version_revisions", table => table.HasCheckConstraint("ck_revision_number", "revision_no >= 0"));
             entity.HasKey(x => x.Id);
+            entity.HasAlternateKey(x => new { x.Id, x.ComponentVersionId });
             entity.Property(x => x.Id).HasColumnName("id");
             entity.Property(x => x.ComponentVersionId).HasColumnName("component_version_id");
             entity.Property(x => x.RevisionNo).HasColumnName("revision_no");
@@ -84,6 +85,20 @@ public sealed class ConfigHubDbContext(DbContextOptions<ConfigHubDbContext> opti
             entity.HasOne<ComponentVersion>().WithMany().HasForeignKey(x => x.ComponentVersionId).OnDelete(DeleteBehavior.Restrict);
         });
         MatrixImportModel.Configure(builder);
+        builder.Entity<DeploymentItem>(entity =>
+        {
+            entity.Property(x => x.RevisionId).HasColumnName("revision_id");
+            entity.HasOne<ComponentVersionRevision>().WithMany().HasForeignKey(x => new { x.RevisionId, x.NewComponentVersionId })
+                .HasPrincipalKey(x => new { x.Id, x.ComponentVersionId }).OnDelete(DeleteBehavior.Restrict);
+            entity.ToTable("deployment_items", table => table.HasCheckConstraint("ck_deployment_revision_version", "revision_id IS NULL OR (new_component_version_id IS NOT NULL AND result = 'Succeeded')"));
+        });
+        builder.Entity<MachineCurrentConfiguration>(entity =>
+        {
+            entity.Property(x => x.RevisionId).HasColumnName("revision_id");
+            entity.HasOne<ComponentVersionRevision>().WithMany().HasForeignKey(x => new { x.RevisionId, x.ComponentVersionId })
+                .HasPrincipalKey(x => new { x.Id, x.ComponentVersionId }).OnDelete(DeleteBehavior.Restrict);
+            entity.ToTable("machine_current_configurations", table => table.HasCheckConstraint("ck_current_revision_version", "revision_id IS NULL OR (component_version_id IS NOT NULL AND state = 'Present')"));
+        });
         LaboratoryModel.Configure(builder);
         builder.Entity<ConfigurationComponent>(entity =>
         {

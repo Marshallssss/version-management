@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { RevisionPicker } from './RevisionPicker'
 import { getBaselineDetail, getBaselines, getMachineConfiguration, recordMachineFacts, type ConfigurationComponent } from './catalog-api'
 
 const absentValue = '__absent__'
@@ -19,6 +20,7 @@ export function FullConfigurationPanel({ machineId, projectId, components, onRec
   const queryClient = useQueryClient()
   const [templateBaselineId, setTemplateBaselineId] = useState('')
   const [selections, setSelections] = useState<Record<string, string>>({})
+  const [revisionSelections, setRevisionSelections] = useState<Record<string, string>>({})
   const [operationType, setOperationType] = useState('InitialSnapshot')
   const [effectiveAt, setEffectiveAt] = useState(nowForInput)
   const [reason, setReason] = useState('')
@@ -30,17 +32,20 @@ export function FullConfigurationPanel({ machineId, projectId, components, onRec
   useEffect(() => {
     setTemplateBaselineId('')
     setSelections({})
+    setRevisionSelections({})
     setReason('')
     setEffectiveAt(nowForInput())
   }, [machineId])
 
   useEffect(() => {
     if (!baselineDetail.data) return
+    setRevisionSelections({})
     const selectedByComponent = new Map(baselineDetail.data.items.filter(item => item.versionId !== null).map(item => [item.componentId, item.versionId!]))
     setSelections(Object.fromEntries(configurableComponents.map(component => [component.id, selectedByComponent.get(component.id) ?? absentValue])))
   }, [baselineDetail.data, configurableComponents])
 
   const loadCurrentConfiguration = () => {
+    setRevisionSelections(Object.fromEntries(configuration.data?.map(item => [item.componentId, item.revisionId ?? '']) ?? []))
     const currentByComponent = new Map(configuration.data?.map(item => [item.componentId, item.state === 'Present' && item.versionId ? item.versionId : absentValue]))
     setTemplateBaselineId('')
     setSelections(Object.fromEntries(configurableComponents.map(component => [component.id, currentByComponent.get(component.id) ?? absentValue])))
@@ -53,7 +58,7 @@ export function FullConfigurationPanel({ machineId, projectId, components, onRec
       sourceType: 'manual-ui',
       effectiveAt: new Date(effectiveAt).toISOString(),
       reason,
-      items: configurableComponents.map(component => ({ componentId: component.id, versionId: selections[component.id] === absentValue ? null : selections[component.id], absent: selections[component.id] === absentValue, knownInstalledAt: null })),
+      items: configurableComponents.map(component => ({ componentId: component.id, versionId: selections[component.id] === absentValue ? null : selections[component.id], revisionId: selections[component.id] === absentValue ? null : revisionSelections[component.id] || null, absent: selections[component.id] === absentValue, knownInstalledAt: operationType === 'Upgrade' && selections[component.id] !== absentValue ? new Date(effectiveAt).toISOString() : null })),
     }),
     onSuccess: async () => {
       setReason('')
@@ -82,7 +87,7 @@ export function FullConfigurationPanel({ machineId, projectId, components, onRec
         <label>生效时间<input type="datetime-local" value={effectiveAt} onChange={(event) => setEffectiveAt(event.target.value)} required /></label>
         <label className="wide-field">记录原因<input value={reason} maxLength={500} onChange={(event) => setReason(event.target.value)} required /></label>
         <div className="full-configuration-grid wide-field">
-          {configurableComponents.map(component => <label className="full-configuration-row" key={component.id}><span>{component.name}</span><select value={selections[component.id] ?? ''} onChange={(event) => setSelections(current => ({ ...current, [component.id]: event.target.value }))} required><option value="">请选择版本或缺失</option><option value={absentValue}>标记为缺失</option>{component.versions.map(version => <option key={version.id} value={version.id}>{versionLabel(version)}</option>)}</select></label>)}
+          {configurableComponents.map(component => <div className="full-configuration-row" key={component.id}><label>{component.name}<select value={selections[component.id] ?? ''} onChange={(event) => { setSelections(current => ({ ...current, [component.id]: event.target.value })); setRevisionSelections(current => ({ ...current, [component.id]: '' })) }} required><option value="">请选择版本或缺失</option><option value={absentValue}>标记为缺失</option>{component.versions.map(version => <option key={version.id} value={version.id}>{versionLabel(version)}</option>)}</select></label><RevisionPicker versionId={selections[component.id] === absentValue ? '' : selections[component.id] ?? ''} value={revisionSelections[component.id] ?? ''} onChange={value => setRevisionSelections(current => ({ ...current, [component.id]: value }))} /></div>)}
         </div>
         <button className="primary-action" type="submit" disabled={saveFullConfiguration.isPending || !complete}>{saveFullConfiguration.isPending ? '正在记录完整配置' : `记录 ${configurableComponents.length} 个组件`}</button>
       </form>

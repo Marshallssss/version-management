@@ -476,6 +476,10 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         if (componentIds.Except(versionedComponentIds).Any()) return Results.ValidationProblem(new Dictionary<string, string[]> { ["items"] = ["结构分类节点没有软件版本，不能记录为机台实际配置。"] });
         var versionIds = request.Items.Where(x => !x.Absent && x.VersionId is not null).Select(x => x.VersionId!.Value).Distinct().ToArray();
         var versions = await db.ComponentVersions.Where(x => versionIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, cancellationToken);
+        var revisionIds = request.Items.Where(x => x.RevisionId != null).Select(x => x.RevisionId!.Value).Distinct().ToArray();
+        var revisions = await db.ComponentVersionRevisions.Where(x => revisionIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, cancellationToken);
+        if (request.Items.Any(x => x.RevisionId is { } id && (x.Absent || !revisions.TryGetValue(id, out var revision) || revision.ComponentVersionId != x.VersionId)))
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["revisionId"] = ["修订必须属于所选版本，未配置组件不能选择修订。"] });
         if (versions.Count != versionIds.Length || request.Items.Any(x => !x.Absent && (x.VersionId is null || versions[x.VersionId.Value].ComponentId != x.ComponentId))) return Results.ValidationProblem(new Dictionary<string, string[]> { ["items"] = ["事实版本必须属于对应组件。"] });
         if (laboratoryOnly && versions.Values.Any(version => version.Maturity != VersionMaturity.Testing)) return Results.Conflict(new { message = "实验室升级登记仅限测试中版本。" });
         if (request.SourceConfigurationBaselineId is not null)
@@ -487,7 +491,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
             if (request.Items.Count != expectedItems.Count || request.Items.Select(item => item.ComponentId).Distinct().Count() != request.Items.Count || request.Items.Any(item => item.Absent || item.VersionId is null) || expectedItems.Any(expected => !request.Items.Any(item => item.ComponentId == expected.ConfigurationComponentId && item.VersionId == expected.ComponentVersionId))) return Results.ValidationProblem(new Dictionary<string, string[]> { ["items"] = ["基线升级的组件和版本必须与所选基线快照完全一致。"] });
             batch.SourceConfigurationBaselineId = sourceBaseline.Id;
         }
-        foreach (var input in request.Items) { var item = new DeploymentItem { Id = Guid.NewGuid(), DeploymentBatchId = batch.Id, ConfigurationComponentId = input.ComponentId, NewComponentVersionId = input.VersionId, Result = input.Absent ? DeploymentItemResult.Absent : DeploymentItemResult.Succeeded, KnownInstalledAt = input.KnownInstalledAt }; db.DeploymentItems.Add(item); await UpsertCurrentAsync(db, machineId, input.ComponentId, input.Absent ? null : input.VersionId, input.Absent, batch.EffectiveAt, input.KnownInstalledAt, item.Id, cancellationToken); }
+        foreach (var input in request.Items) { var item = new DeploymentItem { Id = Guid.NewGuid(), DeploymentBatchId = batch.Id, ConfigurationComponentId = input.ComponentId, NewComponentVersionId = input.Absent ? null : input.VersionId, RevisionId = input.RevisionId, Result = input.Absent ? DeploymentItemResult.Absent : DeploymentItemResult.Succeeded, KnownInstalledAt = input.KnownInstalledAt }; db.DeploymentItems.Add(item); await UpsertCurrentAsync(db, machineId, input.ComponentId, input.Absent ? null : input.VersionId, input.Absent, batch.EffectiveAt, input.KnownInstalledAt, item.Id, cancellationToken, input.RevisionId); }
         if (coverage == ObservationCoverage.Full)
         {
             var allComponentIds = await db.ComponentVersions
@@ -509,7 +513,9 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         var versionIds = items.Where(item => item.ComponentVersionId is not null).Select(item => item.ComponentVersionId!.Value).ToArray();
         var components = await db.ConfigurationComponents.AsNoTracking().Where(item => componentIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, item => item.Name, cancellationToken);
         var versions = await db.ComponentVersions.IgnoreQueryFilters().AsNoTracking().Where(item => versionIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, item => item.VersionNumber, cancellationToken);
-        return TypedResults.Ok(items.Select(item => new { componentId = item.ConfigurationComponentId, componentName = components[item.ConfigurationComponentId], versionId = item.ComponentVersionId, versionNumber = item.ComponentVersionId is null ? null : versions[item.ComponentVersionId.Value], state = item.State.ToString(), stateEffectiveAt = item.StateEffectiveAt, knownInstalledAt = item.KnownInstalledAt }));
+        var revisionIds = items.Where(x => x.RevisionId != null).Select(x => x.RevisionId!.Value).ToArray();
+        var revisionNumbers = await db.ComponentVersionRevisions.Where(x => revisionIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.RevisionNo, cancellationToken);
+        return TypedResults.Ok(items.Select(item => new { componentId = item.ConfigurationComponentId, componentName = components[item.ConfigurationComponentId], versionId = item.ComponentVersionId, versionNumber = item.ComponentVersionId is null ? null : versions[item.ComponentVersionId.Value], revisionId = item.RevisionId, revisionNo = item.RevisionId is { } revisionId ? (int?)revisionNumbers[revisionId] : null, state = item.State.ToString(), stateEffectiveAt = item.StateEffectiveAt, knownInstalledAt = item.KnownInstalledAt }));
     }
 
     private static async Task<IResult> GetMachineConfigurationAtAsync(Guid machineId, DateTimeOffset? at, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
@@ -528,6 +534,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
             {
                 componentId = entry.item.ConfigurationComponentId,
                 versionId = entry.item.NewComponentVersionId,
+                revisionId = entry.item.RevisionId,
                 state = entry.item.Result == DeploymentItemResult.Absent ? "Absent" : "Present",
                 stateEffectiveAt = entry.batch.EffectiveAt,
                 recordedAt = entry.batch.RecordedAt,
@@ -540,6 +547,8 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         var versionIds = latestByComponent.Where(entry => entry.versionId is not null).Select(entry => entry.versionId!.Value).ToArray();
         var componentNames = await db.ConfigurationComponents.AsNoTracking().Where(component => componentIds.Contains(component.Id)).ToDictionaryAsync(component => component.Id, component => component.Name, cancellationToken);
         var versionNumbers = await db.ComponentVersions.IgnoreQueryFilters().AsNoTracking().Where(version => versionIds.Contains(version.Id)).ToDictionaryAsync(version => version.Id, version => version.VersionNumber, cancellationToken);
+        var revisionIds = latestByComponent.Where(x => x.revisionId != null).Select(x => x.revisionId!.Value).ToArray();
+        var revisionNumbers = await db.ComponentVersionRevisions.Where(x => revisionIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.RevisionNo, cancellationToken);
 
         return TypedResults.Ok(new
         {
@@ -549,6 +558,8 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
                 entry.componentId,
                 componentName = componentNames[entry.componentId],
                 entry.versionId,
+                entry.revisionId,
+                revisionNo = entry.revisionId is { } revisionId ? (int?)revisionNumbers[revisionId] : null,
                 versionNumber = entry.versionId is null ? null : versionNumbers[entry.versionId.Value],
                 entry.state,
                 entry.stateEffectiveAt,
@@ -930,11 +941,18 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         if (db.Entry(summary).State == EntityState.Detached) db.MachineDriftSummaries.Add(summary);
     }
 
-    private static async Task UpsertCurrentAsync(ConfigHubDbContext db, Guid machineId, Guid componentId, Guid? versionId, bool absent, DateTimeOffset effectiveAt, DateTimeOffset? knownInstalledAt, Guid sourceItemId, CancellationToken cancellationToken)
+    private static async Task UpsertCurrentAsync(ConfigHubDbContext db, Guid machineId, Guid componentId, Guid? versionId, bool absent, DateTimeOffset effectiveAt, DateTimeOffset? knownInstalledAt, Guid sourceItemId, CancellationToken cancellationToken, Guid? revisionId = null)
     {
         var current = await db.MachineCurrentConfigurations.FindAsync([machineId, componentId], cancellationToken);
-        if (current is null) db.MachineCurrentConfigurations.Add(new MachineCurrentConfiguration { MachineId = machineId, ConfigurationComponentId = componentId, ComponentVersionId = versionId, State = absent ? CurrentConfigurationState.Absent : CurrentConfigurationState.Present, StateEffectiveAt = effectiveAt, KnownInstalledAt = knownInstalledAt, SourceDeploymentItemId = sourceItemId });
-        else if (effectiveAt >= current.StateEffectiveAt) { current.ComponentVersionId = versionId; current.State = absent ? CurrentConfigurationState.Absent : CurrentConfigurationState.Present; current.StateEffectiveAt = effectiveAt; current.KnownInstalledAt = knownInstalledAt ?? current.KnownInstalledAt; current.SourceDeploymentItemId = sourceItemId; }
+        if (current is null) db.MachineCurrentConfigurations.Add(new MachineCurrentConfiguration { MachineId = machineId, ConfigurationComponentId = componentId, ComponentVersionId = versionId, RevisionId = revisionId, State = absent ? CurrentConfigurationState.Absent : CurrentConfigurationState.Present, StateEffectiveAt = effectiveAt, KnownInstalledAt = knownInstalledAt, SourceDeploymentItemId = sourceItemId });
+        else if (effectiveAt >= current.StateEffectiveAt)
+        {
+            var sameConfiguration = current.ComponentVersionId == versionId && current.RevisionId == revisionId && !absent;
+            current.KnownInstalledAt = knownInstalledAt ?? (sameConfiguration ? current.KnownInstalledAt : null);
+            current.ComponentVersionId = versionId; current.RevisionId = revisionId;
+            current.State = absent ? CurrentConfigurationState.Absent : CurrentConfigurationState.Present;
+            current.StateEffectiveAt = effectiveAt; current.SourceDeploymentItemId = sourceItemId;
+        }
     }
 
     private static async Task<IResult> GetProjectAsync(
@@ -2191,7 +2209,7 @@ public sealed record BulkRecordFactsRequest(List<Guid>? MachineIds, string? Oper
 public sealed record BulkBaselineUpgradeRequest(Guid ConfigurationBaselineId, List<Guid>? MachineIds, DateTimeOffset? EffectiveAt, string? Reason);
 public sealed record ExportVersionImpactRequest(string? Reason);
 public sealed record RebuildDriftSummariesRequest(string? Reason);
-public sealed record RecordFactItem(Guid ComponentId, Guid? VersionId, bool Absent, DateTimeOffset? KnownInstalledAt);
+public sealed record RecordFactItem(Guid ComponentId, Guid? VersionId, bool Absent, DateTimeOffset? KnownInstalledAt, Guid? RevisionId = null);
 public sealed record StageImportRequest(Guid ProjectId, string? SourceFileName, string? Reason, List<StageImportRow>? Rows);
 public sealed record StageImportRow(string? ComponentName, string? VersionNumber);
 public sealed record VersionCommandResult(ComponentVersion? Version, bool ComponentMissing, bool Duplicate);

@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import type { ConfigurationComponent } from './catalog-api'
 import { PatchBadge } from './VersionRecordTools'
 
-type ActualItem = { componentId: string; componentName: string; versionId: string | null; versionNumber: string | null; state: string; stateEffectiveAt: string; knownInstalledAt: string | null }
+type ActualItem = { componentId: string; componentName: string; versionId: string | null; versionNumber: string | null; revisionId?: string | null; revisionNo?: number | null; state: string; stateEffectiveAt: string; knownInstalledAt: string | null }
 
 export function ConfigurationTree({ components, items, onOpenVersion, onOpenPatches }: { components: ConfigurationComponent[]; items: ActualItem[]; onOpenVersion: (versionId: string) => void; onOpenPatches: (versionId: string) => void }) {
   const byId = new Map(items.map(item => [item.componentId, item]))
@@ -12,7 +12,7 @@ export function ConfigurationTree({ components, items, onOpenVersion, onOpenPatc
     const parent = component.parentComponentId && knownIds.has(component.parentComponentId) ? component.parentComponentId : null
     children.set(parent, [...children.get(parent) ?? [], component])
   }
-  const versionLabel = (item: ActualItem | undefined, component: ConfigurationComponent) => item?.state === 'Absent' ? '已确认缺失' : item?.versionNumber ?? (component.versions.length ? '尚未观察' : '结构分类')
+  const versionLabel = (item: ActualItem | undefined, component: ConfigurationComponent) => item?.state === 'Absent' ? '已确认缺失' : (item?.versionNumber ? `${item.versionNumber} · ${item.revisionNo == null ? '补丁状态未确认' : item.revisionNo === 0 ? '原始版' : `修订 ${item.revisionNo}`}` : null) ?? (component.versions.length ? '尚未观察' : '结构分类')
   const node = (component: ConfigurationComponent, root: boolean): ReactNode => {
     const item = byId.get(component.id)
     return <div key={component.id} className={root ? 'actual-root-column' : 'actual-child-branch'}>

@@ -6,6 +6,7 @@ public sealed class DeploymentItem
     public Guid DeploymentBatchId { get; set; }
     public Guid ConfigurationComponentId { get; set; }
     public Guid? NewComponentVersionId { get; set; }
+    public Guid? RevisionId { get; set; }
     public DeploymentItemResult Result { get; set; } = DeploymentItemResult.Succeeded;
     public DateTimeOffset? KnownInstalledAt { get; set; }
 }
