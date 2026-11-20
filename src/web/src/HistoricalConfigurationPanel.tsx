@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { RevisionIdentity } from './RevisionIdentity'
 import { useQuery } from '@tanstack/react-query'
 import { compareMachineCurrentToHistory, getMachineConfigurationAt, type ConfigurationComponent, type MachineSummary } from './catalog-api'
 import { PatchBadge } from './VersionRecordTools'
@@ -15,7 +16,7 @@ export function HistoricalConfigurationPanel({ machine, components, onOpenPatche
   const comparison = useQuery({ queryKey: ['machine-current-history-compare', machine.id, at], queryFn: () => compareMachineCurrentToHistory(machine.id, new Date(at).toISOString()), enabled: at !== '' })
   const versions = new Map(components.flatMap(component => component.versions.map(version => [version.id, version] as const)))
   const tree = components.map(component => ({ id: component.id, parentId: component.parentComponentId, name: component.name, sortOrder: component.sortOrder }))
-  const compared = comparison.data && { ...comparison.data, items: comparison.data.items.map(item => ({ ...item, expectedVersionId: item.historicalVersionId, expectedVersionNumber: item.historicalVersionNumber, actualVersionId: item.currentVersionId, actualVersionNumber: item.currentVersionNumber })) }
+  const compared = comparison.data && { ...comparison.data, items: comparison.data.items.map(item => ({ ...item, expectedRevisionId: item.historicalRevisionId, actualRevisionId: item.currentRevisionId, expectedVersionId: item.historicalVersionId, expectedVersionNumber: item.historicalVersionNumber, actualVersionId: item.currentVersionId, actualVersionNumber: item.currentVersionNumber })) }
 
   return <section className="historical-configuration">
     <div className="subsection-heading"><h3>时间点实际配置</h3><label className="history-time-filter">查看时间<input type="datetime-local" value={at} onChange={event => setAt(event.target.value)} /></label></div>
@@ -25,7 +26,7 @@ export function HistoricalConfigurationPanel({ machine, components, onOpenPatche
         <p className="comparison-structure-summary">按当前组件目录分组，不代表当时的组件层级。</p>
         <ComparisonTreeTable key={`${machine.id}:${at}`} rows={historical.data.items} primary={tree} secondary={tree} leftNodes={tree} rightNodes={tree} onlyDifferences={false} isDifferent={() => false} rowClass={() => ''} columnCount={3} className="history-configuration-table" emptyText="此时间点尚无已记录的配置事实。"
           header={<tr><th scope="col">组件</th><th scope="col">历史版本</th><th scope="col">事实时间</th></tr>}
-          renderCells={item => <><td><span className="comparison-version-number">{item.state === 'Present' ? item.versionNumber ?? '存在但未标明版本' : '已确认缺失'}</span>{item.state === 'Present' && item.versionId && <PatchBadge context="history" versionLabel={item.versionNumber ?? undefined} version={versions.get(item.versionId)} onOpen={() => onOpenPatches(item.versionId!)} />}</td><td className="historical-fact-times"><span>生效 {formatTime(item.stateEffectiveAt)}</span><span>记录 {formatTime(item.recordedAt)}</span><span>已知安装 {formatTime(item.knownInstalledAt)}</span></td></>} />
+          renderCells={item => <><td><span className="comparison-version-number">{item.state === 'Present' ? item.versionNumber ?? '存在但未标明版本' : '已确认缺失'}</span><RevisionIdentity versionId={item.versionId} revisionId={item.revisionId} />{item.state === 'Present' && item.versionId && <PatchBadge context="history" versionLabel={item.versionNumber ?? undefined} version={versions.get(item.versionId)} onOpen={() => onOpenPatches(item.versionId!)} />}</td><td className="historical-fact-times"><span>生效 {formatTime(item.stateEffectiveAt)}</span><span>记录 {formatTime(item.recordedAt)}</span><span>已知安装 {formatTime(item.knownInstalledAt)}</span></td></>} />
       </>}
       <div className="history-comparison"><h4>与当前实际对比</h4><MachineVersionComparison key={`${machine.id}:${at}`} data={compared} loading={comparison.isLoading} error={comparison.error} components={components} beforeLabel="历史版本" beforeContext="history" onOpenPatches={onOpenPatches} /></div>
     </>}

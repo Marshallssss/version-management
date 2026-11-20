@@ -39,7 +39,7 @@ export function FullConfigurationPanel({ machineId, projectId, components, onRec
 
   useEffect(() => {
     if (!baselineDetail.data) return
-    setRevisionSelections({})
+    setRevisionSelections(Object.fromEntries(baselineDetail.data.items.map(item => [item.componentId, item.revisionId ?? ''])))
     const selectedByComponent = new Map(baselineDetail.data.items.filter(item => item.versionId !== null).map(item => [item.componentId, item.versionId!]))
     setSelections(Object.fromEntries(configurableComponents.map(component => [component.id, selectedByComponent.get(component.id) ?? absentValue])))
   }, [baselineDetail.data, configurableComponents])

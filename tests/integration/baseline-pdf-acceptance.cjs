@@ -2,17 +2,19 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const { stripTypeScriptTypes } = require('node:module')
 const { chromium } = require('playwright')
-const compiled = stripTypeScriptTypes(fs.readFileSync('src/web/src/baseline-pdf.ts', 'utf8')).replaceAll('export function ', 'function ') + '\nexports.baselinePrintHtml = baselinePrintHtml;'
+const compiled = stripTypeScriptTypes(fs.readFileSync('src/web/src/revision-label.ts', 'utf8')).replaceAll('export function ', 'function ') + '\n' + stripTypeScriptTypes(fs.readFileSync('src/web/src/baseline-pdf.ts', 'utf8')).replace("import { revisionLabel } from './revision-label'", '').replaceAll('export function ', 'function ') + '\nexports.baselinePrintHtml = baselinePrintHtml;'
 const api = { exports: {} }
 new Function('exports', compiled)(api.exports)
 async function main() {
   const items = [{ id: 'root', parentItemId: null, componentName: '控制系统', sortOrder: 0, versionNumber: null }]
   for (let i = 0; i < 90; i++) items.push({ id: String(i), parentItemId: 'root', componentName: `子组件 ${i} <安全>`, sortOrder: i, versionNumber: `V1.0.${i}`, versionId: String(i), requirement: 'Required' })
   items[2].notConfigured = true
+  items[3].revisionNo = 0; items[4].revisionNo = 2
   const html = api.exports.baselinePrintHtml('中文项目', { baseline: { code: '历史基线 <script>恶意</script>', state: 'Released', revisionNo: 2, releasedAt: '2020-01-01T00:00:00Z', isHistorical: true, description: '历史评审记录' }, items })
   assert(!html.includes('<script>'))
   assert(html.includes('当时未配置'))
   assert(html.includes('北京时间'))
+  assert(html.includes('原始版')); assert(html.includes('修订 2')); assert(html.includes('补丁状态未确认'))
   assert.throws(() => api.exports.baselinePrintHtml('项目', { baseline: {}, items: [{ id: 'a', parentItemId: 'missing' }] }), /层级不完整/)
   const browser = await chromium.launch({ channel: 'msedge', headless: true })
   try {

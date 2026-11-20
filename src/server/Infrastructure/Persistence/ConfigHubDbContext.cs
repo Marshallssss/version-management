@@ -85,6 +85,13 @@ public sealed class ConfigHubDbContext(DbContextOptions<ConfigHubDbContext> opti
             entity.HasOne<ComponentVersion>().WithMany().HasForeignKey(x => x.ComponentVersionId).OnDelete(DeleteBehavior.Restrict);
         });
         MatrixImportModel.Configure(builder);
+        builder.Entity<BaselineItem>(entity =>
+        {
+            entity.Property(x => x.RevisionId).HasColumnName("revision_id");
+            entity.HasOne<ComponentVersionRevision>().WithMany().HasForeignKey(x => new { x.RevisionId, x.ComponentVersionId })
+                .HasPrincipalKey(x => new { x.Id, x.ComponentVersionId }).OnDelete(DeleteBehavior.Restrict);
+            entity.ToTable("baseline_items", table => table.HasCheckConstraint("ck_baseline_revision_version", "revision_id IS NULL OR (component_version_id IS NOT NULL AND NOT not_configured)"));
+        });
         builder.Entity<DeploymentItem>(entity =>
         {
             entity.Property(x => x.RevisionId).HasColumnName("revision_id");

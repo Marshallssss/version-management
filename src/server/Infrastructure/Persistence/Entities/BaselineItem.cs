@@ -6,6 +6,7 @@ public sealed class BaselineItem
     public Guid ConfigurationBaselineId { get; set; }
     public Guid ConfigurationComponentId { get; set; }
     public Guid? ComponentVersionId { get; set; }
+    public Guid? RevisionId { get; set; }
     public string? VersionNumberSnapshot { get; set; }
     public bool NotConfigured { get; set; }
     public string? HistoricalVersionState { get; set; }

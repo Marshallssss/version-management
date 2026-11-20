@@ -377,7 +377,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         if (baseline is null || baseline.State != BaselineState.Released) return Results.ValidationProblem(new Dictionary<string, string[]> { ["configurationBaselineId"] = ["必须选择本项目已发布基线。"] });
         var machines = await db.Machines.Where(item => request.MachineIds.Contains(item.Id) && item.ProjectId == projectId).Select(item => item.Id).ToArrayAsync(cancellationToken);
         if (machines.Length != request.MachineIds.Count) return Results.ValidationProblem(new Dictionary<string, string[]> { ["machineIds"] = ["所有机台必须存在且属于该项目。"] });
-        var items = await db.BaselineItems.AsNoTracking().Where(item => item.ConfigurationBaselineId == baseline.Id && item.ComponentVersionId != null).OrderBy(item => item.SortOrder).Select(item => new RecordFactItem(item.ConfigurationComponentId, item.ComponentVersionId, false, request.EffectiveAt)).ToListAsync(cancellationToken);
+        var items = await db.BaselineItems.AsNoTracking().Where(item => item.ConfigurationBaselineId == baseline.Id && item.ComponentVersionId != null).OrderBy(item => item.SortOrder).Select(item => new RecordFactItem(item.ConfigurationComponentId, item.ComponentVersionId, false, request.EffectiveAt, item.RevisionId)).ToListAsync(cancellationToken);
         if (items.Count == 0) return Results.ValidationProblem(new Dictionary<string, string[]> { ["configurationBaselineId"] = ["所选基线没有可升级的软件组件。"] });
         var now = DateTimeOffset.UtcNow;
         var actor = context.User.Identity?.Name ?? throw new InvalidOperationException("Authenticated actor is required.");
@@ -487,8 +487,8 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
             if (operation != DeploymentOperationType.Upgrade || coverage != ObservationCoverage.Full || sourceType != "baseline-upgrade") return Results.ValidationProblem(new Dictionary<string, string[]> { ["sourceConfigurationBaselineId"] = ["基线引用仅可用于完整覆盖的基线升级。"] });
             var sourceBaseline = await db.ConfigurationBaselines.SingleOrDefaultAsync(item => item.Id == request.SourceConfigurationBaselineId && item.ProjectId == machine.ProjectId, cancellationToken);
             if (sourceBaseline is null || sourceBaseline.State != BaselineState.Released) return Results.ValidationProblem(new Dictionary<string, string[]> { ["sourceConfigurationBaselineId"] = ["必须选择该项目已发布基线。"] });
-            var expectedItems = await db.BaselineItems.AsNoTracking().Where(item => item.ConfigurationBaselineId == sourceBaseline.Id && item.ComponentVersionId != null).Select(item => new { item.ConfigurationComponentId, item.ComponentVersionId }).ToListAsync(cancellationToken);
-            if (request.Items.Count != expectedItems.Count || request.Items.Select(item => item.ComponentId).Distinct().Count() != request.Items.Count || request.Items.Any(item => item.Absent || item.VersionId is null) || expectedItems.Any(expected => !request.Items.Any(item => item.ComponentId == expected.ConfigurationComponentId && item.VersionId == expected.ComponentVersionId))) return Results.ValidationProblem(new Dictionary<string, string[]> { ["items"] = ["基线升级的组件和版本必须与所选基线快照完全一致。"] });
+            var expectedItems = await db.BaselineItems.AsNoTracking().Where(item => item.ConfigurationBaselineId == sourceBaseline.Id && item.ComponentVersionId != null).Select(item => new { item.ConfigurationComponentId, item.ComponentVersionId, item.RevisionId }).ToListAsync(cancellationToken);
+            if (request.Items.Count != expectedItems.Count || request.Items.Select(item => item.ComponentId).Distinct().Count() != request.Items.Count || request.Items.Any(item => item.Absent || item.VersionId is null) || expectedItems.Any(expected => !request.Items.Any(item => item.ComponentId == expected.ConfigurationComponentId && item.VersionId == expected.ComponentVersionId && item.RevisionId == expected.RevisionId))) return Results.ValidationProblem(new Dictionary<string, string[]> { ["items"] = ["基线升级的组件、版本和补丁修订必须与所选基线快照完全一致。"] });
             batch.SourceConfigurationBaselineId = sourceBaseline.Id;
         }
         foreach (var input in request.Items) { var item = new DeploymentItem { Id = Guid.NewGuid(), DeploymentBatchId = batch.Id, ConfigurationComponentId = input.ComponentId, NewComponentVersionId = input.Absent ? null : input.VersionId, RevisionId = input.RevisionId, Result = input.Absent ? DeploymentItemResult.Absent : DeploymentItemResult.Succeeded, KnownInstalledAt = input.KnownInstalledAt }; db.DeploymentItems.Add(item); await UpsertCurrentAsync(db, machineId, input.ComponentId, input.Absent ? null : input.VersionId, input.Absent, batch.EffectiveAt, input.KnownInstalledAt, item.Id, cancellationToken, input.RevisionId); }
@@ -617,7 +617,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
             if (status != "Matched") mismatch = true;
             var versionId = found?.ComponentVersionId ?? wanted?.ComponentVersionId;
             if (versionId is not null && versions[versionId.Value].Safety == VersionSafety.Blocked) critical = true;
-            items.Add(new { componentId, componentName = wanted?.ComponentNameSnapshot ?? components[componentId], status, expectedVersionId = wanted?.ComponentVersionId, expectedVersionNumber = wanted?.NotConfigured == true ? "当时未配置" : wanted?.VersionNumberSnapshot, actualVersionId = found?.ComponentVersionId, actualVersionNumber = found?.ComponentVersionId is null ? null : versions[found.ComponentVersionId.Value].VersionNumber });
+            items.Add(new { revisionStatus = RevisionMatch(wanted?.ComponentVersionId, wanted?.RevisionId, found?.ComponentVersionId, found?.RevisionId), expectedRevisionId = wanted?.RevisionId, actualRevisionId = found?.RevisionId, componentId, componentName = wanted?.ComponentNameSnapshot ?? components[componentId], status, expectedVersionId = wanted?.ComponentVersionId, expectedVersionNumber = wanted?.NotConfigured == true ? "当时未配置" : wanted?.VersionNumberSnapshot, actualVersionId = found?.ComponentVersionId, actualVersionNumber = found?.ComponentVersionId is null ? null : versions[found.ComponentVersionId.Value].VersionNumber });
         }
         var chambers = await BuildMachineBaselineChamberComparisonsAsync(db, machineId, expected, actual.Values, cancellationToken);
         return new { machineId, baselineId, baselineCode = baseline.BaselineCode, matchStatus = mismatch ? "Mismatch" : "Matched", riskSeverity = critical ? "Critical" : "None", items, chambers };
@@ -650,7 +650,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
             var leftVersion = before?.State == CurrentConfigurationState.Present ? before.ComponentVersionId : null;
             var rightVersion = after?.State == CurrentConfigurationState.Present ? after.ComponentVersionId : null;
             var status = leftVersion == rightVersion ? "Matched" : leftVersion is null ? "RightOnly" : rightVersion is null ? "LeftOnly" : "Mismatch";
-            return new { componentId, componentName = components[componentId], status, leftVersionId = leftVersion, leftVersionNumber = leftVersion is null ? null : versions[leftVersion.Value].VersionNumber, rightVersionId = rightVersion, rightVersionNumber = rightVersion is null ? null : versions[rightVersion.Value].VersionNumber };
+            return new { revisionStatus = RevisionMatch(leftVersion, before?.RevisionId, rightVersion, after?.RevisionId), leftRevisionId = before?.RevisionId, rightRevisionId = after?.RevisionId, componentId, componentName = components[componentId], status, leftVersionId = leftVersion, leftVersionNumber = leftVersion is null ? null : versions[leftVersion.Value].VersionNumber, rightVersionId = rightVersion, rightVersionNumber = rightVersion is null ? null : versions[rightVersion.Value].VersionNumber };
         }).ToArray();
         var matchStatus = items.All(item => item.status == "Matched") ? "Matched" : "Mismatch";
         var riskSeverity = items.Any(item => (item.leftVersionId is not null && versions[item.leftVersionId.Value].Safety == VersionSafety.Blocked) || (item.rightVersionId is not null && versions[item.rightVersionId.Value].Safety == VersionSafety.Blocked)) ? "Critical" : "None";
@@ -664,7 +664,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         if (!await db.Machines.AnyAsync(machine => machine.Id == machineId, cancellationToken)) return Results.NotFound();
         var current = await db.MachineCurrentConfigurations.AsNoTracking().Where(state => state.MachineId == machineId).ToDictionaryAsync(state => state.ConfigurationComponentId, cancellationToken);
-        var historicalEvents = await db.DeploymentItems.AsNoTracking().Join(db.DeploymentBatches.AsNoTracking(), item => item.DeploymentBatchId, batch => batch.Id, (item, batch) => new { item, batch }).Where(entry => entry.batch.MachineId == machineId && entry.batch.EffectiveAt <= at.Value).OrderBy(entry => entry.batch.EffectiveAt).ThenBy(entry => entry.batch.RecordedAt).ThenBy(entry => entry.item.Id).Select(entry => new { componentId = entry.item.ConfigurationComponentId, versionId = entry.item.NewComponentVersionId, absent = entry.item.Result == DeploymentItemResult.Absent }).ToListAsync(cancellationToken);
+        var historicalEvents = await db.DeploymentItems.AsNoTracking().Join(db.DeploymentBatches.AsNoTracking(), item => item.DeploymentBatchId, batch => batch.Id, (item, batch) => new { item, batch }).Where(entry => entry.batch.MachineId == machineId && entry.batch.EffectiveAt <= at.Value).OrderBy(entry => entry.batch.EffectiveAt).ThenBy(entry => entry.batch.RecordedAt).ThenBy(entry => entry.item.Id).Select(entry => new { componentId = entry.item.ConfigurationComponentId, versionId = entry.item.NewComponentVersionId, revisionId = entry.item.RevisionId, absent = entry.item.Result == DeploymentItemResult.Absent }).ToListAsync(cancellationToken);
         var historical = historicalEvents.GroupBy(entry => entry.componentId).ToDictionary(group => group.Key, group => group.Last());
         var versionIds = current.Values.Where(state => state.State == CurrentConfigurationState.Present && state.ComponentVersionId is not null).Select(state => state.ComponentVersionId!.Value).Concat(historical.Values.Where(state => !state.absent && state.versionId is not null).Select(state => state.versionId!.Value)).Distinct().ToArray();
         var versions = await db.ComponentVersions.IgnoreQueryFilters().AsNoTracking().Where(version => versionIds.Contains(version.Id)).ToDictionaryAsync(version => version.Id, version => new { version.VersionNumber, version.Safety }, cancellationToken);
@@ -676,7 +676,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
             var currentVersion = currentState?.State == CurrentConfigurationState.Present ? currentState.ComponentVersionId : null;
             var historicalVersion = historicalState is not null && !historicalState.absent ? historicalState.versionId : null;
             var status = currentVersion == historicalVersion ? "Matched" : currentVersion is null ? "HistoricalOnly" : historicalVersion is null ? "CurrentOnly" : "Mismatch";
-            return new { componentId, componentName = components[componentId], status, currentVersionId = currentVersion, currentVersionNumber = currentVersion is null ? null : versions[currentVersion.Value].VersionNumber, historicalVersionId = historicalVersion, historicalVersionNumber = historicalVersion is null ? null : versions[historicalVersion.Value].VersionNumber };
+            return new { revisionStatus = RevisionMatch(currentVersion, currentState?.RevisionId, historicalVersion, historicalState?.revisionId), currentRevisionId = currentState?.RevisionId, historicalRevisionId = historicalState?.revisionId, componentId, componentName = components[componentId], status, currentVersionId = currentVersion, currentVersionNumber = currentVersion is null ? null : versions[currentVersion.Value].VersionNumber, historicalVersionId = historicalVersion, historicalVersionNumber = historicalVersion is null ? null : versions[historicalVersion.Value].VersionNumber };
         }).ToArray();
         var matchStatus = items.All(item => item.status == "Matched") ? "Matched" : "Mismatch";
         var riskSeverity = items.Any(item => (item.currentVersionId is not null && versions[item.currentVersionId.Value].Safety == VersionSafety.Blocked) || (item.historicalVersionId is not null && versions[item.historicalVersionId.Value].Safety == VersionSafety.Blocked)) ? "Critical" : "None";
@@ -717,6 +717,9 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
             {
                 componentId,
                 status,
+                revisionStatus = RevisionMatch(before?.ComponentVersionId, before?.RevisionId, after?.ComponentVersionId, after?.RevisionId),
+                leftRevisionId = before?.RevisionId,
+                rightRevisionId = after?.RevisionId,
                 componentName = before?.ComponentNameSnapshot ?? after?.ComponentNameSnapshot,
                 leftVersionId = before?.ComponentVersionId,
                 leftVersionNumber = before?.NotConfigured == true ? "当时未配置" : before?.VersionNumberSnapshot,
@@ -1069,7 +1072,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         await using var database = await factory.CreateDbContextAsync(cancellationToken);
         var baseline = await database.ConfigurationBaselines.AsNoTracking().Where(item => item.Id == baselineId).Select(item => new { id = item.Id, projectId = item.ProjectId, code = item.BaselineCode, seriesCode = database.BaselineSeries.Where(series => series.Id == item.BaselineSeriesId).Select(series => series.SeriesCode).Single(), revisionNo = item.RevisionNo, state = item.State.ToString(), item.Description, item.CreatedBy, item.CreatedAt, item.ReleasedBy, item.ReleasedAt, item.ApprovedBy, item.IsHistorical, releaseRecordedAt = database.BaselineLifecycleTransitions.Where(transition => transition.ConfigurationBaselineId == item.Id && transition.FromState == "Draft" && transition.ToState == "Released").Max(transition => (DateTimeOffset?)transition.OccurredAt) }).SingleOrDefaultAsync(cancellationToken);
         if (baseline is null) return Results.NotFound();
-        var items = await database.BaselineItems.AsNoTracking().Where(item => item.ConfigurationBaselineId == baselineId).OrderBy(item => item.LineageKeySnapshot).Select(item => new { id = item.Id, parentItemId = item.ParentBaselineItemId, componentId = item.ConfigurationComponentId, versionId = item.ComponentVersionId, versionNumber = item.VersionNumberSnapshot, componentName = item.ComponentNameSnapshot, lineageKey = item.LineageKeySnapshot, requirement = item.Requirement.ToString(), item.SortOrder, item.NotConfigured, item.HistoricalVersionState }).ToListAsync(cancellationToken);
+        var items = await database.BaselineItems.AsNoTracking().Where(item => item.ConfigurationBaselineId == baselineId).OrderBy(item => item.LineageKeySnapshot).Select(item => new { id = item.Id, parentItemId = item.ParentBaselineItemId, componentId = item.ConfigurationComponentId, versionId = item.ComponentVersionId, versionNumber = item.VersionNumberSnapshot, revisionId = item.RevisionId, revisionNo = database.ComponentVersionRevisions.Where(r => r.Id == item.RevisionId).Select(r => (int?)r.RevisionNo).FirstOrDefault(), componentName = item.ComponentNameSnapshot, lineageKey = item.LineageKeySnapshot, requirement = item.Requirement.ToString(), item.SortOrder, item.NotConfigured, item.HistoricalVersionState }).ToListAsync(cancellationToken);
         var review = await database.BaselineReviews.AsNoTracking().Where(item => item.ConfigurationBaselineId == baselineId).OrderByDescending(item => item.RequestedAt).Select(item => new { id = item.Id, status = item.Status.ToString(), item.RequestedBy, item.RequestedAt, item.RequestReason, item.DecidedBy, item.DecidedAt, item.DecisionReason }).FirstOrDefaultAsync(cancellationToken);
         return TypedResults.Ok(new { baseline, review, items });
     }
@@ -1141,6 +1144,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         if (versions.Count != selectedVersionIds.Distinct().Count() || selections.Any(item => !components.Contains(item.ComponentId) || !versions.TryGetValue(item.VersionId, out var version) || version.ComponentId != item.ComponentId)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["versionSelections"] = ["维护模式只能选择该草稿组件的已发布版本。"] });
         var now = DateTimeOffset.UtcNow;
         await database.Database.ExecuteSqlRawAsync("SET LOCAL confighub.baseline_maintenance = 'on';", cancellationToken);
+        if (!await ValidBaselineRevisionsAsync(database, selections, cancellationToken)) return Results.BadRequest(new { message = "补丁修订必须属于所选组件版本。" });
         database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) });
         var previousReleasedAt = baseline.ReleasedAt;
         if (request.ReleasedAt is not null) baseline.ReleasedAt = request.ReleasedAt.Value.ToUniversalTime();
@@ -1149,6 +1153,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
             var item = items.Single(item => item.ConfigurationComponentId == selection.ComponentId);
             var version = versions[selection.VersionId];
             item.ComponentVersionId = version.Id;
+            item.RevisionId = selection.RevisionId;
             item.VersionNumberSnapshot = version.VersionNumber;
             item.NotConfigured = false;
             if (baseline.IsHistorical) item.HistoricalVersionState = "HistoricalReleased";
@@ -1243,6 +1248,8 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
             versionsByComponent = explicitSelections.ToDictionary(item => item.ComponentId, item => releasedSelections[item.VersionId]);
         }
 
+        if (!await ValidBaselineRevisionsAsync(database, explicitSelections, cancellationToken)) return Results.BadRequest(new { message = "补丁修订必须属于所选组件版本。" });
+        var revisionsByComponent = explicitSelections.ToDictionary(item => item.ComponentId, item => item.RevisionId);
         if (testingVersions.Any(v => versionsByComponent.GetValueOrDefault(v.ComponentId)?.Id != v.Id))
             return Results.ValidationProblem(new Dictionary<string, string[]> { ["testingVersionIds"] = ["勾选发布的测试版本必须与基线快照选定版本一致。"] });
         if (await ValidateLaboratoryReleaseAsync(database, context, testingVersionIds, cancellationToken) is { } laboratoryError)
@@ -1289,6 +1296,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
                 ConfigurationBaselineId = baseline.Id,
                 ConfigurationComponentId = component.Id,
                 ComponentVersionId = version?.Id,
+                RevisionId = revisionsByComponent.GetValueOrDefault(component.Id),
                 VersionNumberSnapshot = version?.VersionNumber,
                 ParentBaselineItemId = component.ParentComponentId is null ? null : baselineItemIds[component.ParentComponentId.Value],
                 ComponentCodeSnapshot = component.ComponentCode,
@@ -2193,7 +2201,7 @@ public sealed record CloneProjectRequest(string? Code, string? Name, string? Rea
 public sealed record MoveComponentRequest(Guid? ParentComponentId, string? Reason);
 public sealed record ReorderComponentRequest(string? Direction, string? Reason);
 public sealed record CreateBaselineRequest(string? SeriesCode, string? BaselineCode, string? Description, string? Reason, IReadOnlyList<BaselineVersionSelectionRequest>? VersionSelections = null, IReadOnlyList<Guid>? TestingVersionIds = null, bool PublishImmediately = false);
-public sealed record BaselineVersionSelectionRequest(Guid ComponentId, Guid VersionId);
+public sealed record BaselineVersionSelectionRequest(Guid ComponentId, Guid VersionId, Guid? RevisionId = null);
 public sealed record MaintainBaselineDraftRequest(DateTimeOffset? ReleasedAt, IReadOnlyList<BaselineVersionSelectionRequest>? VersionSelections, string? Reason, bool MaintenanceMode, DateTimeOffset? CreatedAt = null);
 public sealed record SetBaselineItemRequirementRequest(string? Requirement, string? Reason);
 public sealed record BaselineReviewRequest(string? Reason);

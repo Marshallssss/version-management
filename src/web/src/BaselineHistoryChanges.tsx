@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { revisionLabel } from './revision-label'
 import { getBaselineDetail } from './catalog-api'
 import { ComparisonTreeTable, comparisonPath, hierarchyChanged, snapshotNodes } from './ComparisonTreeTable'
 
@@ -6,7 +7,7 @@ type Snapshot = Awaited<ReturnType<typeof getBaselineDetail>>
 type SnapshotItem = Snapshot['items'][number]
 
 function versionLabel(item: SnapshotItem | undefined) {
-  return !item ? '未纳入' : item.notConfigured ? '当时未配置' : item.versionNumber ?? '结构分类节点'
+  return !item ? '未纳入' : item.notConfigured ? '当时未配置' : item.versionNumber ? `${item.versionNumber} · ${revisionLabel(item.revisionNo)}` : '结构分类节点'
 }
 
 export function BaselineHistoryChanges({ previousId, previousName, current }: { previousId: string; previousName: string; current: Snapshot }) {
@@ -23,6 +24,7 @@ export function BaselineHistoryChanges({ previousId, previousName, current }: { 
     else if (!right) changes.push('已移除')
     else {
       if (left.versionId !== right.versionId || left.versionNumber !== right.versionNumber || left.notConfigured !== right.notConfigured) changes.push('版本或配置变化')
+      if (left.revisionId !== right.revisionId) changes.push('补丁修订变化')
       if (hierarchyChanged(leftNodes, rightNodes, componentId)) changes.push('层级或名称变化')
       if (left.requirement !== right.requirement) changes.push('必选性变化')
       if (left.sortOrder !== right.sortOrder) changes.push('排序变化')

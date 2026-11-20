@@ -274,6 +274,10 @@ namespace ConfigHub.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(32)")
                         .HasColumnName("requirement");
 
+                    b.Property<Guid?>("RevisionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("revision_id");
+
                     b.Property<int>("SortOrder")
                         .HasColumnType("integer")
                         .HasColumnName("sort_order");
@@ -296,12 +300,16 @@ namespace ConfigHub.Infrastructure.Persistence.Migrations
                         .IsUnique()
                         .HasDatabaseName("ux_baseline_items_baseline_component");
 
+                    b.HasIndex("RevisionId", "ComponentVersionId");
+
                     b.HasIndex("ConfigurationBaselineId", "ParentBaselineItemId", "SortOrder")
                         .HasDatabaseName("ix_baseline_items_baseline_parent_sort");
 
                     b.ToTable("baseline_items", null, t =>
                         {
                             t.HasCheckConstraint("ck_baseline_item_not_configured", "NOT not_configured OR (component_version_id IS NULL AND historical_version_state IS NULL)");
+
+                            t.HasCheckConstraint("ck_baseline_revision_version", "revision_id IS NULL OR (component_version_id IS NOT NULL AND NOT not_configured)");
                         });
                 });
 
@@ -2431,6 +2439,12 @@ namespace ConfigHub.Infrastructure.Persistence.Migrations
                     b.HasOne("ConfigHub.Infrastructure.Persistence.Entities.BaselineItem", null)
                         .WithMany()
                         .HasForeignKey("ParentBaselineItemId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ConfigHub.Infrastructure.Persistence.Entities.ComponentVersionRevision", null)
+                        .WithMany()
+                        .HasForeignKey("RevisionId", "ComponentVersionId")
+                        .HasPrincipalKey("Id", "ComponentVersionId")
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 

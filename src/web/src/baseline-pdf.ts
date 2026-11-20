@@ -1,3 +1,4 @@
+import { revisionLabel } from './revision-label'
 import type { getBaselineDetail } from './catalog-api'
 
 type Snapshot = Awaited<ReturnType<typeof getBaselineDetail>>
@@ -11,7 +12,7 @@ export function baselinePrintHtml(projectName: string, snapshot: Snapshot): stri
     for (const item of items.filter(item => item.parentItemId === parent).sort((a, b) => a.sortOrder - b.sortOrder || a.componentName.localeCompare(b.componentName, 'zh-CN', { numeric: true }))) {
       if (visited.has(item.id)) continue
       visited.add(item.id)
-      rows.push(`<tr class="${depth === 0 ? 'root' : ''}"><td style="padding-left:${10 + Math.min(depth, 8) * 16}px">${depth ? '└ ' : ''}${escape(item.componentName)}</td><td>${escape(item.notConfigured ? '当时未配置' : item.versionNumber ?? '结构分类节点')}</td><td>${item.versionId ? item.requirement === 'Optional' ? '可选' : '必选' : '—'}${item.historicalVersionState ? ' · 历史已发布' : ''}</td></tr>`)
+      rows.push(`<tr class="${depth === 0 ? 'root' : ''}"><td style="padding-left:${10 + Math.min(depth, 8) * 16}px">${depth ? '└ ' : ''}${escape(item.componentName)}</td><td>${escape(item.notConfigured ? '当时未配置' : item.versionNumber ? `${item.versionNumber} · ${revisionLabel(item.revisionNo)}` : '结构分类节点')}</td><td>${item.versionId ? item.requirement === 'Optional' ? '可选' : '必选' : '—'}${item.historicalVersionState ? ' · 历史已发布' : ''}</td></tr>`)
       render(item.id, depth + 1)
     }
   }
