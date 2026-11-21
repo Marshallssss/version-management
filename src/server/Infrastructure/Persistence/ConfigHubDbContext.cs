@@ -68,6 +68,16 @@ public sealed class ConfigHubDbContext(DbContextOptions<ConfigHubDbContext> opti
         base.OnModelCreating(builder);
         ConfigHubModel.Configure(builder);
         MachineEquipmentModel.Configure(builder);
+        builder.Entity<MachineChamberVersion>(entity =>
+        {
+            entity.Property(x => x.RevisionId).HasColumnName("revision_id");
+            entity.Property(x => x.IsUnknown).HasColumnName("is_unknown");
+            entity.Property(x => x.EffectiveAt).HasColumnName("effective_at");
+            entity.Property(x => x.KnownInstalledAt).HasColumnName("known_installed_at");
+            entity.HasOne<ComponentVersionRevision>().WithMany().HasForeignKey(x => new { x.RevisionId, x.VersionId })
+                .HasPrincipalKey(x => new { x.Id, x.ComponentVersionId }).OnDelete(DeleteBehavior.Restrict);
+            entity.ToTable("machine_chamber_versions", table => table.HasCheckConstraint("ck_chamber_revision_state", "(revision_id IS NULL OR version_id IS NOT NULL) AND (NOT is_unknown OR (version_id IS NULL AND revision_id IS NULL AND known_installed_at IS NULL))"));
+        });
         builder.Entity<ComponentVersionRevision>(entity =>
         {
             entity.ToTable("component_version_revisions", table => table.HasCheckConstraint("ck_revision_number", "revision_no >= 0"));
@@ -109,6 +119,9 @@ public sealed class ConfigHubDbContext(DbContextOptions<ConfigHubDbContext> opti
         LaboratoryModel.Configure(builder);
         builder.Entity<ConfigurationComponent>(entity =>
         {
+            entity.Property(x => x.IsPmRoot).HasColumnName("is_pm_root");
+            entity.HasIndex(x => x.ProjectId).HasDatabaseName("ux_project_pm_root").IsUnique().HasFilter("is_pm_root");
+            entity.ToTable("configuration_components", table => table.HasCheckConstraint("ck_pm_root", "NOT is_pm_root OR parent_component_id IS NULL"));
             entity.Property(x => x.Owner).HasColumnName("owner").HasMaxLength(160);
             entity.Property(x => x.Model).HasColumnName("model").HasMaxLength(200);
             entity.Property(x => x.Notes).HasColumnName("notes").HasMaxLength(2000);

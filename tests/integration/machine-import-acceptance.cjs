@@ -22,7 +22,9 @@ async function main() {
     const [projectId, other] = projects, route = `/api/v1/projects/${projectId}/machine-import`
     const component = await write(`/api/v1/projects/${projectId}/components`, { name: '控制器', reason: '验收' })
     const version = await write(`/api/v1/components/${component.id}/versions`, { versionNumber: '001.02', maturity: 'Released', reason: '验收' })
-    await write(`/api/v1/projects/${projectId}/baselines`, { seriesCode: 'XLSX', baselineCode: '机台基线一', publishImmediately: true, reason: '验收' })
+    const patch = await write(`/api/v1/component-versions/${version.id}/patches`, { patchCode: 'P1', title: '导入修订验收', issueDescription: '问题', resolutionDescription: '修复', status: 'Released' })
+    const revision = await write(`/api/v1/component-versions/${version.id}/revisions`, { patchIds: [patch.id], reason: '验收' })
+    await write(`/api/v1/projects/${projectId}/baselines`, { seriesCode: 'XLSX', baselineCode: '机台基线一', publishImmediately: true, reason: '验收', versionSelections: [{ componentId: component.id, versionId: version.id, revisionId: revision.id }] })
     const download = await api.get(`${route}/template`); assert(download.ok())
     const original = await download.body()
     const fixture = changes => {
@@ -111,6 +113,7 @@ async function main() {
     assert.equal(machines.find(m => m.id === b).status, 'ShortTermCip')
     const actual = await get(`/api/v1/machines/${a}/configuration`)
     assert.equal(actual[0].versionId, version.id); assert.equal(actual[0].knownInstalledAt, null)
+    assert.equal(actual[0].revisionId, revision.id, 'Excel baseline selection must preserve the frozen patch revision')
     assert.equal((await get(`/api/v1/machines/${b}/configuration`)).length, 0)
     assert.equal((await get(`/api/v1/machines/${c}/configuration`)).length, 0)
     assert.equal(await (await api.get(`/api/v1/machines/${a}/target`)).text(), '')

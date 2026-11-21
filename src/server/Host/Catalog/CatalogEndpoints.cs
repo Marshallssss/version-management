@@ -47,6 +47,8 @@ public static partial class CatalogEndpoints
         projects.MapGet("/{projectId:guid}/standard", GetProjectStandardAsync);
         projects.MapPost("/{projectId:guid}/standard", AssignProjectStandardAsync).RequireAuthorization("SeniorEngineer");
         projects.MapPost("/{projectId:guid}/bulk-machine-targets", AssignBulkMachineTargetsAsync).RequireAuthorization("SeniorEngineer");
+        projects.MapGet("/{projectId:guid}/pm-configuration", GetPmConfigurationAsync);
+        projects.MapPut("/{projectId:guid}/pm-configuration", SetPmConfigurationAsync).RequireAuthorization("SeniorEngineer");
         projects.MapPost("/{projectId:guid}/bulk-facts", RecordBulkFactsAsync).RequireAuthorization("Engineer");
         projects.MapPost("/{projectId:guid}/bulk-baseline-upgrades", UpgradeMachinesToBaselineAsync).RequireAuthorization("Engineer");
         endpoints.MapPost("/api/v1/baselines/{baselineId:guid}/release", ReleaseBaselineAsync).RequireAuthorization("SeniorEngineer");
@@ -442,7 +444,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
 
     private static async Task<IResult> RecordFactsCoreAsync(Guid machineId, RecordFactsRequest request, HttpContext context, IDbContextFactory<ConfigHubDbContext> factory, string? idempotencyKey, CancellationToken cancellationToken, bool laboratoryOnly = false)
     {
-        if (!Enum.TryParse<DeploymentOperationType>(request.OperationType, true, out var operation) || !Enum.TryParse<ObservationCoverage>(request.Coverage, true, out var coverage) || string.IsNullOrWhiteSpace(request.SourceType) || string.IsNullOrWhiteSpace(request.Reason) || request.Items is null || request.Items.Count == 0) return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = ["必须提供操作类型、覆盖范围、来源、原因和事实项。"] });
+        if (!Enum.TryParse<DeploymentOperationType>(request.OperationType, true, out var operation) || !Enum.TryParse<ObservationCoverage>(request.Coverage, true, out var coverage) || string.IsNullOrWhiteSpace(request.SourceType) || string.IsNullOrWhiteSpace(request.Reason) || request.Items is null || request.Items.Count == 0 && !(request.MultiVersion && request.PmObservations?.Count > 0)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = ["必须提供操作类型、覆盖范围、来源、原因和事实项。"] });
         var key = idempotencyKey; if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return Results.ValidationProblem(new Dictionary<string, string[]> { ["Idempotency-Key"] = ["记录事实必须提供不超过 200 个字符的 Idempotency-Key。"] });
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request)))); var scope = $"deployment-facts:{machineId}";
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
@@ -491,6 +493,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
             if (request.Items.Count != expectedItems.Count || request.Items.Select(item => item.ComponentId).Distinct().Count() != request.Items.Count || request.Items.Any(item => item.Absent || item.VersionId is null) || expectedItems.Any(expected => !request.Items.Any(item => item.ComponentId == expected.ConfigurationComponentId && item.VersionId == expected.ComponentVersionId && item.RevisionId == expected.RevisionId))) return Results.ValidationProblem(new Dictionary<string, string[]> { ["items"] = ["基线升级的组件、版本和补丁修订必须与所选基线快照完全一致。"] });
             batch.SourceConfigurationBaselineId = sourceBaseline.Id;
         }
+        if (await ApplyPmObservationsAsync(db, machine, request, batch, context, cancellationToken) is { } pmError) return pmError;
         foreach (var input in request.Items) { var item = new DeploymentItem { Id = Guid.NewGuid(), DeploymentBatchId = batch.Id, ConfigurationComponentId = input.ComponentId, NewComponentVersionId = input.Absent ? null : input.VersionId, RevisionId = input.RevisionId, Result = input.Absent ? DeploymentItemResult.Absent : DeploymentItemResult.Succeeded, KnownInstalledAt = input.KnownInstalledAt }; db.DeploymentItems.Add(item); await UpsertCurrentAsync(db, machineId, input.ComponentId, input.Absent ? null : input.VersionId, input.Absent, batch.EffectiveAt, input.KnownInstalledAt, item.Id, cancellationToken, input.RevisionId); }
         if (coverage == ObservationCoverage.Full)
         {
@@ -572,7 +575,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
     private static async Task<IResult> ListMachineFactsAsync(Guid machineId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var facts = await db.DeploymentBatches.AsNoTracking().Where(item => item.MachineId == machineId).OrderByDescending(item => item.EffectiveAt).ThenByDescending(item => item.RecordedAt).Select(item => new { id = item.Id, operationType = item.OperationType.ToString(), coverage = item.Coverage.ToString(), sourceType = item.SourceType, sourceBaselineId = item.SourceConfigurationBaselineId, sourceBaselineCode = db.ConfigurationBaselines.Where(baseline => baseline.Id == item.SourceConfigurationBaselineId).Select(baseline => baseline.BaselineCode).FirstOrDefault(), correctsDeploymentBatchId = item.CorrectsDeploymentBatchId, recordedAt = item.RecordedAt, effectiveAt = item.EffectiveAt, itemCount = db.DeploymentItems.Count(detail => detail.DeploymentBatchId == item.Id) }).ToListAsync(cancellationToken);
+        var facts = await db.DeploymentBatches.AsNoTracking().Where(item => item.MachineId == machineId).OrderByDescending(item => item.EffectiveAt).ThenByDescending(item => item.RecordedAt).Select(item => new { id = item.Id, operationType = item.OperationType.ToString(), coverage = item.Coverage.ToString(), sourceType = item.SourceType, sourceBaselineId = item.SourceConfigurationBaselineId, sourceBaselineCode = db.ConfigurationBaselines.Where(baseline => baseline.Id == item.SourceConfigurationBaselineId).Select(baseline => baseline.BaselineCode).FirstOrDefault(), correctsDeploymentBatchId = item.CorrectsDeploymentBatchId, recordedAt = item.RecordedAt, effectiveAt = item.EffectiveAt, itemCount = db.DeploymentItems.Count(detail => detail.DeploymentBatchId == item.Id), pmObservationCount = db.MachineEquipmentHistory.Count(h => h.MachineId == machineId && h.Kind == "ChamberObserved" && h.Details.RootElement.GetProperty("deploymentBatchId").GetString() == item.Id.ToString()) }).ToListAsync(cancellationToken);
         return TypedResults.Ok(facts);
     }
 
@@ -606,6 +609,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         var versions = await db.ComponentVersions.IgnoreQueryFilters().AsNoTracking().Where(item => versionIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, item => new { item.VersionNumber, item.Safety }, cancellationToken);
         var items = new List<object>();
         var mismatch = false;
+        var patchUnknown = false;
         var critical = false;
         foreach (var componentId in componentIds)
         {
@@ -614,13 +618,14 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
             var status = wanted?.NotConfigured == true
                 ? found is null ? "Unknown" : found.State == CurrentConfigurationState.Absent ? "Matched" : "Extra"
                 : wanted is null ? "Extra" : found is null || found.State == CurrentConfigurationState.Absent ? "Missing" : wanted.ComponentVersionId == found.ComponentVersionId ? "Matched" : "Mismatch";
-            if (status != "Matched") mismatch = true;
+            if (status != "Matched" || wanted?.RevisionId is not null && found?.RevisionId is not null && wanted.RevisionId != found.RevisionId) mismatch = true;
+            if (status == "Matched" && wanted?.RevisionId is not null && found?.RevisionId is null) patchUnknown = true;
             var versionId = found?.ComponentVersionId ?? wanted?.ComponentVersionId;
             if (versionId is not null && versions[versionId.Value].Safety == VersionSafety.Blocked) critical = true;
             items.Add(new { revisionStatus = RevisionMatch(wanted?.ComponentVersionId, wanted?.RevisionId, found?.ComponentVersionId, found?.RevisionId), expectedRevisionId = wanted?.RevisionId, actualRevisionId = found?.RevisionId, componentId, componentName = wanted?.ComponentNameSnapshot ?? components[componentId], status, expectedVersionId = wanted?.ComponentVersionId, expectedVersionNumber = wanted?.NotConfigured == true ? "当时未配置" : wanted?.VersionNumberSnapshot, actualVersionId = found?.ComponentVersionId, actualVersionNumber = found?.ComponentVersionId is null ? null : versions[found.ComponentVersionId.Value].VersionNumber });
         }
         var chambers = await BuildMachineBaselineChamberComparisonsAsync(db, machineId, expected, actual.Values, cancellationToken);
-        return new { machineId, baselineId, baselineCode = baseline.BaselineCode, matchStatus = mismatch ? "Mismatch" : "Matched", riskSeverity = critical ? "Critical" : "None", items, chambers };
+        return new { machineId, baselineId, baselineCode = baseline.BaselineCode, matchStatus = mismatch ? "Mismatch" : patchUnknown ? "Unknown" : "Matched", riskSeverity = critical ? "Critical" : "None", items, chambers };
     }
 
     private static async Task<IResult> GetMachineDriftSummaryAsync(Guid machineId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
@@ -788,10 +793,14 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         var projects = await db.Projects.AsNoTracking().Where(item => !projectId.HasValue || item.Id == projectId).Where(item => EF.Functions.ILike(item.Code, pattern) || EF.Functions.ILike(item.Name, pattern)).OrderBy(item => item.Code).Select(item => new { type = "Project", id = item.Id, projectId = item.Id, label = item.Code + " · " + item.Name }).Take(20).ToListAsync(cancellationToken);
         var components = await db.ConfigurationComponents.AsNoTracking().Where(item => !projectId.HasValue || item.ProjectId == projectId).Where(item => EF.Functions.ILike(item.Name, pattern)).OrderBy(item => item.Name).Select(item => new { type = "Component", id = item.Id, projectId = item.ProjectId, label = item.Name }).Take(20).ToListAsync(cancellationToken);
         var versions = await db.ComponentVersions.AsNoTracking().Where(item => EF.Functions.ILike(item.VersionNumber, pattern)).Join(db.ConfigurationComponents.AsNoTracking().Where(item => !projectId.HasValue || item.ProjectId == projectId), version => version.ComponentId, component => component.Id, (version, component) => new { version, component }).OrderBy(item => item.version.VersionNumber).Select(item => new { type = "Version", id = item.version.Id, projectId = item.component.ProjectId, label = item.version.VersionNumber }).Take(20).ToListAsync(cancellationToken);
+        var revisions = await db.ComponentVersionRevisions.FromSqlInterpolated($"SELECT r.* FROM component_version_revisions r JOIN component_versions v ON v.id = r.component_version_id WHERE r.patches::text ILIKE {pattern} OR (v.version_number || ' 修订 ' || r.revision_no::text) ILIKE {pattern}").AsNoTracking()
+            .Join(db.ComponentVersions.AsNoTracking(), revision => revision.ComponentVersionId, version => version.Id, (revision, version) => new { revision, version })
+            .Join(db.ConfigurationComponents.AsNoTracking().Where(c => !projectId.HasValue || c.ProjectId == projectId), x => x.version.ComponentId, c => c.Id, (x, c) => new { x.revision, x.version, c.ProjectId })
+            .OrderByDescending(x => x.revision.CreatedAt).Select(x => new { type = "Revision", id = x.revision.Id, projectId = x.ProjectId, versionId = x.version.Id, label = x.version.VersionNumber + (x.revision.RevisionNo == 0 ? " · 原始版" : " · 修订 " + x.revision.RevisionNo) }).Take(20).ToListAsync(cancellationToken);
         var patches = await db.VersionPatches.AsNoTracking().Where(item => EF.Functions.ILike(item.PatchCode, pattern) || EF.Functions.ILike(item.Title, pattern) || EF.Functions.ILike(item.IssueDescription, pattern) || EF.Functions.ILike(item.ResolutionDescription, pattern)).Join(db.ComponentVersions.AsNoTracking(), patch => patch.ComponentVersionId, version => version.Id, (patch, version) => new { patch, version }).Join(db.ConfigurationComponents.AsNoTracking().Where(item => !projectId.HasValue || item.ProjectId == projectId), value => value.version.ComponentId, component => component.Id, (value, component) => new { value.patch, value.version, component }).OrderByDescending(item => item.patch.RecordedAt).Select(item => new { type = "Patch", id = item.patch.Id, projectId = item.component.ProjectId, versionId = item.version.Id, label = item.patch.PatchCode + " · " + item.version.VersionNumber + " · " + item.patch.Title }).Take(20).ToListAsync(cancellationToken);
         var baselines = await db.ConfigurationBaselines.AsNoTracking().Where(item => !projectId.HasValue || item.ProjectId == projectId).Where(item => EF.Functions.ILike(item.BaselineCode, pattern)).OrderBy(item => item.BaselineCode).Select(item => new { type = "Baseline", id = item.Id, projectId = item.ProjectId, label = item.BaselineCode }).Take(20).ToListAsync(cancellationToken);
         var machines = await db.Machines.AsNoTracking().Where(item => !projectId.HasValue || item.ProjectId == projectId).Where(item => EF.Functions.ILike(item.SerialNumber, pattern) || EF.Functions.ILike(item.Name, pattern)).OrderBy(item => item.SerialNumber).Select(item => new { type = "Machine", id = item.Id, projectId = item.ProjectId, label = item.SerialNumber + " · " + item.Name }).Take(20).ToListAsync(cancellationToken);
-        return TypedResults.Ok(projects.Cast<object>().Concat(components).Concat(versions).Concat(patches).Concat(baselines).Concat(machines));
+        return TypedResults.Ok(projects.Cast<object>().Concat(components).Concat(versions).Concat(revisions).Concat(patches).Concat(baselines).Concat(machines));
     }
 
     private static async Task<IResult> GetDashboardAsync(Guid? projectId, IDbContextFactory<ConfigHubDbContext> factory, CancellationToken cancellationToken)
@@ -938,6 +947,12 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
             var actual = await db.MachineCurrentConfigurations.Where(item => item.MachineId == machineId).ToDictionaryAsync(item => item.ConfigurationComponentId, cancellationToken);
             var versionIds = expected.Values.Where(item => item.ComponentVersionId.HasValue).Select(item => item.ComponentVersionId!.Value).Concat(actual.Values.Where(item => item.State != CurrentConfigurationState.Absent && item.ComponentVersionId is not null).Select(item => item.ComponentVersionId!.Value)).ToArray();
             summary.MatchStatus = expected.Keys.Union(actual.Keys).All(componentId => expected.TryGetValue(componentId, out var wanted) && actual.TryGetValue(componentId, out var found) && (wanted.NotConfigured ? found.State == CurrentConfigurationState.Absent : found.State != CurrentConfigurationState.Absent && wanted.ComponentVersionId == found.ComponentVersionId)) ? DriftMatchStatus.Matched : DriftMatchStatus.Mismatch;
+            if (summary.MatchStatus == DriftMatchStatus.Matched)
+            {
+                var patchRequirements = expected.Values.Where(item => item.RevisionId != null).ToArray();
+                if (patchRequirements.Any(item => actual[item.ConfigurationComponentId].RevisionId is { } found && found != item.RevisionId)) summary.MatchStatus = DriftMatchStatus.Mismatch;
+                else if (patchRequirements.Any(item => actual[item.ConfigurationComponentId].RevisionId is null)) summary.MatchStatus = DriftMatchStatus.Unknown;
+            }
             summary.RiskSeverity = await db.ComponentVersions.AnyAsync(item => versionIds.Contains(item.Id) && item.Safety == VersionSafety.Blocked, cancellationToken) ? DriftRiskSeverity.Critical : DriftRiskSeverity.None;
         }
         summary.CalculatedAt = DateTimeOffset.UtcNow;
@@ -1039,7 +1054,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         var ids = sourceComponents.ToDictionary(item => item.Id, _ => Guid.NewGuid());
         foreach (var sourceComponent in sourceComponents)
         {
-            database.ConfigurationComponents.Add(new ConfigurationComponent { Id = ids[sourceComponent.Id], ProjectId = target.Id, ParentComponentId = sourceComponent.ParentComponentId is null ? null : ids[sourceComponent.ParentComponentId.Value], ComponentCode = sourceComponent.ComponentCode, NormalizedComponentCode = sourceComponent.NormalizedComponentCode, LineageKey = sourceComponent.LineageKey, Name = sourceComponent.Name, Owner = sourceComponent.Owner, Model = sourceComponent.Model, Notes = sourceComponent.Notes, SortOrder = sourceComponent.SortOrder, CreatedAt = now });
+            database.ConfigurationComponents.Add(new ConfigurationComponent { Id = ids[sourceComponent.Id], ProjectId = target.Id, ParentComponentId = sourceComponent.ParentComponentId is null ? null : ids[sourceComponent.ParentComponentId.Value], ComponentCode = sourceComponent.ComponentCode, NormalizedComponentCode = sourceComponent.NormalizedComponentCode, LineageKey = sourceComponent.LineageKey, Name = sourceComponent.Name, IsPmRoot = sourceComponent.IsPmRoot, Owner = sourceComponent.Owner, Model = sourceComponent.Model, Notes = sourceComponent.Notes, SortOrder = sourceComponent.SortOrder, CreatedAt = now });
         }
         database.Projects.Add(target);
         AddAuditEvent(database, context, "ProjectCloned", "Project", target.Id, new { sourceProjectId = source.Id, target.Code, target.Name, target.Description, reason = request.Reason!.Trim(), actor });
@@ -1880,6 +1895,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         var component = await database.ConfigurationComponents.SingleOrDefaultAsync(item => item.Id == componentId, cancellationToken);
         if (component is null) return Results.NotFound();
         if (!await HasProjectWriteAccessAsync(database, context, component.ProjectId, cancellationToken)) return Results.Forbid();
+        if (component.IsPmRoot) return Results.Conflict(new { message = "请先解除此组件的 PM 根组件关联，再删除。" });
         if (await database.ConfigurationComponents.AnyAsync(item => item.ParentComponentId == componentId, cancellationToken)) return Results.Conflict(new { message = "请先移动或删除子组件后再删除该组件。" });
         if (await database.MachineChamberVersions.AnyAsync(item => item.ComponentId == componentId, cancellationToken)
             || await database.MatrixImportReferences.AnyAsync(item => item.ComponentId == componentId, cancellationToken)
@@ -1943,6 +1959,7 @@ return TypedResults.Ok(await database.Machines.AsNoTracking().OrderBy(item => it
         if (!await HasProjectWriteAccessAsync(database, context, component.ProjectId, cancellationToken)) return Results.Forbid();
         var parent = request.ParentComponentId is null ? null : await database.ConfigurationComponents.SingleOrDefaultAsync(item => item.Id == request.ParentComponentId, cancellationToken);
         if (request.ParentComponentId is not null && (parent is null || parent.ProjectId != component.ProjectId)) return Results.ValidationProblem(new Dictionary<string, string[]> { ["parentComponentId"] = ["父组件不存在或不属于同一项目。"] });
+        if (component.IsPmRoot && request.ParentComponentId is not null) return Results.Conflict(new { message = "此组件已关联为 PM 根组件，请先解除关联再移动。" });
         if (parent?.Id == component.Id || parent?.LineageKey.StartsWith(component.LineageKey + "/", StringComparison.Ordinal) == true) return Results.Conflict(new { message = "不能将组件移动到自身或其后代。" });
         var now = DateTimeOffset.UtcNow; await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken); database.IdempotencyRecords.Add(new IdempotencyRecord { Id = Guid.NewGuid(), Scope = scope, IdempotencyKey = key, RequestHash = hash, CreatedAt = now, ExpiresAt = now.AddDays(7) }); var oldLineage = component.LineageKey;
         var newLineage = parent is null ? component.NormalizedComponentCode : $"{parent.LineageKey}/{component.NormalizedComponentCode}";
@@ -2212,7 +2229,7 @@ public sealed record CreateMachineRequest(Guid ProjectId, string? SerialNumber, 
 public sealed record UpdateMachineRequest(string? SerialNumber, string? Name, string? MachineType, string? Location, string? Status, string? Reason, DateTimeOffset? ExpectedResumeAt = null, string? Process = null, string? EquipmentConfiguration = null, string? Owner = null);
 public sealed record AssignMachineTargetRequest(Guid ConfigurationBaselineId, string? Reason);
 public sealed record AssignBulkMachineTargetsRequest(Guid ConfigurationBaselineId, List<Guid>? MachineIds, string? Reason);
-public sealed record RecordFactsRequest(string? OperationType, string? Coverage, string? SourceType, string? ExternalEventId, DateTimeOffset? EffectiveAt, string? Reason, List<RecordFactItem>? Items, Guid? CorrectsDeploymentBatchId = null, Guid? SourceConfigurationBaselineId = null);
+public sealed record RecordFactsRequest(string? OperationType, string? Coverage, string? SourceType, string? ExternalEventId, DateTimeOffset? EffectiveAt, string? Reason, List<RecordFactItem>? Items, Guid? CorrectsDeploymentBatchId = null, Guid? SourceConfigurationBaselineId = null, bool MultiVersion = false, List<PmObservationInput>? PmObservations = null);
 public sealed record BulkRecordFactsRequest(List<Guid>? MachineIds, string? OperationType, string? Coverage, DateTimeOffset? EffectiveAt, string? Reason, List<RecordFactItem>? Items);
 public sealed record BulkBaselineUpgradeRequest(Guid ConfigurationBaselineId, List<Guid>? MachineIds, DateTimeOffset? EffectiveAt, string? Reason);
 public sealed record ExportVersionImpactRequest(string? Reason);

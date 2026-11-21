@@ -2,19 +2,20 @@ import { Modal } from 'antd'
 import { MachineImportDialog } from './MachineImportDialog'
 import { FileExcelOutlined, PlusOutlined, EditOutlined, ArrowUpOutlined, HistoryOutlined, SettingOutlined, SwapOutlined, UnorderedListOutlined, EnvironmentOutlined, CloudUploadOutlined, AimOutlined, SearchOutlined, ClearOutlined } from '@ant-design/icons'
 import { MachineVersionComparison } from './MachineVersionComparison'
+import { MachinePmConfiguration } from './MachinePmConfiguration'
 import { ConfigurationTree } from './ConfigurationTree'
 import { ChamberFields, MachineEquipmentPanel, stages } from './MachineEquipmentPanel'
 import { type ChamberInput } from './catalog-api'
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { RevisionPicker } from './RevisionPicker'
+import { PartialObservationForm } from './PartialObservationForm'
 import { BulkTargetPanel } from './BulkTargetPanel'
 import { BulkBaselineUpgradePanel } from './BulkBaselineUpgradePanel'
 import { FullConfigurationPanel } from './FullConfigurationPanel'
 import { HistoricalConfigurationPanel } from './HistoricalConfigurationPanel'
 import { RollbackFactPanel } from './RollbackFactPanel'
 import { getMachineRegistry, type MachineAttention } from './machine-registry-api'
-import { assignMachineTarget, compareMachineToBaseline, createMachine, getBaselines, getMachineConfiguration, getMachineDrift, getMachineEquipment, getMachineFacts, getMachineTarget, getMachineTargetHistory, getProject, getProjectStandard, recordMachineFacts, updateMachine } from './catalog-api'
+import { assignMachineTarget, compareMachineToBaseline, createMachine, getBaselines, getMachineConfiguration, getMachineDrift, getMachineEquipment, getMachineFacts, getMachineTarget, getMachineTargetHistory, getProject, getProjectStandard, updateMachine } from './catalog-api'
 
 const sourceText: Record<string, string> = { 'machine-excel': 'Excel 机台导入', 'manual-ui': '人工录入', Manual: '人工录入', 'bulk-ui': '批量录入', 'agent-automation': '机台代理' }
 const machineStatusText: Record<string, string> = { Active: '在用', Archived: '已归档', ShortTermCip: '短期 CIP', LongTermCip: '长期 CIP', NoProduction: '暂未过货' }
@@ -55,11 +56,7 @@ export function MachineWorkspace({ projectId, canWrite = true, canImport = false
   const [editStatus, setEditStatus] = useState('Active')
   const [expectedResumeAt, setExpectedResumeAt] = useState('')
   const [editReason, setEditReason] = useState('')
-  const [factComponentId, setFactComponentId] = useState('')
-  const [factVersionId, setFactVersionId] = useState('')
-  const [factRevisionId, setFactRevisionId] = useState('')
-  useEffect(() => { setFactRevisionId('') }, [factVersionId, selectedMachineId])
-  const [factReason, setFactReason] = useState('')
+  const [observationBusy, setObservationBusy] = useState(false)
   const [targetBaselineId, setTargetBaselineId] = useState('')
   const [targetReason, setTargetReason] = useState('')
   const [search, setSearch] = useState('')
@@ -90,7 +87,6 @@ export function MachineWorkspace({ projectId, canWrite = true, canImport = false
   const clearFilters = () => { setSearch(''); setLocationFilter(''); setStatusFilter(''); setStageFilter(''); setBaselineFilter(''); setActualComponentFilter(''); setActualVersionFilter(''); setAttentionFilter('') }
   useEffect(() => { clearFilters(); setAttentionFilter(initialAttention) }, [projectId, initialAttention])
   const machineProject = useQuery({ queryKey: ['project', selectedMachine?.projectId], queryFn: () => getProject(selectedMachine!.projectId), enabled: selectedMachine !== undefined })
-  const selectedFactComponent = machineProject.data?.components.find(component => component.id === factComponentId)
   const targetBaselines = useQuery({ queryKey: ['machine-target-baselines', selectedMachine?.projectId], queryFn: () => getBaselines(selectedMachine!.projectId), enabled: selectedMachine !== undefined })
   const machineTarget = useQuery({ queryKey: ['machine-target', selectedMachineId], queryFn: () => getMachineTarget(selectedMachineId), enabled: selectedMachine !== undefined })
   const machineProjectStandard = useQuery({ queryKey: ['machine-project-standard', selectedMachine?.projectId], queryFn: () => getProjectStandard(selectedMachine!.projectId), enabled: selectedMachine !== undefined })
@@ -102,7 +98,7 @@ export function MachineWorkspace({ projectId, canWrite = true, canImport = false
 
   useEffect(() => {
     setDetailTab('configuration'); setToolTab(null); setEditOpen(false)
-    setFactComponentId(''); setFactVersionId(''); setFactReason(''); setTargetBaselineId(''); setTargetReason('')
+     setTargetBaselineId(''); setTargetReason('')
   }, [selectedMachineId])
 
   useEffect(() => {
@@ -171,13 +167,7 @@ export function MachineWorkspace({ projectId, canWrite = true, canImport = false
       await invalidateMachineData()
     },
   })
-  const recordFacts = useMutation({
-    mutationFn: () => recordMachineFacts(selectedMachineId, { operationType: 'Observation', coverage: 'Partial', sourceType: 'manual-ui', reason: factReason, items: [{ componentId: factComponentId, versionId: factVersionId, revisionId: factRevisionId || null, absent: false, knownInstalledAt: null }] }),
-    onSuccess: async () => {
-      setToolTab(null); setFactReason(''); onSuccess('实际配置已记录为观察事实。')
-      await invalidateMachineData()
-    },
-  })
+
 
   return <div className={`machine-workspace${selectedMachine ? ' has-selection' : ' machine-unselected'}`}>
     {selectedMachine && <div className="machine-return-bar toolbar-actions"><button type="button" onClick={() => { onSelectMachine(''); window.scrollTo({ top: 0, behavior: 'smooth' }) }}><ArrowUpOutlined aria-hidden />返回机台列表</button><span>{selectedMachine.name}</span></div>}
@@ -200,7 +190,7 @@ export function MachineWorkspace({ projectId, canWrite = true, canImport = false
       <div className="machine-registry-scroll"><div className="machine-row-heading" aria-hidden="true"><span>机台 / 序列号</span><span>阶段 / 状态</span><span>位置 / 负责人</span><span>已配置腔室</span><span>目标基线 / 整机实际版本</span><span>匹配 / 风险</span></div>
       <div className="machine-location-groups">{[...new Set(visibleMachines.map(machine => machine.location || '未填写位置'))].map(location => <section className="machine-location-group" key={location}><h4><EnvironmentOutlined aria-hidden />{location}</h4><div className="machine-list">{visibleMachines.filter(machine => (machine.location || '未填写位置') === location).map(machine => {
         const actualSummary = machine.actualVersions.map(version => `${version.componentName} ${version.versionNumber}`).join(' · ')
-        return <button type="button" aria-pressed={machine.id === selectedMachineId} className={machine.id === selectedMachineId ? 'machine-list-item machine-registry-row selected' : 'machine-list-item machine-registry-row'} key={machine.id} onClick={() => { onSelectMachine(machine.id); setFactComponentId(''); setFactVersionId('') }}>
+        return <button type="button" aria-pressed={machine.id === selectedMachineId} className={machine.id === selectedMachineId ? 'machine-list-item machine-registry-row selected' : 'machine-list-item machine-registry-row'} key={machine.id} onClick={() => { onSelectMachine(machine.id);  }}>
           <span className="machine-row-identity"><strong>{machine.name}</strong>{machine.process && <small title={machine.process}>{machine.process}</small>}<span className="machine-list-identity">{machine.serialNumber}{machine.machineType && ` · ${machine.machineType}`}</span></span>
           <span className="machine-row-state"><b>{machine.stage || '未登记阶段'}</b><span>{machineStatusText[machine.status] ?? '未知状态'}</span>{machine.expectedResumeAt && <small>预计恢复 {formatTime(machine.expectedResumeAt)}</small>}</span>
           <span className="machine-row-owner"><b>{machine.location || '未填写位置'}</b><span>负责人 {machine.owner || '未填写'}</span></span>
@@ -221,6 +211,7 @@ export function MachineWorkspace({ projectId, canWrite = true, canImport = false
           <div className="subsection-heading"><h3>当前实际配置</h3>{canWrite && <div className="toolbar-actions"><button type="button" onClick={() => setToolTab('observation')}>记录局部观察</button><button type="button" onClick={() => setToolTab('configuration')}>录入完整配置</button></div>}</div>
           {machineConfiguration.isLoading || machineProject.isLoading ? <p role="status">正在读取配置。</p> : machineConfiguration.isError || machineProject.isError ? <p className="error-strip">配置读取失败，请刷新重试。</p> : <><ConfigurationTree components={machineProject.data?.components ?? []} items={machineConfiguration.data ?? []} onOpenVersion={versionId => onOpenVersion(selectedMachine.projectId, versionId)} onOpenPatches={versionId => onOpenVersion(selectedMachine.projectId, versionId, true)} />{machineConfiguration.data?.length === 0 && <p className="empty-state">尚未记录实际配置。</p>}</>}
         </div>
+        <div hidden={detailTab !== 'configuration'}><MachinePmConfiguration machineId={selectedMachineId} components={machineProject.data?.components ?? []} /></div>
         <div hidden={detailTab !== 'target'} className="machine-section machine-detail-sections">
           <section className="machine-target-section"><div className="subsection-heading"><h3>机台目标</h3>{canWrite && <button type="button" onClick={() => setToolTab('assign')}>指派目标</button>}</div><p className="empty-state">{machineTarget.data ? `${machineTarget.data.baselineCode} · 自 ${formatTime(machineTarget.data.validFrom)} 起生效` : '尚未显式指派目标基线。项目当前标准不会自动成为本机目标。'}</p>{assignTarget.isError && <p className="error-strip">{assignTarget.error.message}</p>}{machineTarget.data && <details className="machine-drift-preview machine-target-comparison"><summary>比对当前实际与机台目标基线</summary><MachineVersionComparison key={selectedMachine.id} data={machineDrift.data} loading={machineDrift.isLoading} error={machineDrift.error} components={machineProject.data?.components ?? []} baselineId={machineTarget.data.baselineId} beforeLabel="目标版本" onOpenPatches={versionId => onOpenVersion(selectedMachine.projectId, versionId, true)} /></details>}</section>
           <details open className="machine-drift-preview machine-standard-comparison"><summary>与项目当前标准比对</summary>{machineProjectStandard.isLoading ? <p role="status">正在读取项目当前标准。</p> : machineProjectStandard.isError ? <p className="error-strip" role="alert">项目当前标准读取失败，请刷新重试。</p> : !machineProjectStandard.data ? <p className="empty-state">项目尚未设定当前标准，因此暂不能进行此项比对。</p> : <><p className="form-hint">项目当前标准为 {machineProjectStandard.data.baselineCode}，不会自动成为本机目标。</p><MachineVersionComparison key={selectedMachine.id} data={projectStandardComparison.data} loading={projectStandardComparison.isLoading} error={projectStandardComparison.error} components={machineProject.data?.components ?? []} baselineId={machineProjectStandard.data.baselineId} beforeLabel="标准版本" onOpenPatches={versionId => onOpenVersion(selectedMachine.projectId, versionId, true)} /></>}</details>
@@ -230,7 +221,7 @@ export function MachineWorkspace({ projectId, canWrite = true, canImport = false
         </div>
         <div hidden={detailTab !== 'history'} className="machine-section machine-detail-sections">
           <div className="subsection-heading"><h3>目标与实际历史</h3>{canWrite && <button type="button" onClick={() => setToolTab('correction')}>回退与更正</button>}</div>
-          <details open><summary>目标与实际历史</summary><div className="component-list">{machineTargetHistory.data?.map(assignment => <article className="component-row" key={assignment.id}><div><strong>{assignment.baselineCode}</strong><span>{assignment.reason}</span></div><small>{formatTime(assignment.validFrom)}{assignment.validTo ? ` 至 ${formatTime(assignment.validTo)}` : ' · 当前目标'}</small></article>)}{machineFacts.data?.map(fact => <article className="component-row" key={fact.id}><div><strong>{operationText[fact.operationType] ?? fact.operationType}{fact.sourceBaselineCode ? `至 ${fact.sourceBaselineCode}` : ''} · {fact.coverage === 'Full' ? '完整' : '局部'}</strong><span>{fact.sourceBaselineCode ? `基线升级 · ${fact.itemCount} 个组件` : `${sourceText[fact.sourceType] ?? '外部来源'} · ${fact.itemCount} 个组件`}</span></div><small>生效 {formatTime(fact.effectiveAt)}<br />记录 {formatTime(fact.recordedAt)}</small></article>)}</div></details>
+          <details open><summary>目标与实际历史</summary><div className="component-list">{machineTargetHistory.data?.map(assignment => <article className="component-row" key={assignment.id}><div><strong>{assignment.baselineCode}</strong><span>{assignment.reason}</span></div><small>{formatTime(assignment.validFrom)}{assignment.validTo ? ` 至 ${formatTime(assignment.validTo)}` : ' · 当前目标'}</small></article>)}{machineFacts.data?.map(fact => <article className="component-row" key={fact.id}><div><strong>{operationText[fact.operationType] ?? fact.operationType}{fact.sourceBaselineCode ? `至 ${fact.sourceBaselineCode}` : ''} · {fact.coverage === 'Full' ? '完整' : '局部'}</strong><span>{fact.sourceBaselineCode ? `基线升级 · ${fact.itemCount} 个组件` : `${sourceText[fact.sourceType] ?? '外部来源'} · ${fact.itemCount} 个整机组件${fact.pmObservationCount ? ` · ${fact.pmObservationCount} 个 PM 观察` : ''}`}</span></div><small>生效 {formatTime(fact.effectiveAt)}<br />记录 {formatTime(fact.recordedAt)}</small></article>)}</div></details>
           <HistoricalConfigurationPanel key={selectedMachine.id} machine={selectedMachine} components={machineProject.data?.components ?? []} onOpenPatches={versionId => onOpenVersion(selectedMachine.projectId, versionId, true)} />
         </div>
       </>}
@@ -254,10 +245,10 @@ export function MachineWorkspace({ projectId, canWrite = true, canImport = false
     <Modal title={`编辑机台资料 · ${selectedMachine?.name ?? ''}`} open={canWrite && editOpen && !!selectedMachine} onCancel={() => { if (!update.isPending) setEditOpen(false) }} maskClosable={!update.isPending} width={760} footer={null} className="machine-dialog" destroyOnHidden><div className="machine-edit">
 <form hidden={!canWrite} className="catalog-form" onSubmit={(event) => { event.preventDefault(); update.mutate() }}><label>机台序列号<input value={editSerial} onChange={(event) => setEditSerial(event.target.value)} required /></label><label>机台名称<input value={editName} onChange={(event) => setEditName(event.target.value)} required /></label><label>工艺（非必填）<input value={editProcess} maxLength={200} onChange={event => setEditProcess(event.target.value)} /></label><label className="wide-field">配置（非必填）<textarea aria-label="配置（非必填）" value={editConfiguration} maxLength={1000} onChange={event => setEditConfiguration(event.target.value)} /></label><label>机型<input value={editType} onChange={(event) => setEditType(event.target.value)} /></label><label>机台负责人<input value={editOwner} maxLength={160} onChange={event => setEditOwner(event.target.value)} /></label><label>位置<input value={editLocation} onChange={(event) => setEditLocation(event.target.value)} /></label><label>状态<select value={editStatus} onChange={(event) => setEditStatus(event.target.value)}><option value="Active">在用</option><option value="ShortTermCip">短期 CIP</option><option value="LongTermCip">长期 CIP</option><option value="NoProduction">暂未过货</option><option value="Archived">已归档</option></select></label>{['ShortTermCip', 'LongTermCip'].includes(editStatus) && <label>预计恢复时间<input type="datetime-local" value={expectedResumeAt} onChange={event => setExpectedResumeAt(event.target.value)} required /></label>}<label className="wide-field">修改原因<input value={editReason} onChange={(event) => setEditReason(event.target.value)} required /></label><button type="submit" disabled={update.isPending}>{update.isPending ? '正在保存' : '保存资料'}</button></form><p className="form-hint">项目归属创建后固定，不能跨项目移动，以保护既有目标、实际配置和历史事实。</p>{update.isError && <p className="error-strip">{update.error.message}</p>}
     </div></Modal>
-    <Modal title={`${({ configuration: '录入完整配置', observation: '记录局部观察', assign: '指派机台目标', correction: '回退与更正', upgrade: '批量升级', target: '批量目标' } as Record<string, string>)[toolTab ?? ''] ?? ''}${selectedMachine && !['upgrade', 'target'].includes(toolTab ?? '') ? ' · ' + selectedMachine.name : ''}`} open={canWrite && !!toolTab} onCancel={() => { if (!assignTarget.isPending && !recordFacts.isPending) setToolTab(null) }} width={1000} footer={null} className="machine-dialog" destroyOnHidden>
+    <Modal title={`${({ configuration: '录入完整配置', observation: '记录局部观察', assign: '指派机台目标', correction: '回退与更正', upgrade: '批量升级', target: '批量目标' } as Record<string, string>)[toolTab ?? ''] ?? ''}${selectedMachine && !['upgrade', 'target'].includes(toolTab ?? '') ? ' · ' + selectedMachine.name : ''}`} open={canWrite && !!toolTab} onCancel={() => { if (!assignTarget.isPending && !observationBusy) setToolTab(null) }} width={1000} footer={null} className="machine-dialog" destroyOnHidden>
       <div className="machine-tools">
         {selectedMachine && toolTab === 'configuration' && <FullConfigurationPanel key={selectedMachine.id} machineId={selectedMachine.id} projectId={projectId} components={machineProject.data?.components ?? []} onRecorded={() => { setToolTab(null); void invalidateMachineData(); onSuccess('完整实际配置已记录为可追溯事实。') }} />}
-        {selectedMachine && toolTab === 'observation' && <><p className="form-hint">观察只表示发现的实际状态，不表示安装或升级；局部观察只更新选中的组件。</p><form hidden={!canWrite} className="catalog-form" onSubmit={(event) => { event.preventDefault(); recordFacts.mutate() }}><label>组件<select aria-label="组件" value={factComponentId} onChange={(event) => { setFactComponentId(event.target.value); setFactVersionId('') }} required><option value="">请选择组件</option>{machineProject.data?.components.filter(component => component.versions.length > 0).map(component => <option key={component.id} value={component.id}>{component.name}</option>)}</select></label><label>版本<select aria-label="版本" value={factVersionId} onChange={(event) => setFactVersionId(event.target.value)} disabled={!selectedFactComponent} required><option value="">{selectedFactComponent ? '请选择版本' : '请先选择组件'}</option>{selectedFactComponent?.versions.map(version => <option key={version.id} value={version.id}>{version.versionNumber} · {({ Draft: '草稿', Testing: '实验室测试', Released: '已发布', Maintenance: '维护中', Deprecated: '已废弃' } as Record<string, string>)[version.maturity] ?? version.maturity}</option>)}</select></label><RevisionPicker versionId={factVersionId} value={factRevisionId} onChange={setFactRevisionId} /><label>观察原因<input value={factReason} onChange={(event) => setFactReason(event.target.value)} required /></label><button type="submit" disabled={recordFacts.isPending || machineProject.isLoading}>{recordFacts.isPending ? '正在记录' : '记录局部观察'}</button></form>{recordFacts.isError && <p className="error-strip">{recordFacts.error.message}</p>}</>}
+        {selectedMachine && toolTab === 'observation' && machineProject.data && <PartialObservationForm key={selectedMachineId} machineId={selectedMachineId} projectId={selectedMachine.projectId} components={machineProject.data.components} isAdmin={isAdmin} onBusy={setObservationBusy} onSaved={async () => { setToolTab(null); onSuccess('局部观察已保存，未提交的组件与 PM 保持不变。'); await invalidateMachineData() }} />}
         {selectedMachine && toolTab === 'assign' && <><form hidden={!canWrite} className="catalog-form" onSubmit={(event) => { event.preventDefault(); assignTarget.mutate() }}><label>已发布基线<select value={targetBaselineId} onChange={(event) => setTargetBaselineId(event.target.value)} required><option value="">请选择已发布基线</option>{targetBaselines.data?.filter(baseline => baseline.state === 'Released').map(baseline => <option key={baseline.id} value={baseline.id}>{baseline.code} · 修订 {baseline.revisionNo}</option>)}</select></label><label>指派原因<input value={targetReason} onChange={(event) => setTargetReason(event.target.value)} required /></label><button type="submit" disabled={assignTarget.isPending}>{assignTarget.isPending ? '正在指派' : '设为机台目标'}</button></form>{assignTarget.isError && <p className="error-strip">{assignTarget.error.message}</p>}</>}
         {selectedMachine && toolTab === 'correction' && <RollbackFactPanel key={selectedMachine.id} machineId={selectedMachine.id} components={machineProject.data?.components ?? []} />}
         {toolTab === 'upgrade' && <BulkBaselineUpgradePanel projectId={projectId} />}

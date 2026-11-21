@@ -184,7 +184,7 @@ async function main() {
 
     await openMachine(matched, '目标与对比')
     target = await expandTarget(page)
-    assert((await target.locator('.comparison-summary').innerText()).includes('版本匹配：匹配'))
+    assert((await target.locator('.comparison-summary').innerText()).includes('配置匹配：匹配'))
     assert((await target.locator('.comparison-summary').innerText()).includes('风险：严重'))
     assert.equal(await target.locator('.patch-open').count(), 0)
     await target.getByLabel('只看差异').uncheck()

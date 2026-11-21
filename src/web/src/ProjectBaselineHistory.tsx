@@ -108,7 +108,7 @@ export function ProjectBaselineHistory({ canWrite = true, detail, isAdmin, isSup
         const latestReleased = component.versions.filter(version => version.maturity === 'Released').sort((left, right) => right.sequenceNo - left.sequenceNo)[0]?.id
         const versionId = testingByComponent.get(component.id) ?? composerOverrides[component.id] ?? standardByComponent.get(component.id) ?? latestReleased
         const prior = standardDetail.data?.items.find(item => item.componentId === component.id && item.versionId === versionId)
-        return versionId ? [{ componentId: component.id, versionId, revisionId: (composerRevisions[component.id] ?? prior?.revisionId) || null }] : []
+        return versionId ? [{ componentId: component.id, versionId, revisionId: testingByComponent.has(component.id) ? null : (composerRevisions[component.id] ?? prior?.revisionId) || null }] : []
       })
       return createBaseline(detail.project.id, { seriesCode: detail.project.code, baselineCode, description: '由实验室测试版本生成', reason: baselineReason, versionSelections, testingVersionIds: testingSelection, publishImmediately: true })
     },

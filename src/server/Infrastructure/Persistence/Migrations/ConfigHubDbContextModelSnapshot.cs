@@ -780,6 +780,10 @@ namespace ConfigHub.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
+                    b.Property<bool>("IsPmRoot")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_pm_root");
+
                     b.Property<string>("LineageKey")
                         .IsRequired()
                         .HasMaxLength(1000)
@@ -829,6 +833,11 @@ namespace ConfigHub.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("ParentComponentId");
 
+                    b.HasIndex("ProjectId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_project_pm_root")
+                        .HasFilter("is_pm_root");
+
                     b.HasIndex("ProjectId", "LineageKey")
                         .IsUnique()
                         .HasDatabaseName("ux_components_project_lineage");
@@ -840,7 +849,10 @@ namespace ConfigHub.Infrastructure.Persistence.Migrations
                     b.HasIndex("ProjectId", "ParentComponentId", "SortOrder")
                         .HasDatabaseName("ix_components_project_parent_sort");
 
-                    b.ToTable("configuration_components", (string)null);
+                    b.ToTable("configuration_components", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_pm_root", "NOT is_pm_root OR parent_component_id IS NULL");
+                        });
                 });
 
             modelBuilder.Entity("ConfigHub.Infrastructure.Persistence.Entities.DeploymentBatch", b =>
@@ -1336,9 +1348,25 @@ namespace ConfigHub.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("component_id");
 
+                    b.Property<DateTimeOffset?>("EffectiveAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("effective_at");
+
                     b.Property<Guid>("HistoryId")
                         .HasColumnType("uuid")
                         .HasColumnName("history_id");
+
+                    b.Property<bool>("IsUnknown")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_unknown");
+
+                    b.Property<DateTimeOffset?>("KnownInstalledAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("known_installed_at");
+
+                    b.Property<Guid?>("RevisionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("revision_id");
 
                     b.Property<long>("Sequence")
                         .HasColumnType("bigint")
@@ -1356,10 +1384,15 @@ namespace ConfigHub.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("VersionId");
 
+                    b.HasIndex("RevisionId", "VersionId");
+
                     b.HasIndex("ChamberId", "ComponentId", "Sequence")
                         .IsUnique();
 
-                    b.ToTable("machine_chamber_versions", (string)null);
+                    b.ToTable("machine_chamber_versions", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_chamber_revision_state", "(revision_id IS NULL OR version_id IS NOT NULL) AND (NOT is_unknown OR (version_id IS NULL AND revision_id IS NULL AND known_installed_at IS NULL))");
+                        });
                 });
 
             modelBuilder.Entity("ConfigHub.Infrastructure.Persistence.Entities.MachineCurrentConfiguration", b =>
@@ -2675,6 +2708,12 @@ namespace ConfigHub.Infrastructure.Persistence.Migrations
                     b.HasOne("ConfigHub.Infrastructure.Persistence.Entities.ComponentVersion", null)
                         .WithMany()
                         .HasForeignKey("VersionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ConfigHub.Infrastructure.Persistence.Entities.ComponentVersionRevision", null)
+                        .WithMany()
+                        .HasForeignKey("RevisionId", "VersionId")
+                        .HasPrincipalKey("Id", "ComponentVersionId")
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 

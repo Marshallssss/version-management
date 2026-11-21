@@ -27,6 +27,7 @@ function orientChambers(chambers: ChamberComparison[], reverse = false): Chamber
     items: chamber.items.map(item => ({
       ...item,
       status: item.status === 'LeftOnly' ? 'RightOnly' : item.status === 'RightOnly' ? 'LeftOnly' : item.status,
+      leftRevisionId: item.rightRevisionId, rightRevisionId: item.leftRevisionId,
       leftVersionId: item.rightVersionId, leftVersionNumber: item.rightVersionNumber, leftState: item.rightState, leftSource: item.rightSource,
       rightVersionId: item.leftVersionId, rightVersionNumber: item.leftVersionNumber, rightState: item.leftState, rightSource: item.leftSource,
     })),
@@ -41,7 +42,7 @@ function ChamberValue({ version, state, source }: { version: string | null; stat
 function chamberResult(item: ChamberComparisonItem) {
   if (item.leftState === 'NotInstalled' || item.rightState === 'NotInstalled') return '安装情况不同'
   if (item.status === 'Unknown') return '信息不足'
-  if (item.status === 'Matched') return '相同'
+  if (item.status === 'Matched') return item.revisionStatus === 'Mismatch' ? '版本相同，补丁修订不同' : item.revisionStatus === 'Unknown' ? '版本相同，补丁待确认' : '相同'
   if (item.status === 'LeftOnly') return '仅左侧'
   if (item.status === 'RightOnly') return '仅右侧'
   return '版本不同'
@@ -124,9 +125,9 @@ export function ConfigurationCompare({ projectId, components, onOpenPatches }: {
           renderCells={row => <><td>{row.left ?? '未配置'}<RevisionIdentity versionId={row.leftVersionId} revisionId={row.leftRevisionId} />{patchBadge(row.leftVersionId, row.left, left)}</td><td>{row.right ?? '未配置'}<RevisionIdentity versionId={row.rightVersionId} revisionId={row.rightRevisionId} />{patchBadge(row.rightVersionId, row.right, right)}</td><td>{row.matched ? '相同' : row.left === null ? '仅右侧' : row.right === null ? '仅左侧' : '版本不同'}<small className="compare-source">{revisionResult(row.revisionStatus)}</small>{hierarchyChanged(leftNodes, rightNodes, row.componentId) && <small className="compare-source">层级或名称不同</small>}</td></>} />
       </div> : <div role="tabpanel" id={`compare-pm-${chamber.number}`} aria-label={`PM${chamber.number} 配置对比`}>
         <div className="chamber-comparison-summary"><strong>PM{chamber.number}</strong><span>版本匹配：{matchNames[chamber.matchStatus]}</span><span className={chamber.riskSeverity === 'Critical' ? 'compare-critical' : ''}>风险：{riskNames[chamber.riskSeverity] ?? '未知'}</span></div>
-        <ComparisonTreeTable key={treeKey} {...treeProps} rows={chamberRows} className="chamber-comparison-table" isDifferent={item => item.status !== 'Matched'} rowClass={item => item.status === 'Matched' ? '' : item.status === 'Unknown' ? 'unconfirmed' : 'changed'} emptyText={onlyDifferences && chamber.items.length ? '此腔室没有配置差异。' : chamber.leftInstalled === false || chamber.rightInstalled === false ? '两侧腔室安装情况不同，暂无组件配置记录。' : '尚无组件配置记录，无法确认版本是否匹配。'}
+        <ComparisonTreeTable key={treeKey} {...treeProps} rows={chamberRows} className="chamber-comparison-table" isDifferent={item => item.status !== 'Matched' || item.revisionStatus === 'Mismatch'} rowClass={item => item.status === 'Matched' ? '' : item.status === 'Unknown' ? 'unconfirmed' : 'changed'} emptyText={onlyDifferences && chamber.items.length ? '此腔室没有配置差异。' : chamber.leftInstalled === false || chamber.rightInstalled === false ? '两侧腔室安装情况不同，暂无组件配置记录。' : '尚无组件配置记录，无法确认版本是否匹配。'}
           header={<tr><th scope="col">组件</th><th scope="col">左侧版本<small>{leftName} · {chamber.leftInstalled === null ? '基线快照' : chamber.leftInstalled ? `PM${chamber.number} 已安装` : '未安装'}</small></th><th scope="col">右侧版本<small>{rightName} · {chamber.rightInstalled === null ? '基线快照' : chamber.rightInstalled ? `PM${chamber.number} 已安装` : '未安装'}</small></th><th scope="col">结果</th></tr>}
-          renderCells={item => <><td><ChamberValue version={item.leftVersionNumber} state={item.leftState} source={item.leftSource} />{patchBadge(item.leftVersionId, item.leftVersionNumber, left)}</td><td><ChamberValue version={item.rightVersionNumber} state={item.rightState} source={item.rightSource} />{patchBadge(item.rightVersionId, item.rightVersionNumber, right)}</td><td>{chamberResult(item)}{hierarchyChanged(leftNodes, rightNodes, item.componentId) && <small className="compare-source">层级或名称不同</small>}</td></>} />
+          renderCells={item => <><td><ChamberValue version={item.leftVersionNumber} state={item.leftState} source={item.leftSource} /><RevisionIdentity versionId={item.leftVersionId} revisionId={item.leftRevisionId} />{patchBadge(item.leftVersionId, item.leftVersionNumber, left)}</td><td><ChamberValue version={item.rightVersionNumber} state={item.rightState} source={item.rightSource} /><RevisionIdentity versionId={item.rightVersionId} revisionId={item.rightRevisionId} />{patchBadge(item.rightVersionId, item.rightVersionNumber, right)}</td><td>{chamberResult(item)}{hierarchyChanged(leftNodes, rightNodes, item.componentId) && <small className="compare-source">层级或名称不同</small>}</td></>} />
 
       </div>}
     </>}

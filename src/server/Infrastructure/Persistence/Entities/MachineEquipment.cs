@@ -31,6 +31,10 @@ public sealed class MachineChamberVersion
     public Guid ChamberId { get; set; }
     public Guid ComponentId { get; set; }
     public Guid? VersionId { get; set; }
+    public Guid? RevisionId { get; set; }
+    public bool IsUnknown { get; set; }
+    public DateTimeOffset? EffectiveAt { get; set; }
+    public DateTimeOffset? KnownInstalledAt { get; set; }
     public long Sequence { get; set; }
     public Guid HistoryId { get; set; }
 }

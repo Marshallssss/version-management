@@ -86,7 +86,7 @@ public static partial class CatalogEndpoints
                 if (!DateTime.TryParseExact(v[17], "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date) || new DateTimeOffset(date, TimeSpan.FromHours(8)) > now) errors.Add("匹配基线后须填写不晚于今天的配置记录日期：YYYY-MM-DD");
                 else observed = new DateTimeOffset(date, TimeSpan.FromHours(8)).ToUniversalTime();
             }
-            var snapshot = baseline is null ? [] : await db.BaselineItems.AsNoTracking().Where(item => item.ConfigurationBaselineId == baseline.Id && item.ComponentVersionId != null).OrderBy(item => item.ConfigurationComponentId).Select(item => new RecordFactItem(item.ConfigurationComponentId, item.ComponentVersionId, false, null)).ToListAsync(ct);
+            var snapshot = baseline is null ? [] : await db.BaselineItems.AsNoTracking().Where(item => item.ConfigurationBaselineId == baseline.Id && item.ComponentVersionId != null).OrderBy(item => item.ConfigurationComponentId).Select(item => new RecordFactItem(item.ConfigurationComponentId, item.ComponentVersionId, false, null, item.RevisionId)).ToListAsync(ct);
             if (baseline is not null && snapshot.Count == 0) { warning = "基线没有可用软件版本；机台仍可导入，软件版本留空。"; baseline = null; }
             var payload = new MachineImportData(MachineImportKind, v, create, baseline?.Id, snapshot, observed, warning);
             db.ImportRows.Add(new ImportRow { Id = Guid.NewGuid(), ImportBatchId = batch.Id, RowNumber = row.RowNumber, Payload = JsonSerializer.SerializeToDocument(payload), ValidationError = errors.Count == 0 ? null : string.Join("；", errors) });
@@ -157,7 +157,7 @@ public static partial class CatalogEndpoints
                 if (data.BaselineId is Guid baselineId)
                 {
                     var current = await db.ConfigurationBaselines.AsNoTracking().SingleOrDefaultAsync(item => item.Id == baselineId && item.ProjectId == projectId && item.State == BaselineState.Released, ct);
-                    var items = await db.BaselineItems.AsNoTracking().Where(item => item.ConfigurationBaselineId == baselineId && item.ComponentVersionId != null).OrderBy(item => item.ConfigurationComponentId).Select(item => new RecordFactItem(item.ConfigurationComponentId, item.ComponentVersionId, false, null)).ToListAsync(ct);
+                    var items = await db.BaselineItems.AsNoTracking().Where(item => item.ConfigurationBaselineId == baselineId && item.ComponentVersionId != null).OrderBy(item => item.ConfigurationComponentId).Select(item => new RecordFactItem(item.ConfigurationComponentId, item.ComponentVersionId, false, null, item.RevisionId)).ToListAsync(ct);
                     if (current is null || !items.SequenceEqual(data.Snapshot)) data = data with { Warning = "预览后基线已改变或撤回；机台资料已导入，软件版本留空，请手动核对。", BaselineId = null };
                     else
                     {

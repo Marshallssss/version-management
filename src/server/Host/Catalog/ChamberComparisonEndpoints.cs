@@ -6,13 +6,13 @@ namespace ConfigHub.Host.Catalog;
 
 public static partial class CatalogEndpoints
 {
-    private sealed record ChamberConfigurationValue(Guid? VersionId, string State, string Source);
+    private sealed record ChamberConfigurationValue(Guid? VersionId, string State, string Source, Guid? RevisionId = null);
     private sealed record EffectiveChamberConfiguration(Guid MachineId, int Number, Dictionary<Guid, ChamberConfigurationValue> Items);
     private sealed record ChamberComparisonVersion(string VersionNumber, VersionSafety Safety);
     private sealed record ChamberComparisonItem(
         Guid ComponentId, string ComponentName, string Status,
         Guid? LeftVersionId, string? LeftVersionNumber, Guid? RightVersionId, string? RightVersionNumber,
-        string LeftState, string RightState, string LeftSource, string RightSource);
+        string LeftState, string RightState, string LeftSource, string RightSource, Guid? LeftRevisionId, Guid? RightRevisionId, string RevisionStatus);
     private sealed record ChamberComparison(
         int Number, bool LeftInstalled, bool? RightInstalled, string MatchStatus, string RiskSeverity,
         ChamberComparisonItem[] Items);
@@ -32,14 +32,19 @@ public static partial class CatalogEndpoints
                     && next.ComponentId == fact.ComponentId && next.Sequence > fact.Sequence))
             .ToArrayAsync(ct);
         var wholeMachine = states.ToLookup(state => state.MachineId);
+        var machineProjects = await db.Machines.Where(m => machineIds.Contains(m.Id)).ToDictionaryAsync(m => m.Id, m => m.ProjectId, ct);
+        var projectIds = machineProjects.Values.Distinct().ToArray();
+        var components = await db.ConfigurationComponents.AsNoTracking().Where(c => projectIds.Contains(c.ProjectId)).ToListAsync(ct);
+        var allowedByProject = components.GroupBy(c => c.ProjectId).ToDictionary(g => g.Key, g => PmComponentIds(g.ToList()));
         return chambers.Select(chamber =>
         {
-            var effective = wholeMachine[chamber.MachineId].ToDictionary(state => state.ConfigurationComponentId,
+            var allowed = allowedByProject.GetValueOrDefault(machineProjects[chamber.MachineId]) ?? [];
+            var effective = wholeMachine[chamber.MachineId].Where(state => allowed.Count == 0 || allowed.Contains(state.ConfigurationComponentId)).ToDictionary(state => state.ConfigurationComponentId,
                 state => new ChamberConfigurationValue(
                     state.State == CurrentConfigurationState.Present ? state.ComponentVersionId : null,
-                    state.State.ToString(), "Machine"));
-            foreach (var fact in latest.Where(fact => fact.ChamberId == chamber.Id && fact.VersionId is not null))
-                effective[fact.ComponentId] = new(fact.VersionId, "Present", "Override");
+                    state.State.ToString(), "Machine", state.RevisionId));
+            foreach (var fact in latest.Where(fact => fact.ChamberId == chamber.Id && (fact.VersionId is not null || fact.IsUnknown)))
+                effective[fact.ComponentId] = new(fact.VersionId, fact.IsUnknown ? "Unknown" : "Present", "Override", fact.RevisionId);
             return new EffectiveChamberConfiguration(chamber.MachineId, chamber.Number, effective);
         }).ToArray();
     }
@@ -50,8 +55,12 @@ public static partial class CatalogEndpoints
     {
         var chambers = await LoadEffectiveChambersAsync(db, [machineId], states, ct);
         if (chambers.Length == 0) return [];
-        var expected = baseline.ToDictionary(item => item.Key,
-            item => new ChamberConfigurationValue(item.Value.ComponentVersionId, item.Value.NotConfigured ? "Absent" : "Present", "Baseline"));
+        var projectId = await db.Machines.Where(m => m.Id == machineId).Select(m => m.ProjectId).SingleAsync(ct);
+        var components = await db.ConfigurationComponents.AsNoTracking().Where(c => c.ProjectId == projectId).ToListAsync(ct);
+        var allowed = PmComponentIds(components);
+        var actualComponents = chambers.SelectMany(c => c.Items.Keys).ToHashSet();
+        var expected = baseline.Where(item => allowed.Count == 0 || allowed.Contains(item.Key) || actualComponents.Contains(item.Key)).ToDictionary(item => item.Key,
+            item => new ChamberConfigurationValue(item.Value.ComponentVersionId, item.Value.NotConfigured ? "Absent" : "Present", "Baseline", item.Value.RevisionId));
         var values = chambers.SelectMany(chamber => chamber.Items.Values).Concat(expected.Values).ToArray();
         var versions = await LoadChamberComparisonVersionsAsync(db, values, ct);
         var componentIds = chambers.SelectMany(chamber => chamber.Items.Keys).Union(expected.Keys).ToArray();
@@ -110,7 +119,7 @@ public static partial class CatalogEndpoints
             return new ChamberComparisonItem(id, names[id], status,
                 before.VersionId, before.VersionId is null ? null : versions[before.VersionId.Value].VersionNumber,
                 after.VersionId, after.VersionId is null ? null : baseline?.GetValueOrDefault(id)?.VersionNumberSnapshot ?? versions[after.VersionId.Value].VersionNumber,
-                before.State, after.State, before.Source, after.Source);
+                before.State, after.State, before.Source, after.Source, before.RevisionId, after.RevisionId, RevisionMatch(before.VersionId, before.RevisionId, after.VersionId, after.RevisionId));
         }).ToArray();
         var installationMismatch = !leftInstalled || rightInstalled == false;
         var match = installationMismatch || items.Any(item => item.Status is not ("Matched" or "Unknown")) ? "Mismatch"

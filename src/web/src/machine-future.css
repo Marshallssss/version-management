@@ -88,12 +88,12 @@
 .compare-scope-tabs button:hover { background: var(--ui-primary-soft); }
 .compare-attention { color: var(--ui-lab); }
 .configuration-compare .compare-critical, .comparison-summary .compare-critical { color: var(--ui-danger); }
-:is(.comparison-table, .chamber-comparison-table, .machine-version-table, .history-configuration-table) { color: var(--ui-ink); font-size: 13px; }
-:is(.comparison-table, .chamber-comparison-table, .machine-version-table, .history-configuration-table) :is(td, th) { padding: 14px 12px; border-color: var(--ui-line); line-height: 1.7; }
-:is(.comparison-table, .chamber-comparison-table, .machine-version-table, .history-configuration-table) thead { color: var(--ui-muted); background: var(--ui-surface-muted); }
+:is(.comparison-table, .chamber-comparison-table, .machine-version-table, .machine-pm-target-table, .history-configuration-table) { color: var(--ui-ink); font-size: 13px; }
+:is(.comparison-table, .chamber-comparison-table, .machine-version-table, .machine-pm-target-table, .history-configuration-table) :is(td, th) { padding: 14px 12px; border-color: var(--ui-line); line-height: 1.7; }
+:is(.comparison-table, .chamber-comparison-table, .machine-version-table, .machine-pm-target-table, .history-configuration-table) thead { color: var(--ui-muted); background: var(--ui-surface-muted); }
 :is(.comparison-table, .chamber-comparison-table) thead small { color: var(--ui-muted); font-size: 12px; }
-:is(.comparison-table, .chamber-comparison-table, .machine-version-table) tr.changed { background: #f1f6ff; }
-:is(.comparison-table, .chamber-comparison-table, .machine-version-table) tr.changed th { box-shadow: inset 3px 0 var(--ui-primary); }
+:is(.comparison-table, .chamber-comparison-table, .machine-version-table, .machine-pm-target-table) tr.changed { background: #f1f6ff; }
+:is(.comparison-table, .chamber-comparison-table, .machine-version-table, .machine-pm-target-table) tr.changed th { box-shadow: inset 3px 0 var(--ui-primary); }
 :is(.comparison-table, .chamber-comparison-table) tr.changed td:last-child { color: var(--ui-primary); }
 .chamber-comparison-table tr.unconfirmed { color: var(--ui-muted); background: #f7f8fa; }
 .compare-source { color: var(--ui-muted); }
@@ -121,7 +121,7 @@
   .machine-detail-header { flex-direction: column; }
   .compare-selectors { grid-template-columns: minmax(0, 1fr); gap: 14px; }
   .compare-swap { justify-self: center; }
-  :is(.comparison-table, .chamber-comparison-table, .machine-version-table, .history-configuration-table) :is(td, th) { padding: 10px 6px; font-size: 12px; }
+  :is(.comparison-table, .chamber-comparison-table, .machine-version-table, .machine-pm-target-table, .history-configuration-table) :is(td, th) { padding: 10px 6px; font-size: 12px; }
   .workspace-tabs button { padding: 9px 8px; }
 }
 

@@ -8,6 +8,7 @@ import type { OperationImpactReference } from './catalog-api'
 import { DeleteVersionButton } from './DeleteVersionButton'
 import { LaboratoryHistory } from './LaboratoryHistory'
 import { VersionChamberImpact } from './VersionChamberImpact'
+import { revisionLabel } from './revision-label'
 import { VersionRevisionsPanel } from './VersionRevisionsPanel'
 import { LaboratoryBadge, LaboratoryPanel } from './LaboratoryPanel'
 import { getLaboratoryVersions } from './laboratory-api'
@@ -78,7 +79,7 @@ export function ProjectWorkspace({ canWrite = true, detail, focusedVersionId, fo
   const selectedVersion = selected?.versions.find(version => version.id === selectedVersionId) ?? null
   const projectStandard = useQuery({ queryKey: ['workspace-project-standard', detail.project.id], queryFn: () => getProjectStandard(detail.project.id) })
   const standardBaseline = useQuery({ queryKey: ['baseline-detail', projectStandard.data?.baselineId], queryFn: () => getBaselineDetail(projectStandard.data!.baselineId), enabled: projectStandard.data != null })
-  const standardVersionByComponent = useMemo(() => new Map((standardBaseline.data?.items ?? []).map(item => [item.componentId, item.notConfigured ? '当时未配置' : item.versionNumber])), [standardBaseline.data?.items])
+  const standardVersionByComponent = useMemo(() => new Map((standardBaseline.data?.items ?? []).map(item => [item.componentId, item.notConfigured ? '当时未配置' : item.versionNumber ? `${item.versionNumber} · ${revisionLabel(item.revisionNo)}` : null])), [standardBaseline.data?.items])
   const standardVersionIdByComponent = useMemo(() => new Map((standardBaseline.data?.items ?? []).flatMap(item => item.versionId ? [[item.componentId, item.versionId] as const] : [])), [standardBaseline.data?.items])
   const children = useMemo(() => {
     const map = new Map<string | null, ConfigurationComponent[]>()

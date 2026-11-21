@@ -66,7 +66,7 @@ public static partial class CatalogEndpoints
             chamber.Installed = false;
             var removal = EquipmentEvent(db, context, machine.Id, chamber.Number, "ChamberRemoved", reason, new { chamber.Stage });
             var facts = await db.MachineChamberVersions.Where(x => x.ChamberId == chamber.Id).ToListAsync(ct);
-            foreach (var last in facts.GroupBy(x => x.ComponentId).Select(x => x.MaxBy(y => y.Sequence)!).Where(x => x.VersionId != null))
+            foreach (var last in facts.GroupBy(x => x.ComponentId).Select(x => x.MaxBy(y => y.Sequence)!).Where(x => x.VersionId != null || x.IsUnknown))
                 db.MachineChamberVersions.Add(new() { Id = Guid.NewGuid(), ChamberId = chamber.Id, ComponentId = last.ComponentId, VersionId = null, Sequence = last.Sequence + 1, HistoryId = removal.Id });
         }
     }
@@ -107,7 +107,13 @@ public static partial class CatalogEndpoints
                 return Results.BadRequest(new { message = "请选择不重复的组件与版本；空列表表示全部恢复沿用整机。" });
             var ids = request.Items.Select(x => x.VersionId).ToArray();
             var versions = await db.ComponentVersions.Where(x => ids.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
-            var components = await db.ConfigurationComponents.Where(x => x.ProjectId == machine.ProjectId).Select(x => x.Id).ToListAsync(ct);
+            var projectComponents = await db.ConfigurationComponents.Where(x => x.ProjectId == machine.ProjectId).ToListAsync(ct);
+            var allowedPm = PmComponentIds(projectComponents);
+            var components = projectComponents.Select(x => x.Id).ToList();
+            if (allowedPm.Count > 0 && request.Items.Any(x => !allowedPm.Contains(x.ComponentId))) return Results.BadRequest(new { message = "特例组件必须属于关联的 PM 根组件及其后代。" });
+            var revisionIds = request.Items.Where(x => x.RevisionId != null).Select(x => x.RevisionId!.Value).ToArray();
+            var revisions = await db.ComponentVersionRevisions.Where(x => revisionIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
+            if (request.Items.Any(x => x.RevisionId is { } id && (!revisions.TryGetValue(id, out var revision) || revision.ComponentVersionId != x.VersionId))) return Results.BadRequest(new { message = "补丁修订必须属于所选 PM 版本。" });
             if (request.Items.Any(x => !components.Contains(x.ComponentId) || !versions.TryGetValue(x.VersionId, out var v) || v.ComponentId != x.ComponentId))
                 return Results.BadRequest(new { message = "组件必须属于机台项目，版本必须属于所选组件。" });
             if (request.LaboratoryOnly && versions.Values.Any(version => version.Maturity != VersionMaturity.Testing)) return Results.Conflict(new { message = "实验室升级登记仅限测试中版本。" });
@@ -115,11 +121,12 @@ public static partial class CatalogEndpoints
             var current = facts.GroupBy(x => x.ComponentId).ToDictionary(x => x.Key, x => x.MaxBy(y => y.Sequence)!);
             var history = EquipmentEvent(db, context, machineId, number, "ChamberOverridesChanged", request.Reason!, new { items = request.Items, partial = request.Partial, installedAt = request.InstalledAt, source = request.LaboratoryOnly ? "LaboratoryRegistration" : "Manual" });
             var sequence = facts.Count == 0 ? 1 : facts.Max(x => x.Sequence) + 1;
-            foreach (var componentId in request.Partial ? request.Items.Select(x => x.ComponentId) : current.Keys.Union(request.Items.Select(x => x.ComponentId)))
+            foreach (var componentId in request.Partial ? request.Items.Select(x => x.ComponentId) : current.Where(x => !x.Value.IsUnknown).Select(x => x.Key).Union(request.Items.Select(x => x.ComponentId)))
             {
-                var next = request.Items.SingleOrDefault(x => x.ComponentId == componentId)?.VersionId;
-                if (!request.LaboratoryOnly && current.GetValueOrDefault(componentId)?.VersionId == next) continue;
-                db.MachineChamberVersions.Add(new() { Id = Guid.NewGuid(), ChamberId = chamber.Id, ComponentId = componentId, VersionId = next, Sequence = sequence, HistoryId = history.Id });
+                var input = request.Items.SingleOrDefault(x => x.ComponentId == componentId);
+                var next = input?.VersionId;
+                if (!request.LaboratoryOnly && current.GetValueOrDefault(componentId) is { } previous && !previous.IsUnknown && previous.VersionId == next && previous.RevisionId == input?.RevisionId) continue;
+                db.MachineChamberVersions.Add(new() { Id = Guid.NewGuid(), ChamberId = chamber.Id, ComponentId = componentId, VersionId = next, RevisionId = input?.RevisionId, EffectiveAt = request.InstalledAt ?? history.RecordedAt, KnownInstalledAt = request.InstalledAt, Sequence = sequence, HistoryId = history.Id });
             }
         }
         var now = DateTimeOffset.UtcNow;
@@ -147,12 +154,13 @@ public static partial class CatalogEndpoints
             chambers = chambers.Select(chamber => new
             {
                 chamber.Number, chamber.Stage, chamber.Installed,
+                unconfirmedComponentIds = facts.Where(x => x.ChamberId == chamber.Id).GroupBy(x => x.ComponentId).Select(x => x.First()).Where(x => x.IsUnknown).Select(x => x.ComponentId),
                 overrides = facts.Where(x => x.ChamberId == chamber.Id).GroupBy(x => x.ComponentId).Select(x => x.First()).Where(x => x.VersionId != null).Select(x =>
                 {
                     var version = versions[x.VersionId!.Value];
                     var expectedItem = items.SingleOrDefault(i => i.ConfigurationComponentId == x.ComponentId);
                     var expected = expectedItem?.ComponentVersionId;
-                    return new { x.ComponentId, x.VersionId, componentName = components[x.ComponentId].Name, versionNumber = version.VersionNumber,
+                    return new { x.ComponentId, x.VersionId, x.RevisionId, x.EffectiveAt, x.KnownInstalledAt, revisionStatus = RevisionMatch(expectedItem?.ComponentVersionId, expectedItem?.RevisionId, x.VersionId, x.RevisionId), componentName = components[x.ComponentId].Name, versionNumber = version.VersionNumber,
                         expectedVersionNumber = expectedItem?.VersionNumberSnapshot,
                         match = target is null ? "Unknown" : expected == x.VersionId ? "Matched" : expected is null ? "Extra" : "Mismatch",
                         risk = version.Safety == VersionSafety.Blocked ? "Critical" : "None" };
@@ -164,5 +172,5 @@ public static partial class CatalogEndpoints
 }
 
 public sealed record ChamberInput(int Number, string Stage);
-public sealed record ChamberVersionInput(Guid ComponentId, Guid VersionId);
+public sealed record ChamberVersionInput(Guid ComponentId, Guid VersionId, Guid? RevisionId = null);
 public sealed record MachineEquipmentRequest(string? Reason, string? Owner = null, string? Stage = null, List<ChamberInput>? Chambers = null, List<ChamberVersionInput>? Items = null, bool Partial = false, DateTimeOffset? InstalledAt = null, bool LaboratoryOnly = false);
